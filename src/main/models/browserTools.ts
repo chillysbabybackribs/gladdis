@@ -10,6 +10,7 @@ import { orchestrate } from '../pipeline/orchestrate'
 import type { PipelineProgressEvent } from '../pipeline/Runner'
 import { generatePipelineFinalResponse } from '../pipeline/finalResponse'
 import { runUnifiedSearch } from './unifiedSearch'
+import { runDeepSearch } from './deepSearch'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { KeyStore } from './KeyStore'
@@ -251,6 +252,9 @@ export class BrowserTools {
         }
 
         // ── Search ────────────────────────────────────────────────────────────
+
+        case 'deep_search':
+          return this.deepSearch(args, ctx)
 
         case 'search':
           return this.search(args, ctx)
@@ -751,6 +755,45 @@ export class BrowserTools {
       })
       .join('\n\n')
     return { ok: true, text: cap(`${hits.length} matching turn(s):\n\n${body}`, 30_000) }
+  }
+
+  /**
+   * Deep web search and recursive crawl using background tabs and deterministic ranking.
+   */
+  private async deepSearch(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    const query = String(args.query ?? '').trim()
+    if (!query) return { ok: false, text: 'deep_search: "query" is required.' }
+
+    const depth = typeof args.depth === 'number' ? args.depth : 2
+    const maxPages = typeof args.max_pages === 'number' ? args.max_pages : 5
+
+    const memKey = `deep_search:${query.toLowerCase()}`
+    const prior = this.taskScope(ctx).get(memKey)
+    if (prior) {
+      return { ok: true, text: prior }
+    }
+
+    const apiKey = this.keys?.get('google') || process.env.GEMINI_API_KEY
+
+    // Run deep search
+    const outcome = await runDeepSearch(
+      { tabs: this.tabs, extractor: this.extractor },
+      {
+        query,
+        depth,
+        maxPages,
+        apiKey,
+        onProgress: (msg) => {
+          console.log(`[Deep Search] ${msg}`)
+        }
+      }
+    )
+
+    if (outcome.ok) {
+      this.rememberDone(ctx, memKey, outcome.text)
+    }
+
+    return outcome
   }
 
   /**

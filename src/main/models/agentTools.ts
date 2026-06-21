@@ -192,6 +192,30 @@ const CAPTURE_TOOLS: ToolDef[] = [
 
 const SEARCH_TOOLS: ToolDef[] = [
   {
+    name: 'deep_search',
+    description:
+      'Performs a deep, multi-step web search and crawl. First formulates a strategic research plan (using Gemini 2.5 Flash-lite), ' +
+      'then executes a fully deterministic parallel crawl across search results and harvested links using native background Chromium tabs. ' +
+      'It reads, extracts, and score-ranks information on multiple pages recursively without requiring any intermediate LLM calls, ' +
+      'reducing token consumption by 90%+. Returns a beautifully compiled, highly detailed knowledge dossier.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The main research topic or question.' },
+        depth: {
+          type: 'number',
+          description:
+            'Recursion depth (1: only direct search hits, 2: search hits + harvesting links on those hits). Default 2.'
+        },
+        max_pages: {
+          type: 'number',
+          description: 'Maximum total pages to crawl and read across all steps. Default 5.'
+        }
+      },
+      required: ['query']
+    }
+  },
+  {
     name: 'search',
     description:
       'Web search via embedded Chromium (DuckDuckGo). Searches your query exactly as given — ' +

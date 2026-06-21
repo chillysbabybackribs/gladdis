@@ -384,7 +384,18 @@ export class ChatService {
             task
           )
 
-          const tabId = req.tabId || this.tools.tabs.activeTabId || (this.tools.tabs.list()[0]?.id)
+          let tabId = req.tabId
+          if (tabId === 'null' || tabId === 'undefined') {
+            tabId = undefined
+          }
+          if (!tabId) {
+            const activeId = this.tools.tabs?.activeTabId
+            if (activeId && activeId !== 'null' && activeId !== 'undefined') {
+              tabId = activeId
+            } else {
+              tabId = this.tools.tabs?.list().find(t => t.id && t.id !== 'null' && t.id !== 'undefined')?.id
+            }
+          }
           await session.runSession((progressMsg) => {
             // Send progressive trace status updates to the UI
             this.emit({

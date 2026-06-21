@@ -239,29 +239,49 @@ export class DeepResearchAgent {
 
   private getValidTabId(requestedTabId?: string): string | undefined {
     const tabs = this.chatService.tools?.tabs
-    if (!tabs) return undefined
+    if (!tabs) {
+      console.warn('[getValidTabId] No tabs tool available')
+      return undefined
+    }
 
     const list = tabs.list()
-    if (list.length === 0) {
+    const validIds = list.map((t: any) => t.id).filter((id: any) => id && id !== 'null' && id !== 'undefined')
+    console.log('[getValidTabId] validIds in TabManager:', validIds)
+
+    // If there are no valid tabs at all, try to create one
+    if (validIds.length === 0) {
       try {
+        console.log('[getValidTabId] No valid tabs found. Creating a fresh tab...')
         const newTab = tabs.create()
-        return newTab.id
+        if (newTab && newTab.id && newTab.id !== 'null' && newTab.id !== 'undefined') {
+          return newTab.id
+        }
       } catch (err) {
-        console.error('[DeepResearchAgent] Failed to create a new fallback tab:', err)
-        return undefined
+        console.error('[getValidTabId] Failed to create a fresh tab:', err)
+      }
+      return undefined
+    }
+
+    // Check requested ID
+    if (requestedTabId && requestedTabId !== 'null' && requestedTabId !== 'undefined') {
+      if (validIds.includes(requestedTabId)) {
+        console.log(`[getValidTabId] Using requestedTabId: ${requestedTabId}`)
+        return requestedTabId
       }
     }
 
-    if (requestedTabId && list.some((t: any) => t.id === requestedTabId)) {
-      return requestedTabId
-    }
-
+    // Check active tab ID
     const activeId = tabs.activeTabId
-    if (activeId && list.some((t: any) => t.id === activeId)) {
-      return activeId
+    if (activeId && activeId !== 'null' && activeId !== 'undefined') {
+      if (validIds.includes(activeId)) {
+        console.log(`[getValidTabId] Using activeTabId: ${activeId}`)
+        return activeId
+      }
     }
 
-    return list[0]?.id
+    // Fall back to first valid ID in list
+    console.log(`[getValidTabId] Falling back to first valid tab ID: ${validIds[0]}`)
+    return validIds[0]
   }
 
   /**

@@ -105,7 +105,7 @@ export async function respondToCodexBrowserToolCall(args: {
   const outcome = await args.tools.run(tool, toolArgs, ctx)
   args.respond(args.msg.id, codexDynamicToolResponse(outcome))
   if (args.requestId) {
-    args.emit({ requestId: args.requestId, type: 'tool_result', callId, ok: outcome.ok, preview: outcome.text.slice(0, 200) })
+    args.emit({ requestId: args.requestId, type: 'tool_result', callId, ok: outcome.ok, preview: outcome.text })
   }
 }
 

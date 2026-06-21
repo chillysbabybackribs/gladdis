@@ -477,94 +477,255 @@ function baseToolName(tool: string): string {
   return tool.startsWith('gladdis.') ? tool.slice('gladdis.'.length) : tool
 }
 
-function ToolRun({ tools }: { tools: ToolActivity[] }) {
-  // Two faces of a run, picked by one derived fact — is anything still running:
-  //  • running → a fixed-height, auto-scrolling ticker of natural-language lines
-  //    (no user toggle; you can't collapse a live feed).
-  //  • settled → one collapsed summary line, click to expand the full lines.
-  // The split is derived from `tools` each render, not a stored flag, so it
-  // can't go stale or fight the user.
-  //
-  // The <section> is owned HERE, not by the two faces, so it mounts once when
-  // the run first appears and stays mounted across the running→settled swap.
-  // If each face rendered its own <section>, the swap would remount it and
-  // replay the `tool-run-in` fade — a visible flash on every transition.
-  const running = tools.some((t) => t.status === 'running')
+const ChevronIcon = () => (
+  <svg className="tool-chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
+)
+
+const Spinner = () => (
+  <svg className="tool-spinner" viewBox="0 0 24 24">
+    <circle className="path" cx="12" cy="12" r="10" fill="none" strokeWidth="3" />
+  </svg>
+)
+
+const CheckIcon = () => (
+  <svg className="tool-check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+)
+
+const ErrorIcon = () => (
+  <svg className="tool-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="8" x2="12" y2="12" />
+    <line x1="12" y1="16" x2="12.01" y2="16" />
+  </svg>
+)
+
+function isEditOrWriteTool(tool: string): boolean {
+  const name = baseToolName(tool)
+  return name === 'edit_file' || name === 'write_file'
+}
+
+function renderToolTitle(tool: ToolActivity): ReactNode {
+  const name = baseToolName(tool.tool)
+  const a = (tool.args ?? {}) as Record<string, any>
+  const [running, past] = TOOL_VERB[name] ?? [TOOL_LABEL[name] ?? name, TOOL_LABEL[name] ?? name]
+  const verb = tool.status === 'ok' ? past : running
+
+  let objectNode: ReactNode = null
+  if (name === 'read_file' || name === 'write_file' || name === 'edit_file' || name === 'list_dir') {
+    if (a.path) {
+      const displayPath = baseName(String(a.path))
+      objectNode = <code className="tool-highlight-code" title={String(a.path)}>{displayPath}</code>
+    }
+  } else if (name === 'search' || name === 'background_web_search' || name === 'search_files') {
+    if (a.query) {
+      objectNode = <span className="tool-highlight-query">“{String(a.query).slice(0, 60)}”</span>
+    }
+  } else if (name === 'fetch_page' || name === 'navigate' || name === 'screenshot_confirmation') {
+    if (a.url) {
+      const cleanUrl = normalizeDisplayUrl(String(a.url)).replace(/^https?:\/\//, '')
+      objectNode = <code className="tool-highlight-code" title={String(a.url)}>{cleanUrl}</code>
+    }
+  } else if (name === 'click_xy') {
+    objectNode = <span>at <strong className="tool-highlight-coords">({a.x}, {a.y})</strong></span>
+  } else if (name === 'type_text') {
+    if (a.text) {
+      objectNode = <span className="tool-highlight-query">“{String(a.text).slice(0, 40)}”</span>
+    }
+  } else if (name === 'press_key') {
+    if (a.key) {
+      objectNode = <code className="tool-highlight-code">{String(a.key)}</code>
+    }
+  } else if (name === 'cdp_command') {
+    if (a.method) {
+      objectNode = <code className="tool-highlight-code">{String(a.method)}</code>
+    }
+  } else if (name === 'run_validation') {
+    if (a.check) {
+      objectNode = <code className="tool-highlight-code">{String(a.check)}</code>
+    }
+  } else if (name === 'run_command') {
+    if (a.command) {
+      objectNode = <code className="tool-highlight-code" title={String(a.command)}>{String(a.command).slice(0, 60)}{String(a.command).length > 60 ? '…' : ''}</code>
+    }
+  } else if (name === 'browse_task') {
+    if (a.task) {
+      objectNode = <span className="tool-highlight-query">“{String(a.task).slice(0, 60)}”</span>
+    }
+  }
+
   return (
-    <section className="tool-run">
-      {running ? <ToolTicker tools={tools} /> : <ToolSummary tools={tools} />}
-    </section>
+    <span className="tool-title-text">
+      {verb} {objectNode}
+      {tool.status === 'error' && <span className="tool-title-failed"> — failed</span>}
+    </span>
   )
 }
 
-/** Live feed: fixed ~3-line card that auto-scrolls to the newest call. */
-function ToolTicker({ tools }: { tools: ToolActivity[] }) {
-  const trackRef = useRef<HTMLDivElement>(null)
-  // Pin to the bottom whenever the line count grows, so the newest call shows.
-  useEffect(() => {
-    const el = trackRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [tools.length])
+function DiffViewer({ preview }: { preview: string }) {
+  if (!preview) return null
+  
+  const lines = preview.split('\n')
   return (
-    <div className="tool-run-ticker" ref={trackRef}>
-      {tools.map((tool) => (
-        <div key={tool.callId} className={`tool-run-line ${tool.status}`}>
-          {tool.status === 'running' && <span className="tool-run-line-dot" />}
-          <span className="tool-run-line-text">{toolSentence(tool)}</span>
-        </div>
-      ))}
+    <div className="diff-viewer">
+      {lines.map((line, idx) => {
+        let className = 'diff-line diff-line-context'
+        if (line.startsWith('+')) {
+          className = 'diff-line diff-line-added'
+        } else if (line.startsWith('-')) {
+          className = 'diff-line diff-line-removed'
+        }
+        return (
+          <div key={idx} className={className}>
+            {line}
+          </div>
+        )
+      })}
     </div>
   )
 }
 
-/** Settled face: one summary line; click to expand the natural-language lines. */
-function ToolSummary({ tools }: { tools: ToolActivity[] }) {
-  const [expanded, setExpanded] = useState(false)
-  let totalMs = 0
-  let failed = 0
-  for (const tool of tools) {
-    const ms = resolvedDurationMs(tool)
-    if (ms != null) totalMs += ms
-    if (tool.status === 'error') failed += 1
+function ToolCallCard({ tool }: { tool: ToolActivity }) {
+  const isRunning = tool.status === 'running'
+  const isError = tool.status === 'error'
+  
+  const [expanded, setExpanded] = useState(isRunning || isError)
+
+  useEffect(() => {
+    if (isRunning || isError) {
+      setExpanded(true)
+    }
+  }, [isRunning, isError])
+
+  let statusIcon = <CheckIcon />
+  if (isRunning) {
+    statusIcon = <Spinner />
+  } else if (isError) {
+    statusIcon = <ErrorIcon />
   }
-  const durationLabel = totalMs > 0 ? formatMs(totalMs) : null
+
+  const durationLabel = tool.durationMs ? formatMs(tool.durationMs) : null
+  const hasDetails = !!(tool.preview || tool.args)
+
   return (
-    <div className={expanded ? 'tool-run-expanded' : 'tool-run-collapsed'}>
+    <div className={`tool-call-card ${tool.status} ${expanded ? 'expanded' : 'collapsed'}`}>
       <button
         type="button"
-        className={`tool-run-summary ${failed ? 'has-error' : ''}`}
-        onClick={() => setExpanded((s) => !s)}
+        className="tool-call-card-header"
+        onClick={() => {
+          if (hasDetails) setExpanded((s) => !s)
+        }}
+        disabled={!hasDetails}
         aria-expanded={expanded}
-        title={expanded ? 'Collapse tool details' : 'Expand tool details'}
+        title={hasDetails ? (expanded ? 'Collapse tool details' : 'Expand tool details') : undefined}
       >
-        <span className={`tool-run-summary-dot ${failed ? 'error' : 'ok'}`} />
-        <span className="tool-run-summary-count">
-          {tools.length} {tools.length === 1 ? 'tool' : 'tools'}
+        <span className="tool-call-card-status">{statusIcon}</span>
+        <span className="tool-call-card-title">
+          {renderToolTitle(tool)}
         </span>
-        {failed > 0 && (
-          <>
-            <span className="tool-run-summary-sep" />
-            <span className="tool-run-summary-failed">{failed} failed</span>
-          </>
-        )}
         {durationLabel && (
-          <>
-            <span className="tool-run-summary-sep" />
-            <span className="tool-run-summary-duration">{durationLabel}</span>
-          </>
+          <span className="tool-call-card-duration">{durationLabel}</span>
         )}
-        <span className="tool-run-summary-caret">{expanded ? '▾' : '▸'}</span>
+        {hasDetails && (
+          <span className="tool-call-card-caret">
+            <ChevronIcon />
+          </span>
+        )}
       </button>
-      {expanded && (
-        <div className="tool-run-track">
-          {tools.map((tool) => (
-            <div key={tool.callId} className={`tool-run-line ${tool.status}`}>
-              <span className="tool-run-line-text">{toolSentence(tool)}</span>
+      
+      {expanded && hasDetails && (
+        <div className="tool-call-card-body">
+          {!!tool.args && (
+            <div className="tool-call-args">
+              <span className="tool-call-args-label">Parameters:</span>
+              <pre className="tool-call-args-pre">
+                {JSON.stringify(sanitizeToolArgs(tool.args), null, 2)}
+              </pre>
             </div>
-          ))}
+          )}
+          {tool.preview && (
+            <div className="tool-call-output">
+              <span className="tool-call-output-label">Result:</span>
+              <div className="tool-call-output-box">
+                {isEditOrWriteTool(tool.tool) ? (
+                  <DiffViewer preview={tool.preview} />
+                ) : (
+                  <pre className="tool-call-output-pre">{tool.preview}</pre>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+function ToolRun({ tools }: { tools: ToolActivity[] }) {
+  const isRunning = tools.some((t) => t.status === 'running')
+  const hasError = tools.some((t) => t.status === 'error')
+  
+  const [expanded, setExpanded] = useState(isRunning || hasError)
+  
+  useEffect(() => {
+    if (isRunning || hasError) {
+      setExpanded(true)
+    }
+  }, [isRunning, hasError])
+
+  const totalDuration = tools.reduce((acc, t) => acc + (resolvedDurationMs(t) ?? 0), 0)
+  const durationLabel = totalDuration > 0 ? formatMs(totalDuration) : null
+  const failedCount = tools.filter((t) => t.status === 'error').length
+
+  let statusIcon = <CheckIcon />
+  let statusClass = 'ok'
+  if (isRunning) {
+    statusIcon = <Spinner />
+    statusClass = 'running'
+  } else if (hasError) {
+    statusIcon = <ErrorIcon />
+    statusClass = 'error'
+  }
+
+  return (
+    <section className="tool-run">
+      <div className={`tool-run-group ${statusClass} ${expanded ? 'expanded' : 'collapsed'}`}>
+        <button
+          type="button"
+          className="tool-run-group-header"
+          onClick={() => setExpanded((s) => !s)}
+          aria-expanded={expanded}
+          title={expanded ? 'Collapse tool run' : 'Expand tool run'}
+        >
+          <span className="tool-run-group-status">{statusIcon}</span>
+          <span className="tool-run-group-title">
+            {isRunning ? 'Running tools...' : `Used ${tools.length} ${tools.length === 1 ? 'tool' : 'tools'}`}
+          </span>
+          {failedCount > 0 && (
+            <span className="tool-run-group-failed-badge">
+              {failedCount} failed
+            </span>
+          )}
+          {durationLabel && (
+            <span className="tool-run-group-duration">{durationLabel}</span>
+          )}
+          <span className="tool-run-group-caret">
+            <ChevronIcon />
+          </span>
+        </button>
+        
+        {expanded && (
+          <div className="tool-run-group-body">
+            {tools.map((tool) => (
+              <ToolCallCard key={tool.callId} tool={tool} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

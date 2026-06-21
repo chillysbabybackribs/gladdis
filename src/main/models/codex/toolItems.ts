@@ -75,7 +75,7 @@ export function toolPreview(item: ThreadItem): string {
   switch (item.type) {
     case 'commandExecution': {
       const out = (item as any).aggregatedOutput
-      if (typeof out === 'string' && out.trim()) return out.slice(0, 200)
+      if (typeof out === 'string' && out.trim()) return out
       return `exit ${(item as any).exitCode ?? '?'}`
     }
     case 'fileChange': {
@@ -84,7 +84,7 @@ export function toolPreview(item: ThreadItem): string {
       return `${n} file change(s) — ${(item as any).status ?? 'applied'}`
     }
     case 'webSearch':
-      return `searched: ${(item as any).query ?? ''}`.slice(0, 200)
+      return `searched: ${(item as any).query ?? ''}`
     default:
       return String(item.type)
   }

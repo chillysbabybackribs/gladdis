@@ -15,6 +15,12 @@ import { selectAgentToolProfile } from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
 import { generatePipelineFinalResponse } from '../pipeline/finalResponse'
+import {
+  SearchQueryOptimizer,
+  AdvancedSearchEngine,
+  DeepResearchAgent,
+  ProgressiveResearchSession
+} from '../pipeline/searchPipeline'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
 import { orchestrate } from '../pipeline/orchestrate'
 import type { Runner } from '../pipeline/Runner'
@@ -337,6 +343,73 @@ export class ChatService {
       // The model decides whether to search/drive the browser by choosing tools;
       // there is no keyword pre-router. /pipeline stays as an explicit power-user
       // entry to the deterministic multi-step engine.
+      if (actionableText.startsWith('/research') || actionableText.startsWith('/deepsearch')) {
+        let task = ''
+        if (actionableText.startsWith('/research')) {
+          task = actionableText.slice(9).trim()
+        } else {
+          task = actionableText.slice(11).trim()
+        }
+        if (!task) {
+          this.emit({
+            requestId: req.requestId,
+            type: 'delta',
+            text: '💡 Please specify a query or topic for the deep research pipeline. Usage: `/research <unoptimized query or topic>`'
+          })
+          this.emit({ requestId: req.requestId, type: 'done' })
+          return
+        }
+
+        this.emit({
+          requestId: req.requestId,
+          type: 'delta',
+          text: `🔍 **Starting Deep Research Session** for: *"${task}"*...\n\n`
+        })
+
+        try {
+          const optimizer = new SearchQueryOptimizer(this, req.modelId)
+          const engine = new AdvancedSearchEngine()
+          const reader = new DeepResearchAgent(this, req.modelId)
+          
+          const session = new ProgressiveResearchSession(
+            optimizer,
+            engine,
+            reader,
+            this,
+            req.modelId,
+            task
+          )
+
+          await session.runSession((progressMsg) => {
+            // Send progressive trace status updates to the UI
+            this.emit({
+              requestId: req.requestId,
+              type: 'delta',
+              text: `* ${progressMsg}\n`
+            })
+          })
+
+          const finalReport = session.renderProgressiveOutput()
+          
+          // Emit the final report!
+          this.emit({
+            requestId: req.requestId,
+            type: 'delta',
+            text: `\n---\n\n${finalReport}\n`
+          })
+
+        } catch (err: any) {
+          this.emit({
+            requestId: req.requestId,
+            type: 'delta',
+            text: `\n❌ **Deep Research failed with error:** ${err?.message ?? String(err)}\n`
+          })
+        } finally {
+          this.emit({ requestId: req.requestId, type: 'done' })
+        }
+        return
+      }
+
       if (actionableText.startsWith('/pipeline')) {
         const task = actionableText.slice(9).trim()
         if (!task) {

@@ -291,7 +291,7 @@ export async function runAnthropicToolLoop(args: {
           type: 'tool_result',
           callId,
           ok: outcome.ok,
-          preview: outcome.text.slice(0, 200)
+          preview: outcome.text
         })
         if (outcome.ok) return
         messages.push({
@@ -326,7 +326,7 @@ export async function runAnthropicToolLoop(args: {
         type: 'tool_result',
         callId: tu.id,
         ok: outcome.ok,
-        preview: outcome.text.slice(0, 200)
+        preview: outcome.text
       })
 
       const content: Anthropic.ToolResultBlockParam['content'] = outcome.imageBase64

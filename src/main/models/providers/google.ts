@@ -353,7 +353,7 @@ export async function runGoogleToolLoop(args: {
           type: 'tool_result',
           callId,
           ok: outcome.ok,
-          preview: outcome.text.slice(0, 200)
+          preview: outcome.text
         })
         if (outcome.ok) return
         contents.push({
@@ -386,7 +386,7 @@ export async function runGoogleToolLoop(args: {
         type: 'tool_result',
         callId,
         ok: outcome.ok,
-        preview: outcome.text.slice(0, 200)
+        preview: outcome.text
       })
       const response = {
         tool_call_id: callId,

@@ -441,7 +441,7 @@ export async function runGrokToolLoop(args: {
           type: 'tool_result',
           callId,
           ok: outcome.ok,
-          preview: outcome.text.slice(0, 200)
+          preview: outcome.text
         })
         if (outcome.ok) return
         messages.push({
@@ -476,7 +476,7 @@ export async function runGrokToolLoop(args: {
         type: 'tool_result',
         callId,
         ok: outcome.ok,
-        preview: outcome.text.slice(0, 200)
+        preview: outcome.text
       })
 
       const toolMsg: OpenAiMessage = { role: 'tool', tool_call_id: callId, content: outcome.text }

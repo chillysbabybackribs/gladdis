@@ -9,6 +9,7 @@ import {
   type CodexStatus,
   type CodexWorkspace,
   type ModelOption,
+  shouldUseWebResearchTools,
 } from '../../../shared/types'
 import { BrowserTools, type ToolContext } from './browserTools'
 import { selectAgentToolProfile } from './agentTools'
@@ -93,7 +94,7 @@ export class ChatService {
   constructor(
     private readonly keys: KeyStore,
     private readonly sendStreamEvent: (e: ChatStreamEvent) => void,
-    private readonly tools: BrowserTools,
+    public readonly tools: BrowserTools,
     private readonly audit: ModelCallLedger,
     private readonly chats: ChatStore
   ) {}
@@ -343,18 +344,21 @@ export class ChatService {
       // The model decides whether to search/drive the browser by choosing tools;
       // there is no keyword pre-router. /pipeline stays as an explicit power-user
       // entry to the deterministic multi-step engine.
-      if (actionableText.startsWith('/research') || actionableText.startsWith('/deepsearch')) {
-        let task = ''
+      const isSearchQuery = actionableText.startsWith('/research') ||
+                            actionableText.startsWith('/deepsearch') ||
+                            shouldUseWebResearchTools(actionableText)
+      if (isSearchQuery) {
+        let task = actionableText
         if (actionableText.startsWith('/research')) {
           task = actionableText.slice(9).trim()
-        } else {
+        } else if (actionableText.startsWith('/deepsearch')) {
           task = actionableText.slice(11).trim()
         }
         if (!task) {
           this.emit({
             requestId: req.requestId,
             type: 'delta',
-            text: '💡 Please specify a query or topic for the deep research pipeline. Usage: `/research <unoptimized query or topic>`'
+            text: '💡 Please specify a query or topic for the search pipeline.'
           })
           this.emit({ requestId: req.requestId, type: 'done' })
           return
@@ -363,7 +367,7 @@ export class ChatService {
         this.emit({
           requestId: req.requestId,
           type: 'delta',
-          text: `🔍 **Starting Deep Research Session** for: *"${task}"*...\n\n`
+          text: `🔍 **Starting Advanced Search & Deep Research** for: *"${task}"*...\n\n`
         })
 
         try {
@@ -380,6 +384,8 @@ export class ChatService {
             task
           )
 
+          const tabId = req.tabId || this.tools.tabs.activeTabId || (this.tools.tabs.list()[0]?.id)
+
           await session.runSession((progressMsg) => {
             // Send progressive trace status updates to the UI
             this.emit({
@@ -387,7 +393,7 @@ export class ChatService {
               type: 'delta',
               text: `* ${progressMsg}\n`
             })
-          })
+          }, tabId)
 
           const finalReport = session.renderProgressiveOutput()
           

@@ -243,35 +243,60 @@ export class DeepResearchAgent {
   async digestTopResults(
     results: EnhancedSearchResult[],
     plan: ExpandedSearchPlan,
-    maxLinksToFetch = 3
+    maxLinksToFetch = 3,
+    tabId?: string,
+    onProgress?: (status: string) => void
   ): Promise<EnhancedSearchResult[]> {
     const targets = results.slice(0, maxLinksToFetch)
     console.log(`[DeepResearchAgent] Deep retrieving content for the top ${targets.length} websites...`)
 
-    // In a production build, we would use our TabManager or Axios/Fetch to pre-fetch HTML
-    // and use `digestPage` (PageDigest) to convert it to ultra-clean markdown/text.
-    // Here we will simulate/implement a robust fetch mechanism or use our existing system tools.
     const enriched: EnhancedSearchResult[] = []
 
     for (const res of targets) {
       try {
-        console.log(`[DeepResearchAgent] Fetching page content: ${res.url}`)
-        // Let's perform a lightweight HTTP fetch to get raw text
-        const response = await fetch(res.url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0' },
-          signal: AbortSignal.timeout(8000)
-        })
+        let cleanText = ''
+        let title = res.title
 
-        if (response.ok) {
-          const html = await response.text()
-          // Fast HTML tag stripping helper
-          const cleanText = html
-            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
+        if (tabId && this.chatService.tools?.tabs) {
+          const msg = `Navigating browser tab to: ${res.url}`
+          if (onProgress) onProgress(msg)
+          console.log(`[DeepResearchAgent] ${msg}`)
 
+          await this.chatService.tools.tabs.navigate(tabId, res.url)
+          await this.chatService.tools.tabs.waitForNavigationSettled(tabId, 10000)
+
+          if (this.chatService.tools.extractor) {
+            const capture = await this.chatService.tools.extractor.run(tabId)
+            cleanText = capture.content?.text || ''
+            if (capture.title) {
+              title = capture.title
+            }
+          }
+        }
+
+        // If visual tab extraction failed or was not used, fall back to global fetch
+        if (!cleanText) {
+          const msg = `Fetching page content via background HTTP: ${res.url}`
+          if (onProgress) onProgress(msg)
+          console.log(`[DeepResearchAgent] ${msg}`)
+
+          const response = await fetch(res.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/115.0.0.0' },
+            signal: AbortSignal.timeout(8000)
+          })
+
+          if (response.ok) {
+            const html = await response.text()
+            cleanText = html
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+              .replace(/<[^>]+>/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim()
+          }
+        }
+
+        if (cleanText) {
           const contentSnippet = cleanText.slice(0, 10000) // Keep top 10k chars
 
           // Use the LLM to extract the exact answer to our query from this page text
@@ -279,7 +304,7 @@ export class DeepResearchAgent {
 You are researching: "${plan.refinedIntent}"
 
 Here is the raw text content extracted from the webpage: ${res.url}
-Title: "${res.title}"
+Title: "${title}"
 
 Extract and summarize any specific answers, code snippets, diagnostic info, or workarounds related directly to "${plan.refinedIntent}" from this page content.
 If the page doesn't contain useful information, output "No relevant technical data found on this page."
@@ -294,6 +319,7 @@ Keep your summary factual, concise (under 300 words), and preserve any code snip
 
           enriched.push({
             ...res,
+            title,
             extractedContent: extractedDigest
           })
         } else {
@@ -335,7 +361,7 @@ export class ProgressiveResearchSession {
   /**
    * Runs the entire research pipeline with progressive state reporting and outcome synthesis.
    */
-  async runSession(onProgress: (status: string) => void): Promise<ResearchState> {
+  async runSession(onProgress: (status: string) => void, tabId?: string): Promise<ResearchState> {
     // Phase 1: Optimize prompt & expand queries
     onProgress('Optimizing user prompt and engineering sub-queries...')
     const plan = await this.optimizer.optimizePrompt(this.state.originalPrompt)
@@ -360,7 +386,7 @@ export class ProgressiveResearchSession {
 
     // Phase 3: Fetch page contents and extract digests for top 3 hits
     onProgress('Fetching and digesting high-relevance web resources...')
-    const digestedResults = await this.reader.digestTopResults(rankedResults, plan, 3)
+    const digestedResults = await this.reader.digestTopResults(rankedResults, plan, 3, tabId, onProgress)
     this.state.allResults = digestedResults
     this.state.visitedUrls = digestedResults.slice(0, 3).map((r) => r.url)
 

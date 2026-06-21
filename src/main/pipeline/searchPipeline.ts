@@ -237,6 +237,33 @@ export class AdvancedSearchEngine {
 export class DeepResearchAgent {
   constructor(private chatService: ChatService, private modelId: string) {}
 
+  private getValidTabId(requestedTabId?: string): string | undefined {
+    const tabs = this.chatService.tools?.tabs
+    if (!tabs) return undefined
+
+    const list = tabs.list()
+    if (list.length === 0) {
+      try {
+        const newTab = tabs.create()
+        return newTab.id
+      } catch (err) {
+        console.error('[DeepResearchAgent] Failed to create a new fallback tab:', err)
+        return undefined
+      }
+    }
+
+    if (requestedTabId && list.some((t: any) => t.id === requestedTabId)) {
+      return requestedTabId
+    }
+
+    const activeId = tabs.activeTabId
+    if (activeId && list.some((t: any) => t.id === activeId)) {
+      return activeId
+    }
+
+    return list[0]?.id
+  }
+
   /**
    * Takes the top search results, reads their actual full-text content, and extracts precise summaries targeting the user's intent.
    */
@@ -257,20 +284,27 @@ export class DeepResearchAgent {
         let cleanText = ''
         let title = res.title
 
-        if (tabId && this.chatService.tools?.tabs) {
+        const resolvedTabId = this.getValidTabId(tabId)
+
+        if (resolvedTabId && this.chatService.tools?.tabs) {
           const msg = `Navigating browser tab to: ${res.url}`
           if (onProgress) onProgress(msg)
           console.log(`[DeepResearchAgent] ${msg}`)
 
-          await this.chatService.tools.tabs.navigate(tabId, res.url)
-          await this.chatService.tools.tabs.waitForNavigationSettled(tabId, 10000)
+          try {
+            await this.chatService.tools.tabs.navigate(resolvedTabId, res.url)
+            await this.chatService.tools.tabs.waitForNavigationSettled(resolvedTabId, 10000)
 
-          if (this.chatService.tools.extractor) {
-            const capture = await this.chatService.tools.extractor.run(tabId)
-            cleanText = capture.content?.text || ''
-            if (capture.title) {
-              title = capture.title
+            if (this.chatService.tools.extractor) {
+              const capture = await this.chatService.tools.extractor.run(resolvedTabId)
+              cleanText = capture.content?.text || ''
+              if (capture.title) {
+                title = capture.title
+              }
             }
+          } catch (navErr) {
+            console.warn(`[DeepResearchAgent] Visual navigation failed for ${res.url}, falling back to background HTTP:`, navErr)
+            cleanText = ''
           }
         }
 

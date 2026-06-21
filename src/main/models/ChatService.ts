@@ -385,7 +385,6 @@ export class ChatService {
           )
 
           const tabId = req.tabId || this.tools.tabs.activeTabId || (this.tools.tabs.list()[0]?.id)
-
           await session.runSession((progressMsg) => {
             // Send progressive trace status updates to the UI
             this.emit({

@@ -350,6 +350,7 @@ export class ChatService {
         try {
           const wsBlock = this.workspaceSystemBlock(initialProfile)
           const codexSystem = wsBlock ? `${CODEX_SYSTEM}\n\n${wsBlock}` : CODEX_SYSTEM
+          this.logSystemPrompt('codex', 'codex', codexSystem)
           const output = await this.codex().send(
             req,
             controller.signal,
@@ -495,6 +496,7 @@ export class ChatService {
   /* ============================ ASK MODE ============================ */
 
   private async streamAnthropic(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
+    this.logSystemPrompt('anthropic', 'plain', ASK_SYSTEM)
     return streamAnthropicPlain({
       client: this.anthropic(),
       audit: this.audit,
@@ -508,6 +510,7 @@ export class ChatService {
   }
 
   private async streamGoogle(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
+    this.logSystemPrompt('google', 'plain', ASK_SYSTEM)
     return streamGooglePlain({
       ai: this.google(),
       audit: this.audit,
@@ -521,6 +524,7 @@ export class ChatService {
   }
 
   private async streamGrok(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
+    this.logSystemPrompt('grok', 'plain', ASK_SYSTEM)
     return streamGrokPlain({
       apiKey: this.grokKey(),
       audit: this.audit,
@@ -542,6 +546,9 @@ export class ChatService {
     browserLlm?: LlmComplete
   ): Promise<void> {
     const profile = this.agentToolProfile(req)
+    const agentSystem = await buildAgentSystem(profile.tools)
+    const workspaceBlock = this.workspaceSystemBlock(profile)
+    this.logSystemPrompt('anthropic', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
     return runAnthropicToolLoop({
       client: this.anthropic(),
       audit: this.audit,
@@ -553,11 +560,23 @@ export class ChatService {
       tools: this.tools,
       ctx: this.toolContext(req, browserLlm),
       toolDefs: profile.tools,
-      agentSystem: await buildAgentSystem(profile.tools),
-      workspaceBlock: this.workspaceSystemBlock(profile),
+      agentSystem,
+      workspaceBlock,
       maxTokens: ANTHROPIC_MAX_TOKENS,
       keepResults: VERBATIM_TOOL_RESULTS
     })
+  }
+
+  /**
+   * Debug: print the EXACT system prompt going to a provider, at the real send
+   * point, to the terminal (stderr). Always on.
+   */
+  private logSystemPrompt(provider: string, mode: string, system: string): void {
+    const bar = '='.repeat(78)
+    process.stderr.write(
+      `\n${bar}\n[SYSTEM PROMPT] provider=${provider} mode=${mode} chars=${system.length}\n${bar}\n` +
+        `${system}\n${bar}\n\n`
+    )
   }
 
   /**
@@ -648,6 +667,9 @@ export class ChatService {
     browserLlm?: LlmComplete
   ): Promise<void> {
     const profile = this.agentToolProfile(req)
+    const agentSystem = await buildAgentSystem(profile.tools)
+    const workspaceBlock = this.workspaceSystemBlock(profile)
+    this.logSystemPrompt('google', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
     return runGoogleToolLoop({
       ai: this.google(),
       audit: this.audit,
@@ -659,8 +681,8 @@ export class ChatService {
       tools: this.tools,
       ctx: this.toolContext(req, browserLlm),
       toolDefs: profile.tools,
-      agentSystem: await buildAgentSystem(profile.tools),
-      workspaceBlock: this.workspaceSystemBlock(profile),
+      agentSystem,
+      workspaceBlock,
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       keepResults: VERBATIM_TOOL_RESULTS
     })
@@ -675,6 +697,9 @@ export class ChatService {
     browserLlm?: LlmComplete
   ): Promise<void> {
     const profile = this.agentToolProfile(req)
+    const agentSystem = await buildAgentSystem(profile.tools)
+    const workspaceBlock = this.workspaceSystemBlock(profile)
+    this.logSystemPrompt('grok', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
     return runGrokToolLoop({
       apiKey: this.grokKey(),
       audit: this.audit,
@@ -686,8 +711,8 @@ export class ChatService {
       tools: this.tools,
       ctx: this.toolContext(req, browserLlm),
       toolDefs: profile.tools,
-      agentSystem: await buildAgentSystem(profile.tools),
-      workspaceBlock: this.workspaceSystemBlock(profile),
+      agentSystem,
+      workspaceBlock,
       maxTokens: MAX_OUTPUT_TOKENS,
       keepResults: VERBATIM_TOOL_RESULTS
     })

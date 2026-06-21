@@ -455,7 +455,7 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_SYSTEM).not.toContain('[NEED_MORE_CONTEXT]')
     expect(CODEX_SYSTEM).toContain('Resume process:')
     expect(CODEX_SYSTEM).toContain('Do not edit files, run validations, navigate pages, or continue old work')
-    expect(CODEX_SYSTEM).toContain('you are already running inside the app')
+    expect(CODEX_SYSTEM).toContain('use the current visible Gladdis browser/tools')
     expect(CODEX_SYSTEM).toContain('Do not launch a second Gladdis/dev app')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('use the current visible app/browser first')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('do not launch a second Gladdis/dev app')

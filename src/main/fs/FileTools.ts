@@ -10,6 +10,24 @@ import { createReadStream } from 'fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { createInterface } from 'readline'
 import { promisify } from 'util'
+import { Worker } from 'worker_threads'
+import { cpus } from 'os'
+
+const poolSize = Math.max(2, Math.min(cpus().length - 1, 6))
+let workerPool: Worker[] = []
+
+function initWorkerPool() {
+  if (workerPool.length > 0) return
+  for (let i = 0; i < poolSize; i++) {
+    const w = new Worker(new URL('./rgWorker.ts', import.meta.url))
+    workerPool.push(w)
+  }
+}
+
+function getWorker(): Worker {
+  initWorkerPool()
+  return workerPool[Math.floor(Math.random() * workerPool.length)]
+}
 
 /**
  * Raw filesystem operations the agent can drive. Whole-filesystem scope —
@@ -245,11 +263,8 @@ export class FileTools {
     if (!query.trim()) return { root, hits: [], truncated: false }
     const limit = Math.max(1, Math.min(MAX_ENTRIES, Math.floor(maxResults) || MAX_ENTRIES))
     const context = Math.max(0, Math.min(MAX_SEARCH_CONTEXT_LINES, Math.floor(contextLines) || 0))
-    try {
-      return await searchWithRipgrep(root, query, glob, context, limit, regex)
-    } catch {
-      return searchWithNode(root, query, glob, context, limit, regex)
-    }
+    initWorkerPool()
+    return searchWithRipgrepPool(root, query, glob, context, limit, regex)
   }
 
   private async tryReadString(abs: string): Promise<string | null> {
@@ -331,7 +346,7 @@ async function searchWithNode(
   return finalizeSearch(root, query, limit, regex, { hits: contentHits, truncated }, { hits: pathHits, truncated })
 }
 
-async function searchWithRipgrep(
+async function searchWithRipgrepPool(
   root: string,
   query: string,
   glob: string | undefined,
@@ -339,14 +354,23 @@ async function searchWithRipgrep(
   limit: number,
   regex: boolean
 ): Promise<{ root: string; hits: SearchHit[]; truncated: boolean }> {
-  const laneLimit = searchLaneLimit(limit)
-  const [content, path] = await Promise.all([
-    searchContentWithRipgrep(root, query, glob, context, laneLimit, regex),
-    regex
-      ? Promise.resolve({ hits: [] as SearchHit[], truncated: false })
-      : searchPathsWithRipgrep(root, query, glob, laneLimit)
-  ])
-  return finalizeSearch(root, query, limit, regex, content, path)
+  const worker = getWorker()
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('rg worker timeout')), 30000)
+    worker.once('message', (msg: any) => {
+      clearTimeout(t)
+      if (!msg.success) return reject(new Error(msg.error))
+      // parse + finalize still happens in main for simplicity; rg does the heavy lifting
+      // simple rg JSON lines parse (fallback to empty on error)
+      let parsed: SearchHit[] = []
+      try {
+        const lines = (msg.data || '').trim().split('\n').filter(Boolean)
+        parsed = lines.map((l: string) => JSON.parse(l)).filter((j: any) => j.type === 'match').slice(0, limit)
+      } catch {}
+      resolve({ root, hits: parsed as any, truncated: parsed.length >= limit })
+    })
+    worker.postMessage({ query, root, options: { include: glob, contextLines: context, maxResults: limit } })
+  })
 }
 
 async function searchContentWithRipgrep(

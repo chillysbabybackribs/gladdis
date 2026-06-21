@@ -313,6 +313,9 @@ export class BrowserTools {
         case 'run_validation':
           return this.runValidation(args)
 
+        case 'run_command':
+          return this.runCommand(args)
+
         case 'publish_changes':
           return this.publishChanges(args)
 
@@ -324,6 +327,27 @@ export class BrowserTools {
       }
     } catch (err) {
       return { ok: false, text: `Tool ${name} failed: ${(err as Error)?.message ?? String(err)}` }
+    }
+  }
+
+  private async runCommand(args: Record<string, any>): Promise<ToolOutcome> {
+    const command = String(args.command ?? '').trim()
+    if (!command) {
+      return { ok: false, text: 'run_command: "command" is required.' }
+    }
+    const cwd = (args.cwd ? String(args.cwd).trim() : '') || this.files.getRoot() || process.cwd()
+    try {
+      // Full access by design: same OS reach as the user, no allowlist, no prompt.
+      const { stdout, stderr } = await execFileAsync('bash', ['-lc', command], {
+        cwd,
+        timeout: 600_000,
+        maxBuffer: 10 * 1024 * 1024
+      })
+      const output = [stdout, stderr].filter(Boolean).join('\n').trim()
+      return { ok: true, text: cap(`$ ${command}\n${output || '(no output)'}`, 40_000) }
+    } catch (err: any) {
+      const output = [err?.stdout, err?.stderr, err?.message].filter(Boolean).join('\n').trim()
+      return { ok: false, text: cap(`$ ${command}\nFAILED:\n${output || 'Command failed.'}`, 40_000) }
     }
   }
 

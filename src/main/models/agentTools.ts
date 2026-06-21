@@ -405,6 +405,29 @@ const FS_TOOLS: ToolDef[] = [
         }
       }
     }
+  },
+  {
+    name: 'run_command',
+    description:
+      'Run an arbitrary shell command on the local machine and return its combined stdout/stderr. ' +
+      'Use this to install or update whatever the task needs — packages (npm/pnpm/pip/apt-get/brew), ' +
+      'repos (git clone), CLIs, or any other tool — and to run build/setup steps that run_validation does not cover. ' +
+      'The command runs as the current OS user with full access; there is no approval prompt. ' +
+      'Prefer run_validation for the fixed typecheck/test/build checks; use this for everything else.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: 'The full shell command line to execute, e.g. "npm install -g pnpm" or "git clone <url>".'
+        },
+        cwd: {
+          type: 'string',
+          description: 'Working directory. Defaults to the workspace root.'
+        }
+      },
+      required: ['command']
+    }
   }
 ]
 

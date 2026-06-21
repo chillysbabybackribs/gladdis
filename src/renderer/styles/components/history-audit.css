@@ -1,0 +1,454 @@
+/* ---------------- Chat history modal ---------------- */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-search {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  padding: 9px 10px;
+  font-size: 13px;
+}
+
+.history-search::placeholder {
+  color: var(--text-muted);
+}
+
+.history-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 12px 0;
+  text-align: center;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.history-item:hover {
+  background: var(--bg-elevated);
+}
+.history-item.active {
+  background: var(--accent-dim);
+}
+
+.history-item-main {
+  flex: 1;
+  min-width: 0;
+}
+.history-item-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.history-item-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.history-item.active .history-item-time {
+  color: var(--text-primary);
+}
+
+.history-del {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  opacity: 0;
+  padding: 2px 4px;
+}
+.history-action {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: transparent;
+}
+.history-action:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+.history-item:hover .history-del {
+  opacity: 1;
+}
+.history-item:hover .history-action {
+  opacity: 1;
+}
+.history-del:hover {
+  color: var(--danger);
+  background: transparent;
+}
+
+.history-search-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.history-search-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+  width: 100%;
+}
+
+.history-search-excerpt {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.history-search-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------------- Model audit drawer ---------------- */
+.audit-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  z-index: 20;
+}
+.audit-scrim.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.audit-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 80%;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-strong);
+  transform: translateX(100%);
+  transition: transform 0.18s ease;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+}
+.audit-drawer.open {
+  transform: translateX(0);
+}
+
+.audit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0 12px;
+  min-height: var(--tabstrip-h);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.audit-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 10px;
+}
+.audit-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.audit-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.audit-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 16px 10px;
+  text-align: center;
+}
+
+.audit-row {
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 6px;
+}
+.audit-row.error {
+  border-color: var(--danger);
+}
+
+.audit-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.audit-stage {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.audit-status {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.audit-row.error .audit-status {
+  color: var(--danger);
+}
+
+.audit-model {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+.audit-metrics {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-secondary, var(--text-muted));
+  margin-top: 4px;
+}
+
+.audit-error {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+/* Codex workspace block inside the Keys modal */
+.codex-workspace {
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.02));
+}
+.codex-folder code {
+  word-break: break-all;
+}
+
+.chat-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.chat-msg-thumb {
+  max-width: 150px;
+  max-height: 150px;
+  object-fit: contain;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  background: #000;
+}
+
+/* Chat drawer responsiveness. These query the drawer width, not the window. */
+@container (max-width: 420px) {
+  .workspace-btn {
+    max-width: 120px;
+  }
+  .chat-messages {
+    padding: 16px 14px;
+    gap: 15px;
+  }
+  .chat-msg {
+    font-size: 14px;
+    max-width: 96%;
+  }
+  .md {
+    font-size: 14px;
+  }
+  .md h1 {
+    font-size: 18px;
+  }
+  .md h2 {
+    font-size: 16px;
+  }
+  .md pre {
+    padding: 8px 9px;
+  }
+  .composer-input {
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .composer-menu {
+    left: 10px;
+    right: 10px;
+    max-height: 220px;
+  }
+}
+
+@container (max-width: 380px) {
+  .workspace-label {
+    display: none;
+  }
+  .workspace-btn {
+    width: 26px;
+    max-width: 26px;
+    padding-inline: 0;
+    justify-content: center;
+    flex: none;
+  }
+  .model-picker-btn {
+    font-size: 13px;
+  }
+  .chat-messages {
+    padding-inline: 12px;
+  }
+  .composer {
+    padding-inline: 9px;
+  }
+  .composer-bar {
+    padding-inline: 6px;
+  }
+  .composer-bar-right {
+    gap: 6px;
+  }
+  .composer-hint .hint-sep {
+    display: none;
+  }
+  .composer-menu {
+    left: 9px;
+    right: 9px;
+  }
+}
+
+@container (max-width: 320px) {
+  .model-picker {
+    flex: 1 1 calc(100% - 34px);
+    max-width: calc(100% - 34px);
+  }
+  .workspace-label {
+    display: none;
+  }
+  .workspace-btn {
+    width: 26px;
+    padding-inline: 0;
+    justify-content: center;
+  }
+  .model-menu {
+    bottom: calc(100% + 4px);
+    width: calc(100cqw - 16px);
+  }
+  .chat-messages {
+    padding: 14px 10px;
+    gap: 13px;
+  }
+  .chat-msg {
+    max-width: 100%;
+  }
+  .chat-msg.user {
+    padding: 8px 10px;
+  }
+  .md table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .tool-run-step {
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 7px;
+  }
+  .composer-box {
+    border-radius: var(--radius);
+  }
+  .composer-bar-right {
+    gap: 6px;
+  }
+  .composer-hint .hint-sep {
+    display: none;
+  }
+  .composer-send {
+    width: 28px;
+    height: 28px;
+  }
+  .composer-menu {
+    left: 8px;
+    right: 8px;
+    max-height: 190px;
+  }
+  .composer-menu-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+@container (max-width: 220px) {
+  .workspace-btn {
+    width: 23px;
+    height: 23px;
+  }
+  .workspace-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  .model-picker-btn {
+    padding-inline: 4px;
+    font-size: 12px;
+  }
+  .chat-messages {
+    padding: 12px 8px;
+  }
+  .chat-empty {
+    font-size: 13px;
+  }
+  .chat-msg,
+  .md {
+    font-size: 13px;
+  }
+  .md ul,
+  .md ol {
+    padding-left: 16px;
+  }
+  .md pre code {
+    font-size: 11px;
+  }
+  .composer-input {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .composer-hint {
+    display: none;
+  }
+  .composer-send {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--radius);
+  }
+}

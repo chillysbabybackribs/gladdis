@@ -1,0 +1,204 @@
+/* Layout + component styles for gladdis. */
+
+.app {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  background: var(--bg-app);
+}
+
+/* ---------------- Workspace: dual retractable drawers + center browser ------ */
+.workspace {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  background: var(--bg-app);
+}
+
+.workspace-main {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+}
+
+/* A side chat drawer. Collapses to width:0 with a smooth width transition; the
+   native browser view tracks the resulting hole via useSlotBounds. overflow
+   hidden so its contents clip cleanly while animating closed. */
+.drawer {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  flex: 0 0 auto;
+  transition: width 0.2s ease;
+}
+.drawer.drawer-left.open {
+  border-right: 1px solid var(--border-subtle);
+}
+.drawer.drawer-right.open {
+  border-left: 1px solid var(--border-subtle);
+}
+/* The chat inside should always use the live drawer width, so both side panels
+   trigger the same container-query compaction as they are resized. */
+.drawer > .chat {
+  width: 100%;
+  max-width: 100%;
+  height: 100%;
+}
+
+/* Center browser column — fills whatever space the drawers leave. Painted the
+   browser canvas color so any 1-frame gap while the native view catches up to
+   the animating hole reads as page, not a flash. */
+.workspace-center {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  background: var(--bg-surface);
+}
+
+/* Drag handle between a drawer and the browser. */
+.drawer-splitter {
+  position: relative;
+  z-index: 10;
+  flex: 0 0 auto;
+  width: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: col-resize;
+}
+.drawer-splitter-grip {
+  width: 3px;
+  height: 40px;
+  border-radius: 3px;
+  background: var(--border-strong);
+  transition: background 0.12s ease;
+}
+.drawer-splitter:hover .drawer-splitter-grip {
+  background: var(--accent);
+}
+
+/* Footer rail for chat drawer controls. Kept outside the native browser slot. */
+.workspace-footer {
+  flex: 0 0 42px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  gap: 12px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-subtle);
+}
+.footer-chat-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  align-self: stretch;
+  min-width: 28px;
+  padding: 0 2px;
+  gap: 12px;
+}
+.footer-chat-controls.right {
+  justify-content: flex-start;
+}
+.footer-chat-controls.left.is-open {
+  padding-right: 12px;
+  border-right: 1px solid var(--border-subtle);
+}
+.footer-chat-controls.right.is-open {
+  padding-left: 12px;
+  border-left: 1px solid var(--border-subtle);
+}
+.workspace-footer-spacer {
+  flex: 1;
+  min-width: 0;
+}
+.footer-chat-toggle,
+.footer-action {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.footer-chat-toggle:hover,
+.footer-chat-toggle.is-open,
+.footer-action:hover,
+.footer-action.is-open {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border-color: var(--border-subtle);
+}
+.footer-action:disabled {
+  color: var(--text-muted);
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+  border-color: transparent;
+}
+.footer-action-slot {
+  flex: none;
+  min-width: 0;
+}
+.footer-chat-controls.left .footer-action-slot {
+  margin-left: auto;
+}
+.footer-chat-controls.right .footer-chat-toggle {
+  margin-left: auto;
+}
+.footer-zoom {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 30px;
+  display: inline-grid;
+  grid-template-columns: 28px 56px 28px;
+  align-items: center;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+}
+.footer-zoom-step,
+.footer-zoom-value {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.footer-zoom-step + .footer-zoom-value,
+.footer-zoom-value + .footer-zoom-step {
+  border-left: 0;
+}
+.footer-zoom-value {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+}
+.footer-zoom-step:hover:not(:disabled),
+.footer-zoom-value:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+.footer-zoom-step:disabled {
+  color: var(--text-muted);
+  opacity: 0.45;
+  cursor: default;
+}

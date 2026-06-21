@@ -1,0 +1,105 @@
+/* ============================================================
+   gladdis — Cursor-inspired dark theme
+   Color + texture cloned from Cursor's default dark UI.
+   ============================================================ */
+
+:root {
+  /* Surfaces — layered near-blacks, the Cursor signature */
+  --bg-app: #141414;          /* window backdrop */
+  --bg-panel: #181818;        /* sidebar / chat panel */
+  --bg-surface: #1e1e1e;      /* main editor-like surface */
+  --bg-elevated: #232323;     /* hover / inputs */
+  --bg-active: #2a2a2c;       /* active row */
+
+  /* Borders — barely-there separators */
+  --border-subtle: #2a2a2a;
+  --border-strong: #363636;
+
+  /* Text */
+  --text-primary: #e6e6e6;
+  --text-secondary: #9d9d9d;
+  --text-muted: #6b6b6b;
+
+  /* Accent — Cursor's soft blue */
+  --accent: #4493f8;
+  --accent-dim: #2d5f9e;
+  --accent-glow: rgba(68, 147, 248, 0.14);
+
+  --danger: #e5534b;
+
+  --radius: 6px;
+  --radius-lg: 9px;
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+
+  --tabstrip-h: 40px;
+  --urlbar-h: 40px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+button:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+input {
+  font-family: inherit;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  outline: none;
+}
+input:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}

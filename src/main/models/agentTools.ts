@@ -25,7 +25,8 @@
  *                   deterministically, then hands back a synthesised answer.
  *                   Use this whenever the goal requires more than 1–2 steps.
  *
- *   FS tools      → read_file / write_file / edit_file / list_dir / search_files.
+ *   FS tools      → read_file / write_file / edit_file / list_dir / search_files /
+ *                   run_validation / publish_changes.
  *   MEMORY tool   → recall_history.
  *
  * Token budget: the old free-form loop could inject 30–100 K tokens per turn
@@ -337,10 +338,10 @@ const FS_TOOLS: ToolDef[] = [
   {
     name: 'search_files',
     description:
-      'Ripgrep-backed recursive search before reading unknown files. Defaults to fixed-string ' +
-      'case-insensitive matching; set regex: true for patterns. ' +
-      'Returns path, match line, compact context, and a suggested read_file line range. ' +
-      'Skips node_modules/.git/build. Optional glob filter (e.g. "*.ts").',
+      'Ripgrep-backed recursive search before reading unknown files. Fixed-string queries use ' +
+      'smart-case matching and also surface strong file-path/name hits alongside content hits; ' +
+      'set regex: true for patterns. Returns ranked hits, compact context, and a suggested ' +
+      'read_file follow-up. Skips node_modules/.git/build. Optional glob filter (e.g. "*.ts").',
     parameters: {
       type: 'object',
       properties: {
@@ -379,6 +380,30 @@ const FS_TOOLS: ToolDef[] = [
         }
       },
       required: ['check']
+    }
+  },
+  {
+    name: 'publish_changes',
+    description:
+      'Commit and push local repository changes after successful code edits and validation. ' +
+      'Stages changes according to .gitignore, creates one commit, and pushes the current branch to the configured Git remote. ' +
+      'Use this automatically at the end of coding tasks when validation has passed, unless the user explicitly says not to push.',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'Short commit message. Defaults to "Update Gladdis app".'
+        },
+        remote: {
+          type: 'string',
+          description: 'Git remote to push. Defaults to origin.'
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch to push. Defaults to the current branch.'
+        }
+      }
     }
   }
 ]

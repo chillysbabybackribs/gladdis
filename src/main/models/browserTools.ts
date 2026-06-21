@@ -71,6 +71,7 @@ const VALIDATION_COMMANDS = {
 } as const
 
 type ValidationCheck = keyof typeof VALIDATION_COMMANDS
+const DEFAULT_PUBLISH_MESSAGE = 'Update Gladdis app'
 
 export interface ToolContext {
   tabId: string
@@ -289,11 +290,20 @@ export class BrowserTools {
             optNum(args.max_results) ?? undefined,
             search.regex
           )
-          const body = r.hits.map((h) =>
-            `${h.path}:${h.line}: ${h.text}\n` +
-            `read_file({"path":${JSON.stringify(h.path)},"start_line":${h.startLine},"end_line":${h.endLine}})\n` +
-            h.snippet
-          ).join('\n\n')
+          const body = r.hits.map((h) => {
+            if (h.kind === 'path') {
+              return (
+                `${h.path} [path hit]\n` +
+                `read_file({"path":${JSON.stringify(h.path)}})\n` +
+                h.snippet
+              )
+            }
+            return (
+              `${h.path}:${h.line}: ${h.text}\n` +
+              `read_file({"path":${JSON.stringify(h.path)},"start_line":${h.startLine},"end_line":${h.endLine}})\n` +
+              h.snippet
+            )
+          }).join('\n\n')
           return {
             ok: true,
             text: cap(`${r.hits.length} hit(s)${r.truncated ? ' (truncated)' : ''}\n${body}`)
@@ -302,6 +312,9 @@ export class BrowserTools {
 
         case 'run_validation':
           return this.runValidation(args)
+
+        case 'publish_changes':
+          return this.publishChanges(args)
 
         case 'recall_history':
           return this.recallHistory(args, ctx)
@@ -344,6 +357,45 @@ export class BrowserTools {
         ok: false,
         text: cap(`FAIL: ${pretty}\n${output || 'Validation failed.'}`, 40_000)
       }
+    }
+  }
+
+  private async publishChanges(args: Record<string, any>): Promise<ToolOutcome> {
+    const cwd = this.files.getRoot() ?? process.cwd()
+    const message = commitMessage(args.message)
+    const remote = String(args.remote ?? 'origin').trim() || 'origin'
+    const requestedBranch = args.branch ? String(args.branch).trim() : ''
+
+    try {
+      await git(['rev-parse', '--is-inside-work-tree'], cwd)
+      const repoRoot = (await git(['rev-parse', '--show-toplevel'], cwd)).stdout.trim() || cwd
+      const before = (await git(['status', '--short'], repoRoot)).stdout.trim()
+      if (!before) return { ok: true, text: 'publish_changes: no local changes to publish.' }
+
+      await git(['add', '-A'], repoRoot)
+      const staged = await gitQuiet(['diff', '--cached', '--quiet'], repoRoot)
+      if (staged.code === 0) return { ok: true, text: 'publish_changes: no staged changes to publish.' }
+
+      await git(['commit', '-m', message], repoRoot)
+      const branch = requestedBranch || (await git(['branch', '--show-current'], repoRoot)).stdout.trim()
+      if (!branch) {
+        return { ok: false, text: 'publish_changes: could not determine the current branch.' }
+      }
+
+      await git(['push', '-u', remote, branch], repoRoot, 240_000)
+      const commit = (await git(['rev-parse', '--short', 'HEAD'], repoRoot)).stdout.trim()
+      const after = (await git(['status', '--short'], repoRoot)).stdout.trim()
+      return {
+        ok: true,
+        text:
+          `Published ${commit} to ${remote}/${branch}.\n` +
+          `Commit message: ${message}\n` +
+          `Changed files before publish:\n${cap(before, 8_000)}` +
+          (after ? `\n\nRemaining local changes:\n${cap(after, 8_000)}` : '\n\nWorking tree clean.')
+      }
+    } catch (err: any) {
+      const output = [err?.stdout, err?.stderr, err?.message].filter(Boolean).join('\n').trim()
+      return { ok: false, text: cap(`publish_changes failed:\n${output || String(err)}`, 20_000) }
     }
   }
 
@@ -707,6 +759,37 @@ function searchQueryArgs(args: Record<string, any>): { query: string; regex: boo
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function commitMessage(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  const message = raw || DEFAULT_PUBLISH_MESSAGE
+  return message.split(/\r?\n/)[0].slice(0, 200)
+}
+
+async function git(
+  args: string[],
+  cwd: string,
+  timeout = 180_000
+): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync('git', args, {
+    cwd,
+    timeout,
+    maxBuffer: 10 * 1024 * 1024
+  })
+}
+
+async function gitQuiet(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  try {
+    const result = await git(args, cwd)
+    return { code: 0, ...result }
+  } catch (err: any) {
+    return {
+      code: typeof err?.code === 'number' ? err.code : 1,
+      stdout: String(err?.stdout ?? ''),
+      stderr: String(err?.stderr ?? err?.message ?? '')
+    }
+  }
 }
 
 /** Coerce an optional numeric arg; undefined/NaN → undefined. */

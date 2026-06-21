@@ -60,7 +60,10 @@ const FILESYSTEM_GUIDANCE =
   'When you edit source, config, tests, or package files, run run_validation before finalizing. ' +
   'Choose the narrowest relevant check first: typecheck for TypeScript/API changes, test for behavior, build for bundling/runtime confidence, ' +
   'and check when the change is broad or risky. If validation fails, fix the issue and run validation again. ' +
-  'If validation cannot be run, say exactly why in the final answer.'
+  'If validation cannot be run, say exactly why in the final answer.\n\n' +
+  '## GitHub publishing\n' +
+  'When a coding task changes files and validation passes, call publish_changes before your final answer. ' +
+  'Use a short commit message that describes the completed change. Do not ask the user to run git, commit, push, or open GitHub manually unless publish_changes fails or the user explicitly says not to push.'
 
 const MEMORY_GUIDANCE =
   '## Memory\n' +
@@ -85,7 +88,7 @@ const FILESYSTEM_OPTIMIZATION_RULES =
   'For unknown code: always call search_files first before any read_file.\n' +
   'When any search_files call returns zero results, automatically retry with common close spellings or slight variations of the query before concluding nothing was found.\n' +
   'Use edit_file for changes, write_file only for new files. Relative paths resolve from /home/dp/Desktop/myworkspace/Gladdis.\n' +
-  'After edit_file or write_file changes code, call run_validation with the relevant check before you say the work is done.'
+  'After edit_file or write_file changes code, call run_validation with the relevant check before you say the work is done. When validation passes, call publish_changes so the repository is committed and pushed automatically.'
 
 const BROWSER_TOOL_NAMES = new Set([
   'search',
@@ -102,7 +105,7 @@ const BROWSER_TOOL_NAMES = new Set([
   'execute_in_browser',
   'cdp_command'
 ])
-const FILESYSTEM_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_validation'])
+const FILESYSTEM_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_validation', 'publish_changes'])
 
 function agentGuidanceForTools(tools: ToolDef[]): string {
   const names = new Set(tools.map((tool) => tool.name))
@@ -184,4 +187,4 @@ export const CODEX_SYSTEM =
   '`gladdis.read_page` and confirm it is not blank and the intended UI is visible before answering. ' +
   'Do not stop at build/curl-only validation for UI work.\n\n' +
   'Do not assume recall_history is available unless Codex itself exposes it.\n\n' +
-  'Persistent rules: for unknown code always call search_files first; always read_page before any browser action; prefer direct navigation to known URLs.'
+  'Persistent rules: for unknown code always call search_files first; always read_page before any browser action; prefer direct navigation to known URLs. After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'

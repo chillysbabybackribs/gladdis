@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile } from 'fs/promises'
+import { execFile } from 'child_process'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { promisify } from 'util'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/gladdis-vitest' },
@@ -13,6 +15,8 @@ vi.mock('electron', () => ({
 }))
 
 import { BrowserTools } from './browserTools'
+
+const execFileAsync = promisify(execFile)
 
 describe('BrowserTools', () => {
   it('formats undefined execute_in_browser results without failing the tool call', async () => {
@@ -211,12 +215,78 @@ describe('BrowserTools', () => {
     expect(broadCase.text).toContain(`${file}:2: export const chatstore = "lowercase"`)
   })
 
+  it('returns file-path hits for fixed-string searches even when the file body lacks the query', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-search-path-hit-'))
+    const file = join(dir, 'SearchCoordinator.ts')
+    await writeFile(file, 'export function planSearch() { return true }\n')
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    const result = await tools.run(
+      'search_files',
+      { path: dir, query: 'SearchCoordinator', glob: '*.ts', max_results: 5 },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain(`${file} [path hit]`)
+    expect(result.text).toContain(`read_file({"path":"${file}"})`)
+    expect(result.text).toContain('path match: SearchCoordinator.ts')
+  })
+
+  it('ranks exact file-name hits ahead of weaker content-only mentions', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-search-ranked-paths-'))
+    const exactFile = join(dir, 'ChatStore.ts')
+    const weakContentFile = join(dir, 'notes.ts')
+    await writeFile(exactFile, 'export function unrelatedHelper() { return "ok" }\n')
+    await writeFile(weakContentFile, 'const label = "ChatStore"\n')
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    const result = await tools.run(
+      'search_files',
+      { path: dir, query: 'ChatStore', glob: '*.ts', max_results: 5, context_lines: 0 },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(true)
+    const pathHitIndex = result.text.indexOf(`${exactFile} [path hit]`)
+    const contentHitIndex = result.text.indexOf(`${weakContentFile}:1: const label = "ChatStore"`)
+    expect(pathHitIndex).toBeGreaterThanOrEqual(0)
+    expect(contentHitIndex).toBeGreaterThanOrEqual(0)
+    expect(pathHitIndex).toBeLessThan(contentHitIndex)
+  })
+
   it('rejects unknown validation checks before running a command', async () => {
     const tools = new BrowserTools({} as any, {} as any, {} as any)
     const result = await tools.run('run_validation', { check: 'rm -rf nope' }, { tabId: 'tab-1' })
 
     expect(result.ok).toBe(false)
     expect(result.text).toContain('must be one of typecheck, test, build, or check')
+  })
+
+  it('commits and pushes local changes with publish_changes', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'gladdis-publish-'))
+    const remote = join(base, 'remote.git')
+    const worktree = join(base, 'worktree')
+    await execFileAsync('git', ['init', '--bare', remote])
+    await execFileAsync('git', ['init', '-b', 'main', worktree])
+    await execFileAsync('git', ['config', 'user.email', 'gladdis@example.test'], { cwd: worktree })
+    await execFileAsync('git', ['config', 'user.name', 'Gladdis Test'], { cwd: worktree })
+    await execFileAsync('git', ['remote', 'add', 'origin', remote], { cwd: worktree })
+    await writeFile(join(worktree, 'source.txt'), 'automated publish\n')
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(worktree)
+    const result = await tools.run(
+      'publish_changes',
+      { message: 'Automate GitHub publishing' },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Published')
+    expect(result.text).toContain('Automate GitHub publishing')
+    expect((await execFileAsync('git', ['status', '--short'], { cwd: worktree })).stdout.trim()).toBe('')
+    expect((await execFileAsync('git', ['--git-dir', remote, 'rev-parse', '--verify', 'main'])).stdout.trim()).toMatch(/[a-f0-9]{40}/)
   })
 
   it('recalls linked continuation history as a brief overview across fresh chats', async () => {

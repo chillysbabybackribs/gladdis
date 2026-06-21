@@ -104,9 +104,17 @@ describe('ChatService provider hardening', () => {
 
     const conversationProfile = selectAgentToolProfile('tell me a joke')
     expect(conversationProfile.name).toBe('conversation')
-    // Lean profile carries recall_history plus the request_tools escape hatch, so
+    // Lean profile carries recall_history, memory tools, plus the request_tools escape hatch, so
     // the model can always pull in tools instead of stalling when it needs to act.
-    expect(conversationProfile.tools.map((tool) => tool.name)).toEqual(['recall_history', 'request_tools'])
+    expect(conversationProfile.tools.map((tool) => tool.name)).toEqual([
+      'recall_history',
+      'memory_write',
+      'memory_read',
+      'memory_list',
+      'memory_forget',
+      'memory_create_task',
+      'request_tools'
+    ])
   })
 
   it('lets a lean turn escalate into filesystem tools via request_tools', async () => {

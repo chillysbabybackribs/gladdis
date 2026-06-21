@@ -413,6 +413,7 @@ const FS_TOOLS: ToolDef[] = [
       'Use this to install or update whatever the task needs — packages (npm/pnpm/pip/apt-get/brew), ' +
       'repos (git clone), CLIs, or any other tool — and to run build/setup steps that run_validation does not cover. ' +
       'The command runs as the current OS user with full access; there is no approval prompt. ' +
+      'For system packages that need root (e.g. apt-get/dpkg), prefix the command with "sudo" — passwordless sudo is configured, so "sudo apt-get install -y <pkg>" runs unattended. ' +
       'Prefer run_validation for the fixed typecheck/test/build checks; use this for everything else.',
     parameters: {
       type: 'object',

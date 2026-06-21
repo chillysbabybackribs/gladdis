@@ -30,13 +30,20 @@ const LOCAL_PATH_RE =
   /(?:^|\s)(?:\.{1,2}\/|~\/|\/[\w.-]|[\w.-]+\/[\w./-]*|[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html|cjs|mjs|yml|yaml|toml|lock|env))\b/i
 
 const LOCAL_ACTION_RE =
-  /\b(?:read|inspect|search|find|list|show|open|edit|modify|patch|write|create|delete|rename|move|refactor|implement|fix|debug|test|typecheck|lint|build|run|execute|commit|diff|grep|rg|cat|sed|npm|pnpm|yarn|git)\b/i
+  /\b(?:read|inspect|search|find|list|show|open|edit|modify|patch|write|create|delete|rename|move|refactor|implement|fix|debug|test|typecheck|lint|build|run|execute|commit|diff|grep|rg|cat|sed|install|reinstall|uninstall|update|upgrade|npm|pnpm|yarn|npx|pip|pipx|apt|apt-get|brew|sudo|git)\b/i
 
 const LOCAL_TARGET_RE =
-  /\b(?:repo|repository|codebase|project|source|filesystem|files?|folders?|directories?|path|workspace|working folder|selected folder|terminal|shell|command|app|ui|frontend|component|src|package\.json|tsconfig|vite|electron|react|typescript)\b/i
+  /\b(?:repo|repository|codebase|project|source|filesystem|files?|folders?|directories?|path|workspace|working folder|selected folder|terminal|shell|command|app|ui|frontend|component|src|package\.json|tsconfig|vite|electron|react|typescript|packages?|dependenc(?:y|ies)|deps?|tool|tooling|librar(?:y|ies)|modules?|cli|binar(?:y|ies))\b/i
 
 const EXPLICIT_LOCAL_SCOPE_RE =
   /\b(?:this|the|current|selected)\s+(?:repo|repository|codebase|workspace|project|folder)\b|\b(?:in|inside|from|under)\s+(?:this|the|current|selected)\s+(?:repo|repository|codebase|workspace|project|folder)\b/i
+
+// Installing/updating a tool, package, or repo is always local shell work, even
+// when the target is a bare package name no vocabulary list would match. Kept
+// narrow so plain English like "update me on the news" does not match: an
+// install verb must sit next to a software-ish object, or be a real command form.
+const INSTALL_INTENT_RE =
+  /\b(?:re)?install\b|\buninstall\b|\b(?:update|upgrade|set\s?up|add|bump)\s+(?:the\s+|a\s+|my\s+)?(?:\S+\s+)?(?:packages?|dependenc(?:y|ies)|deps?|modules?|librar(?:y|ies)|tool(?:s|ing)?|cli|binar(?:y|ies)|version|electron|react|typescript|node|python|npm|pip)\b|\b(?:npm|pnpm|yarn|npx|pip|pipx|apt|apt-get|brew|cargo|go)\s+(?:install|add|get|i|upgrade|update)\b|\bgit\s+clone\b/i
 
 /** True only when the user's words explicitly refer to the currently open page. */
 export function shouldAttachActivePageContext(text: string): boolean {
@@ -73,6 +80,7 @@ export function shouldUseWorkspaceContext(text: string): boolean {
   if (!t) return false
   if (LOCAL_PATH_RE.test(t)) return true
   if (EXPLICIT_LOCAL_SCOPE_RE.test(t)) return true
+  if (INSTALL_INTENT_RE.test(t)) return true
   if (WEB_SEARCH_RE.test(t)) return false
   return LOCAL_ACTION_RE.test(t) && LOCAL_TARGET_RE.test(t)
 }

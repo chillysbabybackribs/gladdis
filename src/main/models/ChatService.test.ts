@@ -125,6 +125,49 @@ describe('ChatService provider hardening', () => {
     expect(shouldUseWorkspaceContext('read src/main/models/ChatService.ts')).toBe(true)
   })
 
+  it('routes install/update requests to a filesystem profile so run_command is offered', () => {
+    // Regression: install/update vocabulary was absent from the routing
+    // predicates, so the model was handed the browser profile (no run_command)
+    // and could only talk about installing — never actually run it.
+    const installs = [
+      'install the foobar package',
+      'update typescript',
+      'npm install left-pad',
+      'update the dependencies',
+      'install ripgrep',
+      'please update electron to latest',
+      'install pandas via pip',
+      'sudo apt-get install jq',
+      'upgrade the deps',
+      'bump the react version',
+      'set up the tooling',
+      'git clone https://example.com/x/y'
+    ]
+    for (const text of installs) {
+      expect(shouldUseWorkspaceContext(text), text).toBe(true)
+      const tools = selectAgentToolProfile(text).tools.map((t) => t.name)
+      expect(tools, text).toContain('run_command')
+    }
+  })
+
+  it('does not let install/update wording hijack web or conversational turns', () => {
+    // The install short-circuit must stay narrow: plain-English "update"/"set up"
+    // phrasings about news/web content must not be pulled into a filesystem turn.
+    const notInstalls = [
+      'update me on the news',
+      'look up the latest React news',
+      "what's the latest on the election",
+      'search for the current weather',
+      'get me up to speed',
+      'review the recent updates online'
+    ]
+    for (const text of notInstalls) {
+      expect(shouldUseWorkspaceContext(text), text).toBe(false)
+      const tools = selectAgentToolProfile(text).tools.map((t) => t.name)
+      expect(tools, text).not.toContain('run_command')
+    }
+  })
+
   it('only attaches the working-folder block to filesystem-capable turns', () => {
     const { service } = makeService('/tmp/selected-project')
 

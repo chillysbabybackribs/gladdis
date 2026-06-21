@@ -140,181 +140,121 @@
   box-shadow: none;
   animation: tool-run-in 180ms ease-out both;
 }
-.tool-run-toggle {
+/* Collapsed summary line: the default face of a tool run. One row, count-first,
+   with live running state or a failure count baked in so the rail stays closed. */
+.tool-run-summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--chat-small-size);
+  line-height: 1.45;
+  cursor: pointer;
+  text-align: left;
+}
+.tool-run-summary:hover {
   color: var(--text-secondary);
-  font-size: var(--chat-pre-code-size);
-  opacity: 0.9;
 }
-.tool-run-track {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-left: 4px;
-}
-.tool-run-track::before {
-  content: '';
-  position: absolute;
-  left: 10px;
-  top: 2px;
-  bottom: 2px;
-  width: 1px;
-  background: linear-gradient(180deg, transparent, var(--border-subtle) 10%, var(--border-subtle) 90%, transparent);
-}
-.tool-run-step {
-  position: relative;
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-}
-.tool-run-rail {
-  position: relative;
-  display: flex;
-  justify-content: center;
-}
-.tool-run-step-dot {
-  position: relative;
-  z-index: 1;
-  width: 10px;
-  height: 10px;
-  margin-top: 4px;
+.tool-run-summary-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--text-muted);
-  box-shadow: 0 0 0 3px var(--bg-surface);
+  box-shadow: 0 0 0 2px var(--bg-surface);
 }
-.tool-run-step-dot.running {
+.tool-run-summary-dot.ok {
+  background: #3fb950;
+}
+.tool-run-summary-dot.running {
   background: var(--accent);
   animation: tool-pulse 1s ease-in-out infinite;
 }
-.tool-run-step-dot.ok {
-  background: #3fb950;
-}
-.tool-run-step-dot.error {
+.tool-run-summary-dot.error {
   background: var(--danger);
 }
-.tool-run-step-line {
-  position: absolute;
-  top: 14px;
-  bottom: -13px;
-  width: 1px;
-  background: var(--border-subtle);
-}
-.tool-run-body {
-  min-width: 0;
-  padding: 2px 0 0;
-}
-.tool-run-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-.tool-run-step-label {
-  /* Take the free space so status + toggle group together on the right. */
-  margin-right: auto;
-  color: var(--text-primary);
-  font-size: var(--chat-code-size);
-  font-weight: 500;
-  line-height: 1.35;
-}
-.tool-run-topline .tool-run-toggle {
-  flex: none;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-.tool-run-topline .tool-run-toggle:hover {
-  color: var(--text-primary);
-}
-.tool-run-step-status {
-  flex: none;
-  font-size: var(--chat-small-size);
-  text-transform: uppercase;
-  letter-spacing: 0.14px;
-  color: var(--text-muted);
-}
-.tool-run-step-status.running {
-  color: var(--accent);
-}
-.tool-run-step-status.ok {
-  color: #7ddc8e;
-}
-.tool-run-step-status.error {
-  color: #ff8a82;
-}
-.tool-run-duration {
-  flex: none;
-  color: var(--text-faint);
-  font-size: var(--chat-small-size);
+.tool-run-summary-count {
+  color: var(--text-secondary);
   font-weight: 600;
 }
-.tool-run-meta {
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  color: var(--text-muted);
-}
-/* Clamped state: collapse long output to a few lines. Items lay out inline and
-   wrap as one flowing block, then -webkit-line-clamp caps the height. */
-.tool-run-meta.clamped {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-  word-break: break-all;
-}
-.tool-run-meta.clamped .tool-run-hint {
-  white-space: normal;
-  overflow: visible;
-}
-.tool-run-meta.clamped .tool-run-sep {
-  display: none;
-}
-/* Expanded state: let the long URL hint wrap and show in full (its default
-   nowrap/ellipsis would otherwise keep it truncated even after "Show all"). */
-.tool-run-meta.expanded .tool-run-hint {
-  white-space: normal;
-  overflow: visible;
-  word-break: break-all;
-}
-.tool-run-hint {
-  font-family: var(--font-mono);
-  font-size: var(--chat-small-size);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-.tool-run-more {
-  margin-top: 5px;
-  padding: 0;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: var(--chat-small-size);
-  cursor: pointer;
-  opacity: 0.85;
-}
-.tool-run-more:hover {
-  opacity: 1;
-  text-decoration: underline;
-}
-.tool-run-sep {
+.tool-run-summary-sep {
+  flex: 0 0 auto;
   width: 3px;
   height: 3px;
   border-radius: 50%;
   background: var(--text-muted);
-  opacity: 0.7;
+  opacity: 0.65;
 }
-.tool-run-preview {
-  font-size: var(--chat-pre-code-size);
-  line-height: 1.45;
+.tool-run-summary-running {
+  color: var(--accent);
+}
+.tool-run-summary-failed {
+  color: #ff8a82;
+  font-weight: 600;
+}
+.tool-run-summary-duration {
   color: var(--text-muted);
+  font-weight: 600;
+}
+.tool-run-summary-caret {
+  margin-left: 2px;
+  color: var(--text-secondary);
+  font-size: var(--chat-pre-code-size);
+}
+/* Live ticker (running): a fixed-height, borderless, text-only feed that
+   auto-scrolls to the newest call. ~3 lines tall, older lines scroll off the
+   top. The fade at the top hints there's more above without any chrome. */
+.tool-run-ticker {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* Exactly three lines tall; older calls scroll off the top as new ones land. */
+  max-height: calc(var(--chat-small-size) * 1.5 * 3 + 8px);
+  overflow: hidden;
+  /* Thin fade only at the very top edge, so the line scrolling out hints at
+     more above without dimming the three legible lines below it. */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 8px);
+  mask-image: linear-gradient(180deg, transparent 0, #000 8px);
+}
+/* Settled, expanded: the same text-only lines, no scroll cap, no fade. */
+.tool-run-expanded .tool-run-track {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tool-run-line {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: var(--chat-small-size);
+  line-height: 1.5;
+}
+.tool-run-line.running {
+  color: var(--text-primary);
+}
+.tool-run-line.error {
+  color: #ff8a82;
+}
+.tool-run-line-dot {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: tool-pulse 1s ease-in-out infinite;
+}
+.tool-run-line-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 @keyframes tool-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }

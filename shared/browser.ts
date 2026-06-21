@@ -8,6 +8,11 @@ export interface TabInfo {
   canGoForward: boolean
 }
 
+export interface TabsUpdatedState {
+  tabs: TabInfo[]
+  activeTabId: string | null
+}
+
 /** Pixel rect (in renderer CSS px) where the active browser view should sit. */
 export interface ViewBounds {
   x: number

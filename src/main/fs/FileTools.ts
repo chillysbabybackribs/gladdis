@@ -205,19 +205,21 @@ export class FileTools {
   async list(path: string): Promise<{ path: string; entries: DirEntry[]; truncated: boolean }> {
     const abs = this.resolve(path)
     const names = await readdir(abs)
-    const entries: DirEntry[] = []
-    for (const name of names.slice(0, MAX_ENTRIES)) {
+    const namesToStat = names.slice(0, MAX_ENTRIES)
+    const statJobs: Promise<DirEntry>[] = namesToStat.map(async (name): Promise<DirEntry> => {
+      const fullPath = join(abs, name)
       try {
-        const st = await stat(join(abs, name))
-        entries.push({
+        const st = await stat(fullPath)
+        return {
           name,
-          type: st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'other',
+          type: (st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'other') as 'dir' | 'file' | 'other',
           size: st.isFile() ? st.size : 0
-        })
+        }
       } catch {
-        entries.push({ name, type: 'other', size: 0 })
+        return { name, type: 'other' as 'dir' | 'file' | 'other', size: 0 }
       }
-    }
+    })
+    const entries = await Promise.all(statJobs)
     entries.sort((a, b) =>
       a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1
     )

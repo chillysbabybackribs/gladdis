@@ -111,8 +111,6 @@ interface StreamConsumerArgs {
   scrollRef: RefObject<HTMLDivElement | null>
   setMessages: Dispatch<SetStateAction<Message[]>>
   setStreaming: Dispatch<SetStateAction<boolean>>
-  /** The streaming-message array, so the scroll effect repins once per committed frame. */
-  messages: Message[]
 }
 
 /**
@@ -134,18 +132,30 @@ export function useStreamConsumer({
   ttsRef,
   scrollRef,
   setMessages,
-  setStreaming,
-  messages
+  setStreaming
 }: StreamConsumerArgs): void {
   const pendingDelta = useRef('')
   const rafRef = useRef<number | null>(null)
+  const scrollRafRef = useRef<number | null>(null)
 
   useEffect(() => {
+    // Pin the scroll container to the bottom, but at most once per animation
+    // frame. Tool events commit synchronously and in bursts (a tool_call and its
+    // tool_result are two commits); pinning per commit forced a synchronous
+    // scrollHeight read + scrollTop write each time — a whole-container reflow
+    // that read as the chat "flashing" on every tool call. Coalescing the pin
+    // into one rAF collapses a burst into a single reflow per frame.
+    const scheduleScrollPin = () => {
+      if (scrollRafRef.current !== null) return
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null
+        const el = scrollRef.current
+        if (el) el.scrollTop = el.scrollHeight
+      })
+    }
+
     // Drain buffered delta text into the trailing assistant message in a single
-    // state update. Called on the next frame after deltas arrive. Scroll pinning
-    // stays in the post-commit effect below so it reads the DOM after React
-    // paints the new text — and since messages now changes once per frame, that
-    // effect runs once per frame too.
+    // state update. Called on the next frame after deltas arrive.
     const flushDeltas = () => {
       rafRef.current = null
       const text = pendingDelta.current
@@ -163,6 +173,7 @@ export function useStreamConsumer({
           activeAssistantMessageId.current
         )
       })
+      scheduleScrollPin()
     }
 
     const off = window.gladdis.chat.onStream((e) => {
@@ -189,6 +200,7 @@ export function useStreamConsumer({
       setMessages((msgs) => {
         return applyStreamEventToMessages(msgs, e, activeAssistantMessageId.current)
       })
+      scheduleScrollPin()
       if (e.type === 'done' || e.type === 'error') {
         if (e.type === 'done') void ttsRef.current.flush()
         activeReq.current = null
@@ -202,16 +214,12 @@ export function useStreamConsumer({
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
       }
+      if (scrollRafRef.current !== null) {
+        cancelAnimationFrame(scrollRafRef.current)
+        scrollRafRef.current = null
+      }
     }
     // Refs are stable; setters are stable. Wire once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Keep the view pinned to the latest output while streaming. Runs post-commit,
-  // so scrollHeight reflects the just-painted text. `messages` now changes once
-  // per animation frame during streaming, so this reflows once per frame.
-  useEffect(() => {
-    const el = scrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages, scrollRef])
 }

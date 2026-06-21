@@ -3,6 +3,7 @@ import type {
   CdpEventPayload,
   ExecResult,
   TabInfo,
+  TabsUpdatedState,
   ViewBounds
 } from './browser'
 import type {
@@ -34,7 +35,7 @@ export interface GladdisApi {
     reorder: (id: string, toIndex: number) => Promise<void>
     list: () => Promise<TabInfo[]>
     capture: (id: string) => Promise<string>
-    onUpdated: (cb: (tabs: TabInfo[]) => void) => () => void
+    onUpdated: (cb: (state: TabsUpdatedState) => void) => () => void
   }
   layout: {
     setBounds: (bounds: ViewBounds) => void

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { TabInfo } from '../../../shared/types'
+import type { TabInfo, TabsUpdatedState } from '../../../shared/types'
 import { TabStrip } from './TabStrip'
 import { UrlBar } from './UrlBar'
 import { useSlotBounds } from '../hooks/useSlotBounds'
@@ -13,12 +13,9 @@ export function BrowserPanel() {
 
   // Keep tab state in sync with main.
   useEffect(() => {
-    const off = window.gladdis.tabs.onUpdated((next) => {
+    const off = window.gladdis.tabs.onUpdated(({ tabs: next, activeTabId }: TabsUpdatedState) => {
       setTabs(next)
-      setActiveId((cur) => {
-        if (cur && next.some((t) => t.id === cur)) return cur
-        return next.length ? next[next.length - 1].id : null
-      })
+      setActiveId(activeTabId)
     })
     void window.gladdis.tabs.list().then((t) => {
       setTabs(t)

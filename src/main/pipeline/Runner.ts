@@ -36,13 +36,19 @@ export class Runner {
   /** Live count of in-flight network requests, maintained from CDP events the
    *  CDPSession already pumps. Lets networkIdle be deterministic, not a sleep. */
   private inFlight = 0
+  private activeTabId: string | null = null
 
   constructor(private readonly deps: PipelineDeps, private readonly onLog?: (msg: string) => void) {}
+
+  get runningTabId(): string | null {
+    return this.activeTabId
+  }
 
   /** Feed this every CDP event (from TabManager's onCdpEvent fan-out) so the
    *  Runner can track network settle deterministically. Cheap + optional —
    *  networkIdle degrades to a bounded wait if not wired. */
-  onCdpEvent(method: string): void {
+  onCdpEvent(tabId: string, method: string): void {
+    if (!this.activeTabId || tabId !== this.activeTabId) return
     if (method === 'Network.requestWillBeSent') this.inFlight++
     else if (method === 'Network.loadingFinished' || method === 'Network.loadingFailed') {
       this.inFlight = Math.max(0, this.inFlight - 1)
@@ -50,150 +56,156 @@ export class Runner {
   }
 
   async run(tabId: string, plan: Plan, replan?: ReplanFn): Promise<Trajectory> {
-    const startedAt = Date.now()
-    const results: StepResult[] = []
-    let llmCalls = 1 // the initial planner call that produced `plan`
-    let checks = 0
-    let success = true
-    let totalReplans = 0
-    const evidenceUrls = new Set<string>()
+    this.activeTabId = tabId
+    try {
+      const startedAt = Date.now()
+      const results: StepResult[] = []
+      let llmCalls = 1 // the initial planner call that produced `plan`
+      let checks = 0
+      let success = true
+      let totalReplans = 0
+      const evidenceUrls = new Set<string>()
 
-    // Work off a mutable queue so replans can splice in a fresh tail.
-    const queue: PlanStep[] = [...plan.steps]
+      // Work off a mutable queue so replans can splice in a fresh tail.
+      const queue: PlanStep[] = [...plan.steps]
 
-    while (queue.length > 0) {
-      const step = queue.shift()!
-      const sStart = Date.now()
-      const maxRetries = step.maxRetries ?? defaultMaxRetries(step)
-      let usedLlm = false
-      let status: StepResult['status'] = 'passed'
-      let error: string | undefined
-      let evidence: StepEvidence | undefined
-      let localChecks = 0
+      while (queue.length > 0) {
+        const step = queue.shift()!
+        const sStart = Date.now()
+        const maxRetries = step.maxRetries ?? defaultMaxRetries(step)
+        let usedLlm = false
+        let status: StepResult['status'] = 'passed'
+        let error: string | undefined
+        let evidence: StepEvidence | undefined
+        let localChecks = 0
 
-      this.onLog?.(`➡️ [Runner] Executing step: ${step.action.type} ${describeAction(step.action)}`)
+        this.onLog?.(`➡️ [Runner] Executing step: ${step.action.type} ${describeAction(step.action)}`)
 
-      // Pre-condition gate (deterministic).
-      if (step.preCondition) {
-        localChecks++
-        const pre = await this.check(tabId, step.preCondition)
-        if (!pre.ok) {
-          // Precondition unmet — treat like a failed step per policy.
-          error = `precondition failed: ${pre.reason}`
-          this.onLog?.(`⚠️ [Runner] Pre-condition check failed: ${pre.reason}`)
-        } else {
-          this.onLog?.(`✅ [Runner] Pre-condition check passed.`)
-        }
-      }
-
-      // Normalise postCondition: if the LLM omitted it, treat as 'always' so we
-      // never crash with "Cannot read properties of undefined (reading 'ok')".
-      const postCond = step.postCondition ?? { kind: 'always' as const }
-
-      // Attempt + verify, with deterministic retries. If the pre-condition
-      // already failed above, `error` is set and we skip straight to escalation.
-      let passed = !error
-      if (!error) {
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-          if (attempt > 0) {
-            this.onLog?.(`🔄 [Runner] Retrying step (attempt ${attempt}/${maxRetries})...`)
-          }
-          try {
-            await this.execute(tabId, step.action)
-            await this.settleForPostCondition(tabId, step.action, postCond)
-          } catch (e: any) {
-            error = `action threw: ${e?.message ?? e}`
-            passed = false
-            this.onLog?.(`❌ [Runner] Action failed: ${error}`)
-            break
-          }
+        // Pre-condition gate (deterministic).
+        if (step.preCondition) {
           localChecks++
-          let post: { ok: boolean; reason: string }
-          try {
-            post = await this.check(tabId, postCond)
-          } catch (e: any) {
-            post = { ok: false, reason: `post-check failed: ${e?.message ?? e}` }
+          const pre = await this.check(tabId, step.preCondition)
+          if (!pre.ok) {
+            // Precondition unmet — treat like a failed step per policy.
+            error = `precondition failed: ${pre.reason}`
+            this.onLog?.(`⚠️ [Runner] Pre-condition check failed: ${pre.reason}`)
+          } else {
+            this.onLog?.(`✅ [Runner] Pre-condition check passed.`)
           }
-          if (post.ok) {
-            passed = true
-            error = undefined
-            status = attempt === 0 ? 'passed' : 'retried-pass'
-            this.onLog?.(`✅ [Runner] Post-condition check passed.`)
+        }
+
+        // Normalise postCondition: if the LLM omitted it, treat as 'always' so we
+        // never crash with "Cannot read properties of undefined (reading 'ok')".
+        const postCond = step.postCondition ?? { kind: 'always' as const }
+
+        // Attempt + verify, with deterministic retries. If the pre-condition
+        // already failed above, `error` is set and we skip straight to escalation.
+        let passed = !error
+        if (!error) {
+          for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            if (attempt > 0) {
+              this.onLog?.(`🔄 [Runner] Retrying step (attempt ${attempt}/${maxRetries})...`)
+            }
+            try {
+              await this.execute(tabId, step.action)
+              await this.settleForPostCondition(tabId, step.action, postCond)
+            } catch (e: any) {
+              error = `action threw: ${e?.message ?? e}`
+              passed = false
+              this.onLog?.(`❌ [Runner] Action failed: ${error}`)
+              break
+            }
+            localChecks++
+            let post: { ok: boolean; reason: string }
+            try {
+              post = await this.check(tabId, postCond)
+            } catch (e: any) {
+              post = { ok: false, reason: `post-check failed: ${e?.message ?? e}` }
+            }
+            if (post.ok) {
+              passed = true
+              error = undefined
+              status = attempt === 0 ? 'passed' : 'retried-pass'
+              this.onLog?.(`✅ [Runner] Post-condition check passed.`)
+              break
+            }
+            passed = false
+            error = `postcondition not met: ${post.reason}`
+            this.onLog?.(`⚠️ [Runner] Post-condition check failed: ${post.reason}`)
+          }
+        }
+
+        // Escalate on failure per policy.
+        if (!passed) {
+          const policy = step.onFail ?? 'replan'
+          this.onLog?.(`🚨 [Runner] Step failed verification. Policy is "${policy}".`)
+          if (policy === 'abort' || !replan) {
+            status = 'aborted'
+            success = false
+            checks += localChecks
+            results.push(this.result(step, status, localChecks, usedLlm, error, sStart))
+            this.onLog?.(`🛑 [Runner] Aborting run.`)
             break
           }
-          passed = false
-          error = `postcondition not met: ${post.reason}`
-          this.onLog?.(`⚠️ [Runner] Post-condition check failed: ${post.reason}`)
+          if (policy === 'retry') {
+            // Already exhausted deterministic retries above → fall through to replan.
+          }
+          // Replan: the one expensive path. Re-perceive live state, ask the model.
+          if (totalReplans >= MAX_TOTAL_REPLANS) {
+            this.onLog?.(`🛑 [Runner] Max replans (${MAX_TOTAL_REPLANS}) reached — aborting.`)
+            status = 'aborted'
+            success = false
+            checks += localChecks
+            results.push(this.result(step, status, localChecks, usedLlm, error, sStart, evidence))
+            break
+          }
+          this.onLog?.(`🧠 [Runner] Querying LLM for a RE-PLAN...`)
+          const capture = await this.deps.capture(tabId)
+          const fresh = await replan(capture, step, queue)
+          llmCalls++
+          usedLlm = true
+          totalReplans++
+          status = 'replanned'
+          // Validate replan steps — drop any that are structurally malformed
+          // (e.g. LLM returned a step with no action, or a click with no target).
+          const validFresh = normalizePlanSteps(fresh, { requireAtLeastOne: false })
+          if (validFresh.length === 0) {
+            this.onLog?.('⚠️ [Runner] Re-plan did not yield any usable step(s). Aborting run.')
+            status = 'aborted'
+            success = false
+            checks += localChecks
+            results.push(this.result(step, status, localChecks, usedLlm, 're-plan produced no usable steps', sStart, evidence))
+            break
+          }
+          if (validFresh.length !== fresh.length) {
+            this.onLog?.(`⚠️ [Runner] Dropped ${fresh.length - validFresh.length} malformed step(s) from replan.`)
+          }
+          // Splice the fresh tail in front of whatever remained.
+          queue.unshift(...validFresh)
+          error = undefined
+          this.onLog?.(`📝 [Runner] RE-PLAN completed. Spliced in ${validFresh.length} new step(s).`)
+        } else {
+          evidence = await this.captureEvidence(tabId, step, postCond, evidenceUrls)
         }
+
+        checks += localChecks
+        results.push(this.result(step, status, localChecks, usedLlm, error, sStart, evidence))
       }
 
-      // Escalate on failure per policy.
-      if (!passed) {
-        const policy = step.onFail ?? 'replan'
-        this.onLog?.(`🚨 [Runner] Step failed verification. Policy is "${policy}".`)
-        if (policy === 'abort' || !replan) {
-          status = 'aborted'
-          success = false
-          checks += localChecks
-          results.push(this.result(step, status, localChecks, usedLlm, error, sStart))
-          this.onLog?.(`🛑 [Runner] Aborting run.`)
-          break
-        }
-        if (policy === 'retry') {
-          // Already exhausted deterministic retries above → fall through to replan.
-        }
-        // Replan: the one expensive path. Re-perceive live state, ask the model.
-        if (totalReplans >= MAX_TOTAL_REPLANS) {
-          this.onLog?.(`🛑 [Runner] Max replans (${MAX_TOTAL_REPLANS}) reached — aborting.`)
-          status = 'aborted'
-          success = false
-          checks += localChecks
-          results.push(this.result(step, status, localChecks, usedLlm, error, sStart, evidence))
-          break
-        }
-        this.onLog?.(`🧠 [Runner] Querying LLM for a RE-PLAN...`)
-        const capture = await this.deps.capture(tabId)
-        const fresh = await replan(capture, step, queue)
-        llmCalls++
-        usedLlm = true
-        totalReplans++
-        status = 'replanned'
-        // Validate replan steps — drop any that are structurally malformed
-        // (e.g. LLM returned a step with no action, or a click with no target).
-        const validFresh = normalizePlanSteps(fresh, { requireAtLeastOne: false })
-        if (validFresh.length === 0) {
-          this.onLog?.('⚠️ [Runner] Re-plan did not yield any usable step(s). Aborting run.')
-          status = 'aborted'
-          success = false
-          checks += localChecks
-          results.push(this.result(step, status, localChecks, usedLlm, 're-plan produced no usable steps', sStart, evidence))
-          break
-        }
-        if (validFresh.length !== fresh.length) {
-          this.onLog?.(`⚠️ [Runner] Dropped ${fresh.length - validFresh.length} malformed step(s) from replan.`)
-        }
-        // Splice the fresh tail in front of whatever remained.
-        queue.unshift(...validFresh)
-        error = undefined
-        this.onLog?.(`📝 [Runner] RE-PLAN completed. Spliced in ${validFresh.length} new step(s).`)
-      } else {
-        evidence = await this.captureEvidence(tabId, step, postCond, evidenceUrls)
+      return {
+        task: plan.task,
+        site: plan.site,
+        startedAt,
+        tookMs: Date.now() - startedAt,
+        llmCalls,
+        deterministicChecks: checks,
+        success,
+        steps: results,
+        finalPlan: { ...plan, steps: results.map((r) => r.step) }
       }
-
-      checks += localChecks
-      results.push(this.result(step, status, localChecks, usedLlm, error, sStart, evidence))
-    }
-
-    return {
-      task: plan.task,
-      site: plan.site,
-      startedAt,
-      tookMs: Date.now() - startedAt,
-      llmCalls,
-      deterministicChecks: checks,
-      success,
-      steps: results,
-      finalPlan: { ...plan, steps: results.map((r) => r.step) }
+    } finally {
+      this.activeTabId = null
+      this.inFlight = 0
     }
   }
 

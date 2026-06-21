@@ -10,6 +10,7 @@ import {
   type ModelCallEvent,
   type Provider,
   type TabInfo,
+  type TabsUpdatedState,
   type ViewBounds
 } from '../../shared/types'
 
@@ -25,8 +26,8 @@ const api: GladdisApi = {
     reorder: (id, toIndex) => ipcRenderer.invoke(IPC.TAB_REORDER, id, toIndex),
     list: () => ipcRenderer.invoke(IPC.TAB_LIST),
     capture: (id) => ipcRenderer.invoke(IPC.TAB_CAPTURE, id),
-    onUpdated: (cb: (tabs: TabInfo[]) => void) => {
-      const listener = (_e: unknown, tabs: TabInfo[]) => cb(tabs)
+    onUpdated: (cb: (state: TabsUpdatedState) => void) => {
+      const listener = (_e: unknown, state: TabsUpdatedState) => cb(state)
       ipcRenderer.on(IPC.TABS_UPDATED, listener)
       return () => ipcRenderer.removeListener(IPC.TABS_UPDATED, listener)
     }

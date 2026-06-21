@@ -1,4 +1,4 @@
-import { app, BaseWindow, WebContentsView, session } from 'electron'
+import { app, BaseWindow, shell, WebContentsView, session } from 'electron'
 import { rm } from 'fs/promises'
 import { join } from 'path'
 import { CDPSession } from './cdp/CDPSession'
@@ -16,6 +16,8 @@ interface Tab {
 export const BROWSER_PARTITION = 'persist:gladdis'
 const DEFAULT_URL = 'https://duckduckgo.com'
 const SEARCH_URL = 'https://duckduckgo.com/?q='
+const HTTP_URL = /^https?:\/\//i
+const ABOUT_BLANK = 'about:blank'
 
 /**
  * Owns every browser tab as a native WebContentsView layered over the UI view.
@@ -79,8 +81,40 @@ export class TabManager {
     wc.on('did-stop-loading', emit)
     wc.on('did-navigate', emit)
     wc.on('did-navigate-in-page', emit)
-    // Open target=_blank etc. as new tabs instead of popups.
-    wc.setWindowOpenHandler(({ url: target }) => {
+    wc.on('will-navigate', (_event, url) => {
+      if (isNavigableUrl(url)) return
+      _event.preventDefault()
+      if (url === ABOUT_BLANK) return
+      void shell.openExternal(url)
+    })
+    wc.setWindowOpenHandler(({ url: target, disposition }) => {
+      if (!isNavigableUrl(target)) {
+        void shell.openExternal(target)
+        return { action: 'deny' }
+      }
+      // A real popup (window.open with window features, e.g. an OAuth/login flow)
+      // must keep its opener so the provider's window.close() after auth actually
+      // closes it. Denying + making our own tab severed that link, orphaning the
+      // popup as a permanent blank tab. So ALLOW it as a native child window that
+      // shares our browser partition (same Google session) — Chrome does the same.
+      if (disposition === 'new-window' || disposition === 'other') {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: {
+            width: 520,
+            height: 640,
+            backgroundColor: BROWSER_VIEW_BACKGROUND,
+            webPreferences: {
+              partition: BROWSER_PARTITION,
+              contextIsolation: true,
+              nodeIntegration: false,
+              sandbox: true
+            }
+          }
+        }
+      }
+      // A foreground/background tab (target=_blank link, modifier-click) is a real
+      // new tab, not a self-closing popup — open it in the strip as before.
       this.create(target)
       return { action: 'deny' }
     })
@@ -89,18 +123,20 @@ export class TabManager {
     this.order.push(id)
     this.win.contentView.addChildView(view)
     this.switch(id)
-    void (async () => {
-      try {
-        await cdp.attach()
-      } catch (err) {
-        console.error(`[tab ${id}] cdp attach failed during creation:`, err)
-      }
-      wc.loadURL(url).catch((err) => {
-        console.warn(`[tab ${id}] load failed:`, (err as Error)?.message ?? err)
-      }).finally(() => {
-        this.onChange()
-      })
-    })()
+    // Fire the load immediately — do NOT gate it on cdp.attach(). Awaiting attach
+    // first (a slow/contended CDP round-trip) could leave the first document
+    // uncommitted, so the view stayed blank and wc.getURL() empty; the URL bar then
+    // submitted that empty value and every navigation bounced to the bare homepage.
+    // The init scripts persist via Page.addScriptToEvaluateOnNewDocument, so they
+    // still cover every document the tab loads after this first one.
+    void wc.loadURL(url).catch((err) => {
+      console.warn(`[tab ${id}] load failed:`, (err as Error)?.message ?? err)
+    }).finally(() => {
+      this.onChange()
+    })
+    void cdp.attach().catch((err) => {
+      console.error(`[tab ${id}] cdp attach failed during creation:`, err)
+    })
     return this.info(tab)
   }
 
@@ -300,6 +336,10 @@ export class TabManager {
       .map((t) => this.info(t))
   }
 
+  snapshot(): { tabs: TabInfo[]; activeTabId: string | null } {
+    return { tabs: this.list(), activeTabId: this.activeTabId }
+  }
+
   private info(tab: Tab): TabInfo {
     const wc = tab.view.webContents
     return {
@@ -355,4 +395,8 @@ function isLikelyHostname(value: string): boolean {
   if (/^localhost:\d+$/i.test(value)) return true
   if (/^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/.*)?$/.test(value)) return true
   return /^[^\s/]+\.[^\s/]+(?:\/.*)?$/.test(value)
+}
+
+function isNavigableUrl(url: string): boolean {
+  return url === ABOUT_BLANK || HTTP_URL.test(url)
 }

@@ -163,7 +163,7 @@ export function ChatPanel({
     return saved
   }
 
-  const flushPersist = (postSave = true): Conversation | null => {
+  const flushPersist = async (postSave = true): Promise<Conversation | null> => {
     if (!restored.current) return null
     if (saveTimer.current) {
       clearTimeout(saveTimer.current)
@@ -171,22 +171,32 @@ export function ChatPanel({
     }
     const conv = buildConversation()
     if (conv.messages.length === 0) return null
-    const saved = window.gladdis.chats.saveSync(conv)
-    lastSavedSignature.current = conversationSignature(
-      saved.id,
-      saved.createdAt,
-      saved.messages as Message[]
+    return persistConversation(conv, postSave)
+  }
+
+  const flushPersistSync = (postSave = true): void => {
+    if (!restored.current) return
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current)
+      saveTimer.current = null
+    }
+    const conv = buildConversation()
+    if (conv.messages.length === 0) return
+    const signature = conversationSignature(
+      conv.id,
+      conv.createdAt,
+      conv.messages as Message[]
     )
+    if (lastSavedSignature.current === signature) return
+    const saved = window.gladdis.chats.saveSync(conv)
+    lastSavedSignature.current = signature
     if (postSave) postPersist(saved.id, saved.messages as Message[])
-    return saved
   }
 
   useEffect(() => {
-    const off = window.gladdis.tabs.onUpdated((next) => {
+    const off = window.gladdis.tabs.onUpdated(({ tabs: next, activeTabId }) => {
       setTabs(next)
-      setActiveId((cur) =>
-        cur && next.some((t) => t.id === cur) ? cur : next.at(-1)?.id ?? null
-      )
+      setActiveId(activeTabId)
     })
     void window.gladdis.tabs.list().then((t) => {
       setTabs(t)
@@ -265,7 +275,7 @@ export function ChatPanel({
 
   useEffect(() => {
     const onBeforeUnload = () => {
-      flushPersist(false)
+      flushPersistSync(false)
     }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
@@ -277,8 +287,7 @@ export function ChatPanel({
     ttsRef,
     scrollRef,
     setMessages,
-    setStreaming,
-    messages
+    setStreaming
   })
 
   const persistModel = (id: string) => {
@@ -300,7 +309,7 @@ export function ChatPanel({
     })
   }
 
-  const onSubmit = async ({ text }: ComposerSubmit) => {
+  const onSubmit = ({ text }: ComposerSubmit) => {
     if (streaming) return
 
     const model = models.find((m) => m.id === modelId) ?? MODELS.find((m) => m.id === modelId)
@@ -345,7 +354,6 @@ export function ChatPanel({
       ? `[Active page: ${activeTab.title || ''} — ${activeTab.url}]\n\n${text}`
       : text
     const history: ChatMessage[] = [...prior, { role: 'user', content }]
-    if (restored.current) window.gladdis.chats.saveSync(buildConversation(convId, nextMessages))
 
     const requestId = newRequestId()
     const assistantMessageId = newMessageId()
@@ -355,11 +363,9 @@ export function ChatPanel({
     setStreaming(true)
     setMessages((m) => [...m, userMsg, { id: assistantMessageId, role: 'assistant', text: '' }])
     if (restored.current) {
-      try {
-        await persistConversation(buildConversation(convId, nextMessages), false)
-      } catch (err) {
+      void persistConversation(buildConversation(convId, nextMessages), false).catch((err) => {
         console.warn('[chat] pre-send conversation save failed:', (err as Error)?.message ?? err)
-      }
+      })
     }
     if (activeReq.current !== requestId) return
     window.gladdis.chat.send({
@@ -391,7 +397,7 @@ export function ChatPanel({
       activeAssistantMessageId.current = null
     }
     tts.stop()
-    const saved = flushPersist()
+    void flushPersist()
     setStreaming(false)
     setMessages([])
     continuesFromId.current = null
@@ -412,7 +418,7 @@ export function ChatPanel({
       activeAssistantMessageId.current = null
     }
     tts.stop()
-    flushPersist()
+    void flushPersist()
     setStreaming(false)
     const conv = await window.gladdis.chats.get(id)
     if (conv) {
@@ -437,7 +443,7 @@ export function ChatPanel({
       activeAssistantMessageId.current = null
     }
     tts.stop()
-    flushPersist()
+    void flushPersist()
     setStreaming(false)
     setMessages([])
     continuesFromId.current = id

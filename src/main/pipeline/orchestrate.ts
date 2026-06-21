@@ -27,7 +27,8 @@ const MAX_REPLAN_OUTPUT_TOKENS = 1_200
  *
  * The Runner's networkIdle is deterministic only if it's fed CDP events. If the
  * host has an onCdpEvent fan-out (TabManager does), forward Network.* methods to
- * `runner.onCdpEvent(method)`; otherwise networkIdle degrades to a bounded wait.
+ * `runner.onCdpEvent(tabId, method)`; otherwise networkIdle degrades to a bounded
+ * wait.
  */
 
 export interface OrchestrateOpts {

@@ -41,6 +41,32 @@ app aborts at launch with a `chrome-sandbox ... mode 4755` error. Two options:
   ```
 - **Quick/dev workaround:** launch with `--no-sandbox` (weakens isolation).
 
+### Trust local/self-signed HTTPS pages
+
+If the embedded browser shows a "not trusted" certificate warning for your local
+dev site, you can allow local HTTPS cert exceptions for testing only:
+
+```bash
+export GLADDIS_TRUST_LOCAL_CERTS=1
+export GLADDIS_TRUSTED_LOCAL_CERT_HOSTS=localhost,127.0.0.1,::1
+# optional: add internal hosts, comma-separated
+```
+
+This only applies to HTTPS and only to the listed hosts; everything else still
+needs a valid certificate chain. For production-like testing, prefer installing
+the certificate into your OS trust store and running with the trust override off.
+
+### OAuth/login pages in embedded webviews
+
+If you see the exact Google-style warning:
+
+> This browser or app may not be secure. Try using a different browser.
+
+that is often provider policy for embedded browsers, not a browser trust error.
+Google and some other identity providers intentionally block OAuth from
+embedded webviews. In that case the reliable fix is to use an external browser
+for sign-in and return to Gladdis after authentication.
+
 ## Architecture
 
 ```

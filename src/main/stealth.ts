@@ -116,8 +116,11 @@ export const STEALTH_INIT_SCRIPT = `
       });
     };
 
-    // 1. navigator.webdriver — the canonical automation tell.
-    defineGetter(Navigator.prototype, 'webdriver', () => false);
+    // 1. navigator.webdriver — the canonical automation tell. We do NOT spoof it
+    // here: --disable-blink-features=AutomationControlled (set in main) makes the
+    // native value a real boolean false, exactly what current Chrome reports. A JS
+    // override is both unnecessary and risky — returning undefined (or even a
+    // patched getter) is itself a tell, so we let the native false stand.
 
     // 2. window.chrome — give a plausible surface even if a bare one exists.
     if (!window.chrome) {

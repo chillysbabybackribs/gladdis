@@ -34,12 +34,28 @@ let workspace: WorkspaceStore
 let tools: BrowserTools
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
+const trustLocalCertificates = process.env.GLADDIS_TRUST_LOCAL_CERTS === '1'
+const extraTrustedHosts = new Set(
+  (process.env.GLADDIS_TRUSTED_LOCAL_CERT_HOSTS ?? '')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean)
+)
+const trustedLocalCertHosts = new Set([
+  'localhost',
+  '127.0.0.1',
+  '::1',
+  ...extraTrustedHosts
+])
 
 /**
  * Remote debugging port — exposes the whole CDP surface of gladdis's Chromium
  * over a localhost WebSocket so external tools (Puppeteer/Playwright,
- * chrome://inspect, a CLI) can attach. Defaults to 9222; override or disable
- * with GLADDIS_REMOTE_DEBUG ("0"/"off"/"none" turns it off).
+ * chrome://inspect, a CLI) can attach. OFF by default: a live remote-debugging
+ * endpoint is an externally-attachable automation surface that bot walls (e.g.
+ * Google's "this browser may not be secure" login check) flag, and gladdis drives
+ * its own tabs through webContents.debugger anyway, so it isn't needed for normal
+ * use. Opt in by setting GLADDIS_REMOTE_DEBUG to a port (e.g. "9222").
  *
  * Must be configured BEFORE app.whenReady(), hence at module top level.
  *
@@ -49,7 +65,7 @@ const isDev = !!process.env.ELECTRON_RENDERER_URL
  * port (Puppeteer's newPage / Target.createTarget); gladdis never attaches to
  * tabs it didn't create, so those stay conflict-free.
  */
-const remoteDebug = process.env.GLADDIS_REMOTE_DEBUG ?? '9222'
+const remoteDebug = process.env.GLADDIS_REMOTE_DEBUG ?? 'off'
 if (!['0', 'off', 'none', 'false'].includes(remoteDebug.toLowerCase())) {
   app.commandLine.appendSwitch('remote-debugging-port', remoteDebug)
   // Bind the DevTools endpoint to loopback only — never expose it on the LAN.
@@ -57,6 +73,34 @@ if (!['0', 'off', 'none', 'false'].includes(remoteDebug.toLowerCase())) {
   // Chromium 111+ refuses WS upgrades unless the Origin is explicitly allowed.
   app.commandLine.appendSwitch('remote-allow-origins', 'http://127.0.0.1:' + remoteDebug)
   console.log(`[gladdis] remote debugging on http://127.0.0.1:${remoteDebug}`)
+}
+
+// Avoid exposing the obvious Selenium/WebDriver fingerprint on login pages that
+// block on embedded-automation surfaces.
+app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
+
+if (trustLocalCertificates) {
+  // Let localhost / local network admin cert flows through for dev and internal
+  // staging URLs while we avoid a full browser-wide trust override.
+  app.commandLine.appendSwitch('allow-insecure-localhost')
+  app.on('certificate-error', (event, _webContents, url, _error, _cert, callback) => {
+    if (isTrustedLocalCertificateHost(url)) {
+      event.preventDefault()
+      callback(true)
+      return
+    }
+    callback(false)
+  })
+}
+
+function isTrustedLocalCertificateHost(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'https:') return false
+    return trustedLocalCertHosts.has(parsed.hostname.toLowerCase())
+  } catch {
+    return false
+  }
 }
 
 function createWindow(): void {
@@ -99,16 +143,16 @@ function createWindow(): void {
 
   const pushTabs = () => {
     if (uiView.webContents.isDestroyed()) return
-    uiView.webContents.send(IPC.TABS_UPDATED, tabs.list())
+    uiView.webContents.send(IPC.TABS_UPDATED, tabs.snapshot())
   }
 
   tabs = new TabManager(
     win,
     pushTabs,
     (e) => {
-      // Forward to every browser-driving pipeline Runner (supports concurrent
-      // turns from two chat panels), then push to the renderer.
-      broadcastCdpEvent(e.method)
+      // Forward CDP events to active pipeline Runner(s) for the tab that changed.
+      // Supports concurrent turns from two chat panels with bounded overhead.
+      broadcastCdpEvent(e)
       if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.CDP_EVENT, e)
     }
   )

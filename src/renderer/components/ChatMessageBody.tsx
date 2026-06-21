@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ContractTrace } from '../../../shared/types'
 import { renderMarkdown } from '../lib/markdown'
 import type { Message, ToolActivity } from './chatTypes'
@@ -38,25 +38,72 @@ const TOOL_LABEL: Record<string, string> = {
   recall_history: 'Recalling history'
 }
 
-function argHint(tool: string, args: unknown): string {
-  const a = (args ?? {}) as Record<string, any>
-  if (tool === 'navigate') return a.url ?? ''
-  if (tool === 'screenshot_confirmation') return a.url ?? ''
-  if (tool === 'click_xy') return `(${a.x}, ${a.y})`
-  if (tool === 'cdp_command') return a.method ?? ''
-  if (tool === 'execute_in_browser') return String(a.code ?? '').slice(0, 48)
-  if (tool === 'type_text') return `"${String(a.text ?? '').slice(0, 32)}"`
-  if (tool === 'press_key') return a.key ?? ''
-  if (tool === 'read_page') return a.focus ?? ''
-  if (tool === 'search' || tool === 'background_web_search') return a.query ?? ''
-  if (tool === 'fetch_page') return a.url ?? ''
-  if (tool === 'browse_task') return a.task ?? ''
-  if (tool === 'read_file' || tool === 'write_file' || tool === 'edit_file' || tool === 'list_dir')
-    return a.path ?? ''
-  if (tool === 'search_files') return a.query ?? ''
-  if (tool === 'run_validation') return a.check ?? ''
-  if (tool === 'recall_history') return 'Recalling history'
-  return ''
+/** Verb pair for a tool: [present-continuous (running), past (settled)]. */
+const TOOL_VERB: Record<string, [string, string]> = {
+  execute_in_browser: ['Running script', 'Ran script'],
+  search: ['Searching the web for', 'Searched the web for'],
+  background_web_search: ['Searching the web for', 'Searched the web for'],
+  fetch_page: ['Opening', 'Opened'],
+  browse_task: ['Running task', 'Ran task'],
+  read_page: ['Reading the page', 'Read the page'],
+  navigate: ['Navigating to', 'Navigated to'],
+  screenshot_confirmation: ['Confirming', 'Confirmed'],
+  click_xy: ['Clicking', 'Clicked'],
+  type_text: ['Typing', 'Typed'],
+  press_key: ['Pressing', 'Pressed'],
+  cdp_command: ['Running', 'Ran'],
+  read_file: ['Reading', 'Read'],
+  write_file: ['Writing', 'Wrote'],
+  edit_file: ['Editing', 'Edited'],
+  list_dir: ['Listing', 'Listed'],
+  search_files: ['Searching files for', 'Searched files for'],
+  run_validation: ['Validating', 'Validated'],
+  recall_history: ['Recalling earlier history', 'Recalled earlier history']
+}
+
+/** Trailing-path basename, so "/a/b/ChatPanel.tsx" reads as "ChatPanel.tsx". */
+function baseName(path: string): string {
+  const trimmed = path.replace(/\/+$/, '')
+  const tail = trimmed.split('/').filter(Boolean).pop() ?? trimmed
+  return tail || path
+}
+
+/**
+ * One clean natural-language line for a tool call, e.g. "Read ChatPanel.tsx" or
+ * "Searching the web for performance tuning". Tense follows status: running
+ * reads present-continuous, settled reads past; an error appends "— failed".
+ */
+function toolSentence(tool: ToolActivity): string {
+  const name = baseToolName(tool.tool)
+  const a = (tool.args ?? {}) as Record<string, any>
+  const [running, past] = TOOL_VERB[name] ?? [TOOL_LABEL[name] ?? name, TOOL_LABEL[name] ?? name]
+  // Past tense only on success; a failed/in-flight call reads present-continuous
+  // ("Validating typecheck — failed", not "Validated … — failed").
+  const verb = tool.status === 'ok' ? past : running
+
+  let object = ''
+  if (name === 'read_file' || name === 'write_file' || name === 'edit_file' || name === 'list_dir') {
+    object = a.path ? baseName(String(a.path)) : ''
+  } else if (name === 'search' || name === 'background_web_search' || name === 'search_files') {
+    object = a.query ? `“${String(a.query).slice(0, 60)}”` : ''
+  } else if (name === 'fetch_page' || name === 'navigate' || name === 'screenshot_confirmation') {
+    object = a.url ? normalizeDisplayUrl(String(a.url)).replace(/^https?:\/\//, '') : ''
+  } else if (name === 'click_xy') {
+    object = `at (${a.x}, ${a.y})`
+  } else if (name === 'type_text') {
+    object = a.text ? `“${String(a.text).slice(0, 40)}”` : ''
+  } else if (name === 'press_key') {
+    object = a.key ?? ''
+  } else if (name === 'cdp_command') {
+    object = a.method ?? ''
+  } else if (name === 'run_validation') {
+    object = a.check ?? ''
+  } else if (name === 'browse_task') {
+    object = a.task ? String(a.task).slice(0, 60) : ''
+  }
+
+  const sentence = object ? `${verb} ${object}` : verb
+  return tool.status === 'error' ? `${sentence} — failed` : sentence
 }
 
 export const ChatMessageBody = memo(function ChatMessageBody({ message }: { message: Message }) {
@@ -431,93 +478,94 @@ function baseToolName(tool: string): string {
 }
 
 function ToolRun({ tools }: { tools: ToolActivity[] }) {
-  const [expanded, setExpanded] = useState(tools.length <= 2 || tools.some((t) => t.status !== 'ok'))
-  const single = tools.length === 1
-  const toggle = (
-    <button
-      type="button"
-      className="tool-run-toggle"
-      onClick={() => setExpanded((s) => !s)}
-      aria-expanded={expanded}
-      title={expanded ? 'Collapse tool details' : 'Expand tool details'}
-    >
-      {expanded ? 'Hide' : single ? 'Show' : `Show ${tools.length - 1} more`}
-    </button>
-  )
-  const visible = expanded ? tools : tools.slice(0, 1)
+  // Two faces of a run, picked by one derived fact — is anything still running:
+  //  • running → a fixed-height, auto-scrolling ticker of natural-language lines
+  //    (no user toggle; you can't collapse a live feed).
+  //  • settled → one collapsed summary line, click to expand the full lines.
+  // The split is derived from `tools` each render, not a stored flag, so it
+  // can't go stale or fight the user.
+  //
+  // The <section> is owned HERE, not by the two faces, so it mounts once when
+  // the run first appears and stays mounted across the running→settled swap.
+  // If each face rendered its own <section>, the swap would remount it and
+  // replay the `tool-run-in` fade — a visible flash on every transition.
+  const running = tools.some((t) => t.status === 'running')
   return (
-    <section className={`tool-run ${expanded ? 'expanded' : 'collapsed'}`}>
-      <div className="tool-run-track">
-        {visible.map((tool, idx) => (
-          <ToolStep
-            key={tool.callId}
-            tool={tool}
-            last={idx === visible.length - 1}
-            collapsed={single && !expanded}
-            toggle={idx === 0 ? toggle : null}
-          />
-        ))}
-      </div>
+    <section className="tool-run">
+      {running ? <ToolTicker tools={tools} /> : <ToolSummary tools={tools} />}
     </section>
   )
 }
 
-function ToolStep({
-  tool,
-  last,
-  collapsed = false,
-  toggle = null
-}: {
-  tool: ToolActivity
-  last: boolean
-  collapsed?: boolean
-  toggle?: ReactNode
-}) {
-  const [showAll, setShowAll] = useState(false)
-  // Codex surfaces browser tools namespaced as "gladdis.<name>"; label them the same.
-  const baseTool = tool.tool.startsWith('gladdis.') ? tool.tool.slice('gladdis.'.length) : tool.tool
-  const label = TOOL_LABEL[baseTool] ?? tool.tool
-  const hint = argHint(baseTool, tool.args)
-  const duration = formatToolDuration(tool)
-  const expandable = (hint.length + (tool.preview?.length ?? 0)) > 120
+/** Live feed: fixed ~3-line card that auto-scrolls to the newest call. */
+function ToolTicker({ tools }: { tools: ToolActivity[] }) {
+  const trackRef = useRef<HTMLDivElement>(null)
+  // Pin to the bottom whenever the line count grows, so the newest call shows.
+  useEffect(() => {
+    const el = trackRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [tools.length])
   return (
-    <div className={`tool-run-step ${tool.status}`}>
-      <div className="tool-run-rail">
-        <span className={`tool-run-step-dot ${tool.status}`} />
-        {!last && <span className="tool-run-step-line" />}
-      </div>
-      <div className="tool-run-body">
-        <div className="tool-run-topline">
-          <span className="tool-run-step-label">{label}</span>
-          <span className={`tool-run-step-status ${tool.status}`}>{tool.status}</span>
-          {duration && <span className="tool-run-duration">{duration}</span>}
-          {toggle}
+    <div className="tool-run-ticker" ref={trackRef}>
+      {tools.map((tool) => (
+        <div key={tool.callId} className={`tool-run-line ${tool.status}`}>
+          {tool.status === 'running' && <span className="tool-run-line-dot" />}
+          <span className="tool-run-line-text">{toolSentence(tool)}</span>
         </div>
-        {!collapsed && (
-          <>
-            {(hint || tool.preview) && (
-              <div className={`tool-run-meta ${expandable ? (showAll ? 'expanded' : 'clamped') : ''}`}>
-                {hint && <code className="tool-run-hint">{hint}</code>}
-                {hint && tool.preview && <span className="tool-run-sep" />}
-                {tool.preview && <span className="tool-run-preview">{tool.preview}</span>}
-              </div>
-            )}
-            {expandable && (
-              <button type="button" className="tool-run-more" onClick={() => setShowAll((s) => !s)}>
-                {showAll ? 'Show less' : 'Show all'}
-              </button>
-            )}
-          </>
-        )}
-      </div>
+      ))}
     </div>
   )
 }
 
-function formatToolDuration(tool: ToolActivity): string | null {
-  if (typeof tool.durationMs === 'number') return formatMs(tool.durationMs)
-  if (tool.status === 'running' && typeof tool.startedAt === 'number') return 'running'
-  return null
+/** Settled face: one summary line; click to expand the natural-language lines. */
+function ToolSummary({ tools }: { tools: ToolActivity[] }) {
+  const [expanded, setExpanded] = useState(false)
+  let totalMs = 0
+  let failed = 0
+  for (const tool of tools) {
+    const ms = resolvedDurationMs(tool)
+    if (ms != null) totalMs += ms
+    if (tool.status === 'error') failed += 1
+  }
+  const durationLabel = totalMs > 0 ? formatMs(totalMs) : null
+  return (
+    <div className={expanded ? 'tool-run-expanded' : 'tool-run-collapsed'}>
+      <button
+        type="button"
+        className={`tool-run-summary ${failed ? 'has-error' : ''}`}
+        onClick={() => setExpanded((s) => !s)}
+        aria-expanded={expanded}
+        title={expanded ? 'Collapse tool details' : 'Expand tool details'}
+      >
+        <span className={`tool-run-summary-dot ${failed ? 'error' : 'ok'}`} />
+        <span className="tool-run-summary-count">
+          {tools.length} {tools.length === 1 ? 'tool' : 'tools'}
+        </span>
+        {failed > 0 && (
+          <>
+            <span className="tool-run-summary-sep" />
+            <span className="tool-run-summary-failed">{failed} failed</span>
+          </>
+        )}
+        {durationLabel && (
+          <>
+            <span className="tool-run-summary-sep" />
+            <span className="tool-run-summary-duration">{durationLabel}</span>
+          </>
+        )}
+        <span className="tool-run-summary-caret">{expanded ? '▾' : '▸'}</span>
+      </button>
+      {expanded && (
+        <div className="tool-run-track">
+          {tools.map((tool) => (
+            <div key={tool.callId} className={`tool-run-line ${tool.status}`}>
+              <span className="tool-run-line-text">{toolSentence(tool)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function resolvedDurationMs(tool: ToolActivity): number | null {

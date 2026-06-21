@@ -1,5 +1,4 @@
 import type { ToolDef } from './browserTools'
-import { listSkills } from '../skills'
 
 /**
  * A compact, hand-written brief on what gladdis is, so the model understands
@@ -25,8 +24,13 @@ const ABOUT_GLADDIS =
 
 /** How to behave + the operating constraints that are not obvious from a schema. */
 const AGENT_GUIDANCE_BASE =
-  'Work agentically: plan, act with tools, observe each result, and continue until the goal is done. ' +
-  'Be concise in what you tell the user — do the work with tools rather than describing it.'
+  'When the user asks you to do something, do it with tools rather than describing it, and keep ' +
+  'going until that task is done. (Advisory or open-ended questions just want a good answer — use ' +
+  'your own judgment about when tools help.) ' +
+  'You start with a lean tool set. When you need to act but lack the tool — read or edit the ' +
+  'project, install a package, run a command, drive the browser — call request_tools with the right ' +
+  'group ("filesystem", "browser", or "research"), then continue, rather than stopping to say what ' +
+  'you would have done.'
 
 const BROWSER_GUIDANCE =
   '## Browser tools\n' +
@@ -49,14 +53,18 @@ const BROWSER_GUIDANCE =
   '  • screenshot / screenshot_app → PNG of the tab or the whole app; use when a visual is ' +
   'genuinely needed (verify a render, inspect layout).\n\n' +
 
-  '**CRITICAL RULE**: Always call read_page FIRST to see the current URL and state before any action. Only navigate if the page is wrong. Drive first, then read in a separate step — do not act and read in one thought. ' +
+  'Call read_page before acting on a page, so you act on the real current state. Drive first, then ' +
+  'read in a separate step — do not act and read in one thought. When you already know (or can infer) ' +
+  'the URL, navigate or fetch_page directly; reach for search when the URL is unknown or the user ' +
+  'asked for search results. ' +
   'Aim to finish the user’s actual task, not just the literal words: if intent is unclear, ' +
   'offer a sharp clarifying question or concrete options rather than guessing.'
 
 const FILESYSTEM_GUIDANCE =
   '## Filesystem\n' +
   'Locate before you read: for unknown code, use search_files with a targeted query/glob, then ' +
-  'read_file only for the suggested line range around relevant hits. Read whole files only when ' +
+  'read_file only for the suggested line range around relevant hits. If a search returns nothing, ' +
+  'retry with close spellings or variations before concluding it is absent. Read whole files only when ' +
   'they are small, config-like, or the user truly needs the complete content. Read files before ' +
   'editing. Use edit_file for surgical changes, write_file for new files. Filesystem writes apply ' +
   'immediately — be deliberate.\n\n' +
@@ -86,21 +94,6 @@ const MEMORY_GUIDANCE =
   'Trimmed tool results (shown as "[trimmed]") are re-readable via recall_history(tool_call_id). ' +
   'Do not claim you cannot remember something without first calling recall_history.'
 
-const TOOL_FIRST_GUIDANCE =
-  'Be concise and tool-first — execute rather than narrate.'
-
-const BROWSER_OPTIMIZATION_RULES =
-  '## Persistent Agent Rules (Grok 4.3 optimization)\n' +
-  'Prefer direct navigation to known URLs over SERP results. Only use search when the URL is unknown or when the user explicitly asks for search results.\n' +
-  'When a URL is known or can be inferred, use navigate or fetch_page immediately instead of searching first.'
-
-const FILESYSTEM_OPTIMIZATION_RULES =
-  '## Persistent Agent Rules (Grok 4.3 optimization)\n' +
-  'For unknown code: always call search_files first before any read_file.\n' +
-  'When any search_files call returns zero results, automatically retry with common close spellings or slight variations of the query before concluding nothing was found.\n' +
-  'Use edit_file for changes, write_file only for new files. Relative paths resolve from /home/dp/Desktop/myworkspace/Gladdis.\n' +
-  'After edit_file or write_file changes code, call run_validation with the relevant check before you say the work is done. When validation passes, call publish_changes so the repository is committed and pushed automatically.'
-
 const BROWSER_TOOL_NAMES = new Set([
   'search',
   'fetch_page',
@@ -126,21 +119,7 @@ function agentGuidanceForTools(tools: ToolDef[]): string {
   if (hasBrowser) sections.push(BROWSER_GUIDANCE)
   if (hasFilesystem) sections.push(FILESYSTEM_GUIDANCE)
   if (names.has('recall_history')) sections.push(MEMORY_GUIDANCE)
-  if (hasBrowser) sections.push(BROWSER_OPTIMIZATION_RULES)
-  if (hasFilesystem) sections.push(FILESYSTEM_OPTIMIZATION_RULES)
-  if (hasBrowser || hasFilesystem) sections.push(TOOL_FIRST_GUIDANCE)
   return sections.join('\n\n')
-}
-
-/** The skills section, built at call time because it reads the skills/ folder. */
-async function skillsBlock(): Promise<string> {
-  const names = await listSkills()
-  if (names.length === 0) return ''
-  return (
-    '\n\n## Available Skills\n' +
-    names.map(n => `- ${n}`).join('\n') +
-    '\nThe model decides automatically which skill(s) (if any) to activate for the current task.'
-  )
 }
 
 /**
@@ -152,7 +131,7 @@ export async function buildAgentSystem(tools: ToolDef[]): Promise<string> {
     const gist = t.description.split('. ')[0].replace(/\.$/, '')
     return `- ${t.name}: ${gist}.`
   }).join('\n')
-  return `${ABOUT_GLADDIS}\n\nYour tools:\n${toolLines}\n\n${agentGuidanceForTools(tools)}${await skillsBlock()}`
+  return `${ABOUT_GLADDIS}\n\nYour tools:\n${toolLines}\n\n${agentGuidanceForTools(tools)}`
 }
 
 /**
@@ -163,9 +142,7 @@ export const ASK_SYSTEM =
   `${ABOUT_GLADDIS}\n\nThis turn is plain conversation: no execution surface is active. ` +
   'When a page is attached to the message, gladdis can route the turn through browser-capable ' +
   'execution; when code work is requested, gladdis can route through local filesystem execution. ' +
-  'Answer accurately about those capabilities without asking the user to choose an execution mode.\n\n' +
-  'Core rules still apply: for unknown code always use search_files first; always call read_page ' +
-  'before acting on a browser page; prefer direct navigation when a URL is known.'
+  'Answer accurately about those capabilities without asking the user to choose an execution mode.'
 
 /**
  * Codex turns run through the local app-server for repo/file/shell work. Clear
@@ -179,7 +156,7 @@ export const CODEX_SYSTEM =
   'task needs yourself — language packages, repos, or system packages via `sudo apt-get install -y` ' +
   '— instead of reporting a tool as missing.\n\n' +
   'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
-  'use gladdis.recall_history if it is exposed, summarize the relevant saved chat context, and stop for ' +
+  'use gladdis.recall_history, summarize the relevant saved chat context, and stop for ' +
   'the next concrete instruction. Do not edit files, run validations, navigate pages, or continue old work ' +
   'from a bare resume request.\n\n' +
   'For anything in a browser — viewing, web search, reading a page, screenshots, UI validation — ' +
@@ -199,5 +176,5 @@ export const CODEX_SYSTEM =
   'launching the local dev server, open the rendered page with `gladdis.screenshot` and/or ' +
   '`gladdis.read_page` and confirm it is not blank and the intended UI is visible before answering. ' +
   'Do not stop at build/curl-only validation for UI work.\n\n' +
-  'Do not assume recall_history is available unless Codex itself exposes it.\n\n' +
-  'Persistent rules: for unknown code always call search_files first; always read_page before any browser action; prefer direct navigation to known URLs. After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+  'gladdis.recall_history is your only conversation-memory channel; never rely on Codex-native memory of past sessions.\n\n' +
+  'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'

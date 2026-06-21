@@ -90,7 +90,7 @@ export class CodexClient {
     }
   ) {}
 
-  /** Report install + auth status for the ModelPicker / KeysModal. */
+  /** Report install + auth status for the ModelPicker / settings keys tab. */
   async status(): Promise<CodexStatus> {
     const probe = await probeCodexBinary()
     if (!probe.installed) {

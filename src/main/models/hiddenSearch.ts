@@ -15,14 +15,6 @@ export interface HiddenSearchPage {
   reason?: string
 }
 
-export interface HiddenPageInspection {
-  ok: boolean
-  url: string
-  title: string
-  text: string
-  reason?: string
-}
-
 let hiddenWindow: BrowserWindow | null = null
 let hiddenWindowQueue: Promise<void> = Promise.resolve()
 let hiddenWindowIdleTimer: ReturnType<typeof setTimeout> | null = null
@@ -58,30 +50,6 @@ export async function runHiddenSearch(query: string, limit = 8, timeoutMs = 8_00
         url: wc.isDestroyed() ? '' : wc.getURL(),
         title: wc.isDestroyed() ? '' : wc.getTitle(),
         results: [],
-        reason: err instanceof Error ? err.message : String(err)
-      }
-    }
-  })
-}
-
-export async function inspectHiddenPage(url: string, timeoutMs = 10_000): Promise<HiddenPageInspection> {
-  if (!/^https?:\/\//i.test(url)) return { ok: false, url, title: '', text: '', reason: 'unsupported URL' }
-  return withHiddenWindow(async (wc) => {
-    try {
-      await loadWithTimeout(wc.loadURL(url), timeoutMs, `page load timed out after ${timeoutMs}ms`)
-      await waitForIdle(wc, timeoutMs)
-      const landed = wc.getURL()
-      const title = wc.getTitle()
-      const challenge = detectChallenge(landed, title)
-      if (challenge) return { ok: false, url: landed, title, text: '', reason: challenge }
-      const text = await loadWithTimeout(wc.executeJavaScript(pageTextExpression(), true), 2_000, 'page text parse timed out')
-      return { ok: true, url: landed, title, text: typeof text === 'string' ? text : '' }
-    } catch (err) {
-      return {
-        ok: false,
-        url: wc.isDestroyed() ? url : wc.getURL(),
-        title: wc.isDestroyed() ? '' : wc.getTitle(),
-        text: '',
         reason: err instanceof Error ? err.message : String(err)
       }
     }
@@ -138,15 +106,6 @@ function scheduleHiddenWindowClose(): void {
   }, 60_000)
 }
 
-function destroyHiddenWindow(): void {
-  if (hiddenWindowIdleTimer) {
-    clearTimeout(hiddenWindowIdleTimer)
-    hiddenWindowIdleTimer = null
-  }
-  if (hiddenWindow && !hiddenWindow.isDestroyed()) hiddenWindow.destroy()
-  hiddenWindow = null
-}
-
 function ddgResultsExpression(limit: number): string {
   return `
     (() => {
@@ -173,18 +132,6 @@ function ddgResultsExpression(limit: number): string {
         if (out.length >= ${Math.max(1, Math.min(12, Math.floor(limit)))}) break;
       }
       return out;
-    })()
-  `
-}
-
-function pageTextExpression(): string {
-  return `
-    (() => {
-      const clone = document.body ? document.body.cloneNode(true) : null;
-      if (!clone) return "";
-      for (const el of clone.querySelectorAll("script,style,noscript,svg,iframe,canvas")) el.remove();
-      const text = (clone.innerText || clone.textContent || "").replace(/\\s+/g, " ").trim();
-      return text.slice(0, 12000);
     })()
   `
 }

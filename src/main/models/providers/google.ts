@@ -92,6 +92,7 @@ async function getOrCreateGeminiCache(args: {
 }
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
+import { resolveTurnTools } from '../agentTools'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number }
 type ActiveAuditCall = {
@@ -262,11 +263,14 @@ export async function runGoogleToolLoop(args: {
   const systemInstruction = args.workspaceBlock
     ? `${args.agentSystem}\n\n${args.workspaceBlock}`
     : args.agentSystem
-  const functionDeclarations = args.toolDefs.map((t) => ({
-    name: t.name,
-    description: t.description,
-    parameters: toGeminiSchema(t.parameters)
-  }))
+  // Rebuilt each step because request_tools can grow the granted set mid-turn.
+  const buildDecls = () =>
+    resolveTurnTools(args.toolDefs, args.ctx.grantedTools).map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: toGeminiSchema(t.parameters)
+    }))
+  let functionDeclarations = buildDecls()
 
   const contents = toGoogleContents(args.req)
   const responseObjs: GoogleToolResponseRecord[] = []
@@ -282,6 +286,10 @@ export async function runGoogleToolLoop(args: {
   })
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    functionDeclarations = buildDecls() // pick up tools granted via request_tools last step
+    // The prebuilt cache only covers the starting tools; once the model has pulled
+    // in extra groups, send the full tool list inline instead of relying on it.
+    const useCache = cachedContentName && !(args.ctx.grantedTools && args.ctx.grantedTools.size > 0)
     const call = args.audit.begin({
       requestId: args.req.requestId,
       conversationId: args.req.conversationId,
@@ -297,7 +305,7 @@ export async function runGoogleToolLoop(args: {
         abortSignal: args.signal
       }
 
-      if (cachedContentName) {
+      if (useCache) {
         config.cachedContent = cachedContentName
       } else {
         config.systemInstruction = systemInstruction

@@ -1,6 +1,7 @@
 import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
+import { resolveTurnTools } from '../agentTools'
 import {
   createToolValidationState,
   needsValidationBeforeFinal,
@@ -120,9 +121,12 @@ function grokBody(args: {
 
 function grokReasoningEffort(modelId: string, stage: string): GrokReasoningEffort | undefined {
   if (!/^grok-4\.3(?:$|-|_)/.test(modelId) && modelId !== 'grok-4.3-latest' && modelId !== 'grok-latest') return undefined
-  if (stage === 'chat:plain') return 'low'
-  if (stage.startsWith('chat:browser') || stage === 'complete') return 'medium'
-  if (/\b(plan|planner|debug|review|refactor|code|coding|tool)\b/i.test(stage)) return 'medium'
+  // Hardest reasoning in the system — planning and re-planning a multi-step task.
+  // Let Grok use its native high tier here instead of pinning it to medium.
+  if (/\b(plan|planner|replan|debug|review|refactor|code|coding)\b/i.test(stage)) return 'high'
+  // Agentic execution and final synthesis: real work, but not the deep planning step.
+  if (stage.startsWith('chat:browser') || stage === 'complete' || stage === 'pipeline:final') return 'medium'
+  // Lightweight turns: plain chat, titles, anything else.
   return 'low'
 }
 
@@ -364,10 +368,13 @@ export async function runGrokToolLoop(args: {
 }): Promise<void> {
   // OpenAI tools take a JSON Schema directly, which is exactly what ToolDef.parameters
   // already is — no per-field type mapping needed (unlike the Gemini adapter).
-  const tools = args.toolDefs.map((t) => ({
-    type: 'function' as const,
-    function: { name: t.name, description: t.description, parameters: t.parameters }
-  }))
+  // Rebuilt each step because request_tools can grow the granted set mid-turn.
+  const buildTools = () =>
+    resolveTurnTools(args.toolDefs, args.ctx.grantedTools).map((t) => ({
+      type: 'function' as const,
+      function: { name: t.name, description: t.description, parameters: t.parameters }
+    }))
+  let tools = buildTools()
 
   const systemText = args.workspaceBlock
     ? `${args.agentSystem}\n\n${args.workspaceBlock}`
@@ -378,6 +385,7 @@ export async function runGrokToolLoop(args: {
   const validation = createToolValidationState()
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    tools = buildTools() // pick up any tools granted via request_tools last step
     const call = args.audit.begin({
       requestId: args.req.requestId,
       conversationId: args.req.conversationId,

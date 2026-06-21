@@ -503,6 +503,65 @@ const RESEARCH_TOOLS: ToolDef[] = [
   ...MEMORY_TOOLS
 ]
 
+// ─── On-demand tool escalation ────────────────────────────────────────────────
+// The lean starting profile is a GUESS. When it guesses wrong, the model would
+// otherwise narrate "I need to read the project" and stop, having no filesystem
+// tool. request_tools removes that failure: it is in every profile, and calling
+// it pulls in a whole group for the rest of the turn. The model asks instead of
+// giving up — and we still only pay for the heavy tool defs once they're needed.
+
+/** Tool groups the model can pull in mid-turn via request_tools. */
+const TOOL_GROUPS: Record<string, ToolDef[]> = {
+  filesystem: FS_TOOLS,
+  browser: [...PERCEIVE_TOOLS, ...CAPTURE_TOOLS, ...DRIVE_TOOLS],
+  research: [...SEARCH_TOOLS, ...TASK_TOOLS]
+}
+
+const REQUEST_TOOLS_DEF: ToolDef = {
+  name: 'request_tools',
+  description:
+    'Pull in a group of tools you need but were not given yet, then continue the task. ' +
+    'Call this the moment you realize you need to act — never say you will do something you lack the tool for; ask for the tool instead. ' +
+    'Groups: "filesystem" (read/search/edit files, run shell commands, install packages), ' +
+    '"browser" (read/navigate/click/screenshot the visible page), ' +
+    '"research" (web search and page fetch). After the tools are granted, use them in your next step.',
+  parameters: {
+    type: 'object',
+    properties: {
+      group: {
+        type: 'string',
+        enum: ['filesystem', 'browser', 'research'],
+        description: 'Which tool group to add for the rest of this turn.'
+      }
+    },
+    required: ['group']
+  }
+}
+
+/** Tool names contained in a requestable group (empty for an unknown group). */
+export function toolGroupNames(group: string): string[] {
+  return (TOOL_GROUPS[group] ?? []).map((t) => t.name)
+}
+
+/** Every profile carries request_tools so the model can always escalate. */
+function withEscalation(tools: ToolDef[]): ToolDef[] {
+  return tools.some((t) => t.name === REQUEST_TOOLS_DEF.name) ? tools : [...tools, REQUEST_TOOLS_DEF]
+}
+
+/**
+ * The tool list for a turn: the starting profile plus any groups the model has
+ * pulled in via request_tools this turn. Deduped by name, order preserved.
+ */
+export function resolveTurnTools(profileTools: ToolDef[], granted?: Set<string>): ToolDef[] {
+  const base = withEscalation(profileTools)
+  if (!granted || granted.size === 0) return base
+  const have = new Set(base.map((t) => t.name))
+  const extra = Object.values(TOOL_GROUPS)
+    .flat()
+    .filter((t) => granted.has(t.name) && !have.has(t.name))
+  return extra.length ? [...base, ...extra] : base
+}
+
 export function selectAgentToolProfile(userText: string): AgentToolProfile {
   const text = userText.toLowerCase()
   const wantsFilesystem = shouldUseWorkspaceContext(text)
@@ -510,16 +569,16 @@ export function selectAgentToolProfile(userText: string): AgentToolProfile {
   const wantsResearch = shouldUseWebResearchTools(text)
 
   if (wantsFilesystem && !wantsBrowser && !wantsResearch) {
-    return { name: 'filesystem', tools: FILESYSTEM_TOOLS }
+    return { name: 'filesystem', tools: withEscalation(FILESYSTEM_TOOLS) }
   }
   if (wantsBrowser && !wantsFilesystem) {
-    return { name: 'browser', tools: BROWSER_TOOLS }
+    return { name: 'browser', tools: withEscalation(BROWSER_TOOLS) }
   }
   if (wantsResearch && !wantsFilesystem) {
-    return { name: 'research', tools: RESEARCH_TOOLS }
+    return { name: 'research', tools: withEscalation(RESEARCH_TOOLS) }
   }
   if (wantsFilesystem || wantsBrowser || wantsResearch) {
-    return { name: 'full', tools: AGENT_TOOLS }
+    return { name: 'full', tools: withEscalation(AGENT_TOOLS) }
   }
-  return { name: 'conversation', tools: CONVERSATION_TOOLS }
+  return { name: 'conversation', tools: withEscalation(CONVERSATION_TOOLS) }
 }

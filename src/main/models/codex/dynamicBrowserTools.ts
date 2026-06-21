@@ -47,6 +47,18 @@ export const CODEX_DISABLED_NATIVE_CONFIG = {
     browser_use: false,
     browser_use_external: false,
     computer_use: false
+  },
+  // Gladdis owns conversation memory (recall_history over its own ChatStore).
+  // Codex's native cross-session memory reads/writes the shared ~/.codex store,
+  // so a fresh in-app "let's continue" could otherwise surface the user's
+  // terminal Codex sessions. Disable Codex's own memory + history persistence so
+  // the only memory channel is gladdis's. (Auth stays in ~/.codex, untouched.)
+  memories: {
+    use_memories: false,
+    generate_memories: false
+  },
+  history: {
+    persistence: 'none'
   }
 }
 

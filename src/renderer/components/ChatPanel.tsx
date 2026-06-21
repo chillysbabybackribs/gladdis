@@ -24,15 +24,8 @@ import { useTts, useTtsSettings } from '../hooks/useTts'
 import { ChatMessageBody } from './ChatMessageBody'
 import { useStreamConsumer } from '../hooks/useStreamConsumer'
 import { previousTurnAttachedActivePage } from '../lib/chatTurnContext'
-import type { Message, Part } from './chatTypes'
-
-function appendText(parts: Part[], text: string): Part[] {
-  const out = parts.slice()
-  const last = out[out.length - 1]
-  if (last?.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + text }
-  else out.push({ kind: 'text', text })
-  return out
-}
+import type { Message } from './chatTypes'
+import { appendText } from './chatTypes'
 
 let reqCounter = 0
 const newRequestId = () => `req-${Date.now()}-${reqCounter++}`

@@ -325,7 +325,15 @@ export class ChatService {
       if (!req.tabId && policy.browserIntent) req.tabId = this.tools.tabs.activeTabId
       this.emitContractTrace(req, policy, model.provider)
       const { actionableText, profile: initialProfile } = policy
-      const agentic = req.mode === 'agent' && initialProfile.name !== 'conversation'
+      // Run the agentic loop (which carries request_tools) for any real task. The
+      // conversation profile normally skips the loop to keep pure chat cheap — but
+      // when a workspace folder is selected the user is working on a project, so a
+      // "conversation"-classified turn like "what should we install" must be able to
+      // escalate into tools instead of dead-ending. Pure chat with no folder open
+      // stays plain.
+      const hasSelectedFolder = !!this.tools.getWorkspaceRoot()
+      const agentic =
+        req.mode === 'agent' && (initialProfile.name !== 'conversation' || hasSelectedFolder)
       // The model decides whether to search/drive the browser by choosing tools;
       // there is no keyword pre-router. /pipeline stays as an explicit power-user
       // entry to the deterministic multi-step engine.
@@ -664,9 +672,18 @@ export class ChatService {
    * Relative paths use the selected folder; absolute paths can still reach elsewhere.
    */
   private workspaceSystemBlock(profile?: ReturnType<typeof selectAgentToolProfile>): string | null {
-    if (profile && profile.name !== 'filesystem' && profile.name !== 'full') return null
     const folder = this.tools.getWorkspaceRoot()
     if (!folder) return null
+    // Lean profiles don't carry filesystem tools yet, but a folder IS selected —
+    // tell the model so it escalates (request_tools "filesystem") to act on the
+    // project instead of answering generically about it.
+    if (profile && profile.name !== 'filesystem' && profile.name !== 'full') {
+      return (
+        `A project folder is selected: ${folder}\n` +
+        `If the request is about THIS project (inspect, edit, install, run, optimize), ` +
+        `call request_tools("filesystem") and work in it — do not answer generically.`
+      )
+    }
     return (
       `Working folder: ${folder}\n` +
       `Relative paths in read_file/write_file/edit_file/list_dir/search_files resolve ` +

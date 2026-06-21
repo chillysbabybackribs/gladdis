@@ -85,9 +85,14 @@ function reasoningEffortForModel(entry?: CodexModelEntry): ReasoningEffort | nul
   if (configured) {
     return supported.length === 0 || supported.includes(configured) ? configured : supported[0]
   }
-  // No override: aim for DEFAULT (medium) rather than the lowest advertised
-  // effort, so Codex isn't silently capped at its weakest reasoning tier.
-  return pickClosestEffort(supported, DEFAULT_CODEX_REASONING_EFFORT)
+  // No override: honor the model's own advertised default reasoning effort, so we
+  // match Codex's native per-model recommendation instead of pinning every model
+  // to a hardcoded tier. Fall back to medium only when the model advertises none.
+  const target =
+    (entry?.defaultReasoningEffort && REASONING_EFFORTS.includes(entry.defaultReasoningEffort)
+      ? entry.defaultReasoningEffort
+      : DEFAULT_CODEX_REASONING_EFFORT)
+  return pickClosestEffort(supported, target)
 }
 
 /**

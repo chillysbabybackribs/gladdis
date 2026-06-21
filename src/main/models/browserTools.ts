@@ -4,7 +4,7 @@ import type { ChatStore } from './ChatStore'
 import type { Conversation, ConversationMeta } from '../../../shared/types'
 import { FileTools } from '../fs/FileTools'
 import { digestPage } from './PageDigest'
-import { AGENT_TOOLS } from './agentTools'
+import { AGENT_TOOLS, toolGroupNames } from './agentTools'
 import type { LlmComplete } from '../pipeline/Planner'
 import { orchestrate } from '../pipeline/orchestrate'
 import { generatePipelineFinalResponse } from '../pipeline/finalResponse'
@@ -78,6 +78,13 @@ export interface ToolContext {
   conversationId?: string | null
   fullResults?: Map<string, string>
   llm?: LlmComplete
+  /**
+   * Tools the model has pulled in this turn via request_tools, on top of the
+   * lean starting profile. The provider loop rebuilds its tool list from
+   * profile ∪ grantedTools after each step, so a model that needs filesystem
+   * or browser tools asks for them and continues — it never narrates "I can't".
+   */
+  grantedTools?: Set<string>
 }
 
 export class BrowserTools {
@@ -237,12 +244,21 @@ export class BrowserTools {
 
         /* ----------------- Local filesystem ----------------- */
         case 'read_file': {
-          const r = await this.files.read(
-            String(args.path ?? ''),
-            optNum(args.start_line),
-            optNum(args.end_line),
-            args.full === true
-          )
+          const path = String(args.path ?? '')
+          let r
+          try {
+            r = await this.files.read(path, optNum(args.start_line), optNum(args.end_line), args.full === true)
+          } catch (err) {
+            const msg = (err as Error)?.message ?? String(err)
+            if (/ENOENT|no such file/i.test(msg)) {
+              const near = await this.files.nearbyMatches(path)
+              const hint = near.length
+                ? ` Did you mean one of: ${near.join(', ')}? Read one of those, or call list_dir on the folder.`
+                : ' Call list_dir on the parent folder to see what exists.'
+              return { ok: false, text: `read_file: "${path}" does not exist.${hint}` }
+            }
+            throw err
+          }
           const window =
             r.defaultWindow
               ? `showing lines ${r.startLine}-${r.endLine} of ${r.totalLines}; default window`
@@ -319,6 +335,9 @@ export class BrowserTools {
         case 'publish_changes':
           return this.publishChanges(args)
 
+        case 'request_tools':
+          return this.requestTools(args, ctx)
+
         case 'recall_history':
           return this.recallHistory(args, ctx)
 
@@ -327,6 +346,20 @@ export class BrowserTools {
       }
     } catch (err) {
       return { ok: false, text: `Tool ${name} failed: ${(err as Error)?.message ?? String(err)}` }
+    }
+  }
+
+  private async requestTools(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    const group = String(args.group ?? '').trim()
+    const names = toolGroupNames(group)
+    if (names.length === 0) {
+      return { ok: false, text: `request_tools: unknown group "${group}". Use filesystem, browser, or research.` }
+    }
+    const granted = (ctx.grantedTools ??= new Set<string>())
+    for (const name of names) granted.add(name)
+    return {
+      ok: true,
+      text: `Granted ${group} tools for this turn: ${names.join(', ')}. Call them now to continue.`
     }
   }
 

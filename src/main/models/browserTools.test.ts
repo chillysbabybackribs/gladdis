@@ -72,6 +72,35 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('from selected folder')
   })
 
+  it('turns a missing-file read into an actionable near-match hint', async () => {
+    // The exact trace case: model guesses vite.config.ts; the real file is
+    // electron.vite.config.ts. The error must point at the near match so the
+    // model fixes it in one step instead of needing a separate list_dir.
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-read-miss-'))
+    await writeFile(join(dir, 'electron.vite.config.ts'), 'export default {}')
+    await writeFile(join(dir, 'package.json'), '{}')
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    const result = await tools.run('read_file', { path: 'vite.config.ts' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('does not exist')
+    expect(result.text).toContain('electron.vite.config.ts')
+    // The raw Node ENOENT text is replaced by guidance.
+    expect(result.text).not.toContain('ENOENT')
+  })
+
+  it('falls back to a list_dir suggestion when nothing is similar', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-read-miss2-'))
+    await writeFile(join(dir, 'totally-unrelated.md'), 'x')
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    const result = await tools.run('read_file', { path: 'zzz.ts' }, { tabId: 'tab-1' })
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('list_dir')
+  })
+
   it('returns search_files hits with context and a suggested narrow read range', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gladdis-search-files-'))
     const file = join(dir, 'source.ts')

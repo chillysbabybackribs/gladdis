@@ -342,7 +342,7 @@ function normalizeMs(rawMs: unknown): number | null {
   return ms
 }
 
-function isPositionalSelector(selector: string): boolean {
+export function isPositionalSelector(selector: string): boolean {
   return POSITIONAL_SELECTOR_RE.test(selector) || selector.startsWith('/') || selector.startsWith('//')
 }
 

@@ -10,7 +10,7 @@ import type {
   Target,
   Trajectory
 } from './types'
-import { normalizePlanSteps } from './Planner'
+import { normalizePlanSteps, isPositionalSelector } from './Planner'
 
 /** Re-plan callback: given the live capture + the failed step, produce a fresh
  *  tail of steps to splice in. This is the ONLY place the LLM enters the loop. */
@@ -20,7 +20,6 @@ export type ReplanFn = (
   remaining: PlanStep[]
 ) => Promise<PlanStep[]>
 
-const KEY_MAP_HINT = "use BrowserTools key names, e.g. 'Enter', 'Tab'"
 const MAX_TOTAL_REPLANS = 1
 const EVIDENCE_TEXT_CHARS = 1_200
 const EVIDENCE_HEADINGS = 12
@@ -578,18 +577,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-const POSITIONAL_SELECTOR_RE =
-  /(:nth-(?:child|of-type)|:first-(?:child|of-type)|:last-(?:child|of-type)|\[[0-9]+\]|>[^>]*>[^>]*>)/i
-
-function isPositionalSelector(selector: string): boolean {
-  return POSITIONAL_SELECTOR_RE.test(selector) || selector.startsWith('/') || selector.startsWith('//')
-}
-
 function stableSelector(selector: string): string | null {
   const trimmed = selector.trim()
   if (!trimmed) return null
   if (isPositionalSelector(trimmed)) return null
   return trimmed
 }
-
-void KEY_MAP_HINT

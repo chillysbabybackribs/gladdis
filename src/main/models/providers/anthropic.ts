@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
+import { resolveTurnTools } from '../agentTools'
 import {
   createToolValidationState,
   needsValidationBeforeFinal,
@@ -211,18 +212,26 @@ export async function runAnthropicToolLoop(args: {
     system.push({ type: 'text', text: args.workspaceBlock, cache_control: { type: 'ephemeral' } })
   }
 
-  const anthropicTools = args.toolDefs.map((t, i) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.parameters as Anthropic.Tool.InputSchema,
-    ...(i === args.toolDefs.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {})
-  }))
+  // Rebuilt each step because request_tools can grow the granted set mid-turn.
+  // The cache_control marker sits on the last tool, so the prompt cache naturally
+  // invalidates exactly when (and only when) the tool list actually changes.
+  const buildTools = () => {
+    const defs = resolveTurnTools(args.toolDefs, args.ctx.grantedTools)
+    return defs.map((t, i) => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.parameters as Anthropic.Tool.InputSchema,
+      ...(i === defs.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {})
+    }))
+  }
+  let anthropicTools = buildTools()
 
   const messages = toAnthropicMessages(args.req)
   const resultBlocks: Anthropic.ToolResultBlockParam[] = []
   const validation = createToolValidationState()
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    anthropicTools = buildTools() // pick up tools granted via request_tools last step
     applyRollingCache(messages)
     const call = args.audit.begin({
       requestId: args.req.requestId,

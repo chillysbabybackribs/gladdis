@@ -20,6 +20,16 @@ export type Part =
   | { kind: 'tool'; tool: ToolActivity }
   | { kind: 'contract'; trace: ContractTrace }
 
+/** Append a text delta to the last text part, opening a new one if the most
+ *  recent part is a tool (so prose after a tool starts its own segment). */
+export function appendText(parts: Part[], text: string): Part[] {
+  const out = parts.slice()
+  const last = out[out.length - 1]
+  if (last?.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + text }
+  else out.push({ kind: 'text', text })
+  return out
+}
+
 export interface Message {
   /** Stable id for routing live stream events to the assistant turn they belong to. */
   id?: string

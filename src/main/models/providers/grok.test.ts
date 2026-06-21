@@ -108,7 +108,33 @@ describe('completeGrok', () => {
 
     const [, init] = fetchSpy.mock.calls[0]
     const body = JSON.parse(String(init.body))
-    expect(body.reasoning_effort).toBe('medium')
+    // grok-latest resolves to the 4.3 reasoning policy; planning is the high-effort band.
+    expect(body.reasoning_effort).toBe('high')
+  })
+
+  it('bands reasoning effort by stage: planning high, execution medium, light low', async () => {
+    const cases: Array<[string, string]> = [
+      ['pipeline:planner', 'high'],
+      ['pipeline:replan', 'high'],
+      ['planner', 'high'],
+      ['chat:browser:2', 'medium'],
+      ['complete', 'medium'],
+      ['pipeline:final', 'medium'],
+      ['chat:plain', 'low'],
+      ['title', 'low']
+    ]
+    for (const [stage, expected] of cases) {
+      const fetchSpy = vi.fn(async (_url: string, _init: RequestInit) => ({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+      }))
+      vi.stubGlobal('fetch', fetchSpy)
+      const { audit } = fakeAudit()
+      await completeGrok({ apiKey: 'x', audit, modelId: 'grok-4.3', system: '', user: 'hi', maxOutputTokens: 10, stage })
+      const [, init] = fetchSpy.mock.calls[0]
+      const body = JSON.parse(String(init.body))
+      expect(body.reasoning_effort, `stage ${stage}`).toBe(expected)
+    }
   })
 
   it('throws a descriptive error on a non-2xx response', async () => {

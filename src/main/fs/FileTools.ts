@@ -30,7 +30,6 @@ const SMALL_FILE_FULL_LINES = 220
 /** Cap on entries returned from a single list / search, to stay bounded. */
 const MAX_ENTRIES = 1000
 const MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024
-const SEARCH_CONCURRENCY = 24
 const DEFAULT_SEARCH_CONTEXT_LINES = 2
 const MAX_SEARCH_CONTEXT_LINES = 8
 const SEARCH_LANE_MULTIPLIER = 3
@@ -255,6 +254,32 @@ export class FileTools {
       return null
     }
   }
+
+  /**
+   * For a path that doesn't exist, list same-directory entries whose name is a
+   * near miss (shared stem or basename substring) — so a wrong-filename guess
+   * (vite.config.ts → electron.vite.config.ts) becomes self-correcting in one
+   * step instead of needing a separate list_dir.
+   */
+  async nearbyMatches(path: string, max = 6): Promise<string[]> {
+    const abs = this.resolve(path)
+    const dir = dirname(abs)
+    const want = basename(abs).toLowerCase()
+    const wantStem = want.replace(/\.[^.]+$/, '')
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      return []
+    }
+    return names
+      .filter((name) => {
+        const n = name.toLowerCase()
+        const stem = n.replace(/\.[^.]+$/, '')
+        return n.includes(wantStem) || wantStem.includes(stem) || n.includes(want) || want.includes(n)
+      })
+      .slice(0, max)
+  }
 }
 
 /**
@@ -476,12 +501,6 @@ function countOccurrences(haystack: string, needle: string): number {
     i = haystack.indexOf(needle, i + needle.length)
   }
   return count
-}
-
-/** Translate a simple file-name glob (`*`, `?`) into an anchored RegExp. */
-function globToRegExp(glob: string): RegExp {
-  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
-  return new RegExp(`^${escaped}$`, 'i')
 }
 
 function shouldIgnoreCase(query: string): boolean {

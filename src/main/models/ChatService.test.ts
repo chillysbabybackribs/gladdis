@@ -27,7 +27,8 @@ vi.mock('./hiddenSearch', async (importOriginal) => {
 import { ChatService, extractLocalPreviewUrl, hasActivePagePreamble, isUserFacingLocalPreviewRequest, stripActivePagePreamble, stubOldGoogleResults, stubOldResults } from './ChatService'
 import { shouldAttachActivePageContext, shouldContinueActivePageContext, shouldUseBrowserTools } from '../../../shared/types'
 import { shouldUseWorkspaceContext } from '../../../shared/types'
-import { AGENT_TOOLS, selectAgentToolProfile } from './agentTools'
+import { AGENT_TOOLS, selectAgentToolProfile, resolveTurnTools } from './agentTools'
+import { BrowserTools } from './browserTools'
 import { CODEX_BROWSER_INSTRUCTIONS, CODEX_BROWSER_TOOL_NAMES } from './codex/dynamicBrowserTools'
 import { CODEX_SYSTEM, buildAgentSystem } from './prompts'
 import { resolveTurnContextPolicy } from './turnContextPolicy'
@@ -103,7 +104,35 @@ describe('ChatService provider hardening', () => {
 
     const conversationProfile = selectAgentToolProfile('tell me a joke')
     expect(conversationProfile.name).toBe('conversation')
-    expect(conversationProfile.tools.map((tool) => tool.name)).toEqual(['recall_history'])
+    // Lean profile carries recall_history plus the request_tools escape hatch, so
+    // the model can always pull in tools instead of stalling when it needs to act.
+    expect(conversationProfile.tools.map((tool) => tool.name)).toEqual(['recall_history', 'request_tools'])
+  })
+
+  it('lets a lean turn escalate into filesystem tools via request_tools', async () => {
+    // The exact dead-stop from the trace: a turn lands in the conversation profile
+    // (1 real tool), the model needs to inspect/install in the project. It must be
+    // able to pull in filesystem tools mid-turn instead of narrating and stopping.
+    const lean = selectAgentToolProfile('what performance packages should we consider installing')
+    expect(lean.tools.map((t) => t.name)).toContain('request_tools')
+    expect(lean.tools.map((t) => t.name)).not.toContain('run_command')
+
+    // Drive the REAL dispatcher: request the filesystem group.
+    const bt = new BrowserTools({} as any, {} as any, {} as any)
+    const granted = new Set<string>()
+    const res = await bt.run('request_tools', { group: 'filesystem' }, { tabId: 'tab-1', grantedTools: granted } as any)
+    expect(res.ok).toBe(true)
+    expect(granted.has('run_command')).toBe(true)
+    expect(granted.has('read_file')).toBe(true)
+
+    // After the grant, resolveTurnTools surfaces the filesystem tools for the next step.
+    const next = resolveTurnTools(lean.tools, granted).map((t) => t.name)
+    expect(next).toContain('run_command')
+    expect(next).toContain('edit_file')
+
+    // An unknown group is rejected, not silently granted.
+    const bad = await bt.run('request_tools', { group: 'nonsense' }, { tabId: 'tab-1', grantedTools: new Set() } as any)
+    expect(bad.ok).toBe(false)
   })
 
   it('describes recall_history as context recovery, not automatic continuation', () => {
@@ -201,18 +230,29 @@ describe('ChatService provider hardening', () => {
     }
   })
 
-  it('only attaches the working-folder block to filesystem-capable turns', () => {
+  it('gives filesystem turns the full path block and lean turns an escalation hint', () => {
     const { service } = makeService('/tmp/selected-project')
+    const block = (text: string) =>
+      (service as any).workspaceSystemBlock(selectAgentToolProfile(text)) as string | null
 
-    expect(
-      (service as any).workspaceSystemBlock(selectAgentToolProfile('search the web for xAI docs'))
-    ).toBe(null)
-    expect(
-      (service as any).workspaceSystemBlock(selectAgentToolProfile('tell me a joke'))
-    ).toBe(null)
-    expect(
-      (service as any).workspaceSystemBlock(selectAgentToolProfile('edit src/main/index.ts'))
-    ).toContain('/tmp/selected-project')
+    // Filesystem-capable turn: full path-resolution block.
+    const fs = block('edit src/main/index.ts')
+    expect(fs).toContain('/tmp/selected-project')
+    expect(fs).toContain('Working folder')
+
+    // Lean turn WITH a folder selected: a short hint that points at request_tools,
+    // so "what should we install" can escalate instead of answering generically.
+    const lean = block('tell me a joke')
+    expect(lean).toContain('/tmp/selected-project')
+    expect(lean).toContain('request_tools')
+  })
+
+  it('attaches no working-folder block when no folder is selected', () => {
+    const { service } = makeService(null)
+    const block = (text: string) =>
+      (service as any).workspaceSystemBlock(selectAgentToolProfile(text)) as string | null
+    expect(block('tell me a joke')).toBe(null)
+    expect(block('edit src/main/index.ts')).toBe(null)
   })
 
   it('emits a routing trace for the selected agent profile', () => {

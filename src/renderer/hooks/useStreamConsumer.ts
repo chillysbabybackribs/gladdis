@@ -1,16 +1,7 @@
 import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import type { ChatStreamEvent } from '../../../shared/types'
-import type { Message, Part, ToolActivity } from '../components/chatTypes'
-
-/** Append a text delta to the last text part, opening a new one if the most
- *  recent part is a tool (so prose after a tool starts its own segment). */
-function appendText(parts: Part[], text: string): Part[] {
-  const out = parts.slice()
-  const last = out[out.length - 1]
-  if (last?.kind === 'text') out[out.length - 1] = { kind: 'text', text: last.text + text }
-  else out.push({ kind: 'text', text })
-  return out
-}
+import type { Message, ToolActivity } from '../components/chatTypes'
+import { appendText } from '../components/chatTypes'
 
 function findAssistantIndex(messages: Message[], assistantMessageId?: string | null): number {
   if (assistantMessageId) {

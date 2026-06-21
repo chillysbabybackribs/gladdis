@@ -117,7 +117,7 @@ export const STEALTH_INIT_SCRIPT = `
     };
 
     // 1. navigator.webdriver — the canonical automation tell.
-    defineGetter(Navigator.prototype, 'webdriver', () => undefined);
+    defineGetter(Navigator.prototype, 'webdriver', () => false);
 
     // 2. window.chrome — give a plausible surface even if a bare one exists.
     if (!window.chrome) {

@@ -13,8 +13,7 @@ import type {
 import {
   MODELS,
   shouldAttachActivePageContext,
-  shouldContinueActivePageContext,
-  shouldUseBrowserTools
+  shouldContinueActivePageContext
 } from '../../../shared/types'
 import { Composer, type ComposerSubmit } from './Composer'
 import { ModelPicker } from './ModelPicker'
@@ -349,7 +348,7 @@ export function ChatPanel({
     const activePageFollowup =
       previousTurnAttachedActivePage(messagesRef.current) && shouldContinueActivePageContext(text)
     const attachActivePageContext = shouldAttachActivePageContext(text) || activePageFollowup
-    const tabId = shouldUseBrowserTools(text) || activePageFollowup ? activeId : null
+    const tabId = activeId
     const content = activeTab && attachActivePageContext
       ? `[Active page: ${activeTab.title || ''} — ${activeTab.url}]\n\n${text}`
       : text

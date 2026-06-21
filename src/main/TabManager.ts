@@ -1,9 +1,18 @@
-import { app, BaseWindow, shell, WebContentsView, session } from 'electron'
-import { rm } from 'fs/promises'
-import { join } from 'path'
+import { app, BaseWindow, shell, WebContentsView } from 'electron'
 import { CDPSession } from './cdp/CDPSession'
 import { BROWSER_VIEW_BACKGROUND } from './browserPolish'
-import { configureStealthSession, STEALTH_INIT_SCRIPT } from './stealth'
+import { STEALTH_INIT_SCRIPT } from './stealth'
+import {
+  normalizeAddress,
+  isNavigableUrl,
+  waitForNavigationSettled as waitForNavigationSettledImpl,
+  navigateTo,
+  goBack,
+  goForward,
+  reloadPage,
+} from './tabs/navigation'
+import { ensureSession as ensureSessionImpl } from './tabs/session'
+import { DEFAULT_URL, ABOUT_BLANK, BROWSER_PARTITION } from './tabs/constants'
 import type { CdpEventPayload, ExecResult, TabInfo, ViewBounds } from '../../shared/types'
 
 interface Tab {
@@ -22,11 +31,7 @@ export function isUsableTabId(id: string | null | undefined): id is string {
   return !!id && id !== 'null' && id !== 'undefined'
 }
 
-export const BROWSER_PARTITION = 'persist:gladdis'
-const DEFAULT_URL = 'https://duckduckgo.com'
-const SEARCH_URL = 'https://duckduckgo.com/?q='
-const HTTP_URL = /^https?:\/\//i
-const ABOUT_BLANK = 'about:blank'
+export { BROWSER_PARTITION } from './tabs/constants'
 
 /**
  * Owns every browser tab as a native WebContentsView layered over the UI view.
@@ -212,62 +217,31 @@ export class TabManager {
   navigate(id: string, url: string): void {
     const tab = this.tabs.get(id)
     if (!tab) return
-    const normalized = normalizeAddress(url)
-    if (tab.view.webContents.isLoading()) {
-      tab.view.webContents.stop()
-    }
-    void tab.view.webContents.loadURL(normalized).catch((err) => {
-      console.warn(`[tab ${id}] navigation failed:`, (err as Error)?.message ?? err)
-    })
+    navigateTo(tab.view.webContents, url)
   }
 
   waitForNavigationSettled(id: string, timeoutMs = 10_000): Promise<void> {
     const tab = this.tabs.get(id)
     if (!tab) return Promise.resolve()
-    const wc = tab.view.webContents
-
-    return new Promise((resolve) => {
-      let sawLoad = wc.isLoading()
-      const done = () => {
-        clearTimeout(timer)
-        clearTimeout(graceTimer)
-        wc.off('did-start-loading', onStart)
-        wc.off('did-stop-loading', done)
-        wc.off('did-finish-load', done)
-        wc.off('did-fail-load', done)
-        resolve()
-      }
-      const onStart = () => {
-        sawLoad = true
-      }
-      const maybeDone = () => {
-        if (!sawLoad && !wc.isLoading()) done()
-      }
-      const timer = setTimeout(done, timeoutMs)
-      const graceTimer = setTimeout(maybeDone, 250)
-      wc.once('did-start-loading', onStart)
-      wc.once('did-stop-loading', done)
-      wc.once('did-finish-load', done)
-      wc.once('did-fail-load', done)
-    })
+    return waitForNavigationSettledImpl(tab.view.webContents, timeoutMs)
   }
 
   back(id: string): void {
     const tab = this.tabs.get(id)
     if (!tab) return
-    tab.view.webContents.navigationHistory.goBack()
+    goBack(tab.view.webContents)
   }
 
   forward(id: string): void {
     const tab = this.tabs.get(id)
     if (!tab) return
-    tab.view.webContents.navigationHistory.goForward()
+    goForward(tab.view.webContents)
   }
 
   reload(id: string): void {
     const tab = this.tabs.get(id)
     if (!tab) return
-    tab.view.webContents.reload()
+    reloadPage(tab.view.webContents)
   }
 
   setBounds(bounds: ViewBounds): void {
@@ -383,49 +357,8 @@ export class TabManager {
   }
 
   static async ensureSession(): Promise<void> {
-    // Touch the partition early so cookies/storage persist like a real browser,
-    // and present it as current real Chrome (UA + Accept-Language + Sec-CH-UA
-    // client hints) so the bundled-Chromium version gap doesn't trip bot walls.
-    await repairVolatileBrowserStorage()
-    const browserSession = session.fromPartition(BROWSER_PARTITION)
-    configureStealthSession(browserSession)
+    await ensureSessionImpl()
   }
 }
 
-async function repairVolatileBrowserStorage(): Promise<void> {
-  const partitionDir = join(app.getPath('userData'), 'Partitions', 'gladdis')
-  const volatileDirs = [
-    'Service Worker',
-    'Code Cache',
-    'GPUCache',
-    'DawnWebGPUCache',
-    'DawnGraphiteCache'
-  ]
-  await Promise.all(volatileDirs.map(async (dir) => {
-    try {
-      await rm(join(partitionDir, dir), { recursive: true, force: true })
-    } catch (err) {
-      console.warn(`[browser session] failed to remove ${dir}:`, (err as Error)?.message ?? err)
-    }
-  }))
-}
 
-function normalizeAddress(input: string): string {
-  const value = input.trim()
-  if (!value) return DEFAULT_URL
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value
-  if (isLikelyHostname(value)) return `https://${value}`
-  return `${SEARCH_URL}${encodeURIComponent(value)}`
-}
-
-function isLikelyHostname(value: string): boolean {
-  if (/\s/.test(value)) return false
-  if (value === 'localhost') return true
-  if (/^localhost:\d+$/i.test(value)) return true
-  if (/^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/.*)?$/.test(value)) return true
-  return /^[^\s/]+\.[^\s/]+(?:\/.*)?$/.test(value)
-}
-
-function isNavigableUrl(url: string): boolean {
-  return url === ABOUT_BLANK || HTTP_URL.test(url)
-}

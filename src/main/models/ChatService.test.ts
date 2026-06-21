@@ -38,7 +38,7 @@ function makeService(workspaceRoot: string | null = null) {
   const tools = {
     getWorkspaceRoot: () => workspaceRoot,
     run: vi.fn(),
-    tabs: { activeTabId: 'tab-1', create: vi.fn(() => ({ id: 'tab-new' })), navigate: vi.fn(), capturePagePng: vi.fn(async () => Buffer.from('png').toString('base64')) }
+    tabs: { activeTabId: 'tab-1', liveTabId: vi.fn((id?: string | null) => id ?? 'tab-1'), create: vi.fn(() => ({ id: 'tab-new' })), navigate: vi.fn(), capturePagePng: vi.fn(async () => Buffer.from('png').toString('base64')) }
   } as any
   const audit = { begin: vi.fn(() => ({ addOutput: vi.fn(), finish: vi.fn() })) } as any
 

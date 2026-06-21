@@ -164,7 +164,7 @@ function createWindow(): void {
   })
   extractor = new PageExtractor(tabs)
   workspace = new WorkspaceStore()
-  tools = new BrowserTools(tabs, extractor, chats)
+  tools = new BrowserTools(tabs, extractor, chats, keys)
   // Apply the persisted working folder so fs tools resolve relative paths there.
   tools.setWorkspaceRoot(workspace.get().folder)
   // Wire the app-window capture (the root UI view lives here in main) so the

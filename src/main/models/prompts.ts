@@ -98,7 +98,8 @@ const FILESYSTEM_GUIDANCE =
   '`npm install -g <pkg>`, `pip install <pkg>`, `git clone <url>`, or — for system packages that ' +
   'need root — `sudo apt-get install -y <pkg>` (sudo is passwordless). Commands run unattended as ' +
   'the desktop user with no approval prompt, so be deliberate, and prefer the narrowest command ' +
-  'that does the job. Use run_validation (not run_command) for the fixed typecheck/test/build checks.\n\n' +
+  'that does the job. Use read_clipboard / write_clipboard to inspect or copy text via clipboard. ' +
+  'Use run_validation (not run_command) for the fixed typecheck/test/build checks.\n\n' +
   '## Validation\n' +
   'When you edit source, config, tests, or package files, run run_validation before finalizing. ' +
   'Choose the narrowest relevant check first: typecheck for TypeScript/API changes, test for behavior, build for bundling/runtime confidence, ' +
@@ -132,7 +133,18 @@ const BROWSER_TOOL_NAMES = new Set([
   'execute_in_browser',
   'cdp_command'
 ])
-const FILESYSTEM_TOOL_NAMES = new Set(['read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_validation', 'publish_changes'])
+const FILESYSTEM_TOOL_NAMES = new Set([
+  'read_file',
+  'write_file',
+  'edit_file',
+  'list_dir',
+  'search_files',
+  'run_validation',
+  'publish_changes',
+  'run_command',
+  'read_clipboard',
+  'write_clipboard'
+])
 
 function agentGuidanceForTools(tools: ToolDef[]): string {
   const names = new Set(tools.map((tool) => tool.name))
@@ -141,7 +153,10 @@ function agentGuidanceForTools(tools: ToolDef[]): string {
   const sections = [REASONING_METHOD, AGENT_GUIDANCE_BASE]
   if (hasBrowser) sections.push(BROWSER_GUIDANCE)
   if (hasFilesystem) sections.push(FILESYSTEM_GUIDANCE)
-  if (names.has('recall_history')) sections.push(MEMORY_GUIDANCE)
+  const hasMemoryTools = names.has('recall_history') ||
+    names.has('memory_write') || names.has('memory_read') ||
+    names.has('memory_list') || names.has('memory_forget') || names.has('memory_create_task')
+  if (hasMemoryTools) sections.push(MEMORY_GUIDANCE)
   return sections.join('\n\n')
 }
 

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "workspace": {
+    "updatedAt": "2026-06-21T21:05:33.106Z",
+    "notes": {
+      "projectName": {
+        "value": "Gladdis"
+      },
+      "lastTest": {
+        "value": "2026-06-21T21:05:33.104Z"
+      }
+    }
+  },
+  "tasks": {
+    "task-mqo9zycy": {
+      "label": "test-auth-flow",
+      "createdAt": "2026-06-21T21:05:33.106Z",
+      "updatedAt": "2026-06-21T21:05:33.106Z"
+    }
+  }
+}

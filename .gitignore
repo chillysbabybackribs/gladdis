@@ -24,3 +24,6 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# Codex skills (dev-only, do not commit)
+.codex/skills/

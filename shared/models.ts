@@ -21,6 +21,7 @@ export const MODELS: ModelOption[] = [
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google' },
+  { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google' },
   { id: 'grok-4.3', label: 'Grok 4.3', provider: 'grok' },
   { id: 'grok-build-0.1', label: 'Grok Build 0.1', provider: 'grok' },
   { id: 'gpt-5.5', label: 'Codex · GPT-5.5', provider: 'codex' },

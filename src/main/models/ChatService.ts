@@ -14,7 +14,6 @@ import { BrowserTools, type ToolContext } from './browserTools'
 import { selectAgentToolProfile } from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
-import { isUsableTabId } from '../TabManager'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
 import type { ModelCallLedger } from './ModelCallLedger'
 import { ASK_SYSTEM, CODEX_SYSTEM, buildAgentSystem } from './prompts'
@@ -319,8 +318,6 @@ export class ChatService {
     try {
       const policy = resolveTurnContextPolicy(req)
       stripStaleActivePageContext(req, policy)
-      if (!req.tabId && policy.browserIntent && isUsableTabId(this.tools.tabs.activeTabId))
-        req.tabId = this.tools.tabs.activeTabId
       this.emitContractTrace(req, policy, model.provider)
       const { actionableText, profile: initialProfile } = policy
       // Run the agentic loop (which carries request_tools) for any real task. The
@@ -421,10 +418,7 @@ export class ChatService {
     const url = extractLocalPreviewUrl(output)
     if (!url) return
 
-    const tabId =
-      typeof this.tools.tabs.liveTabId === 'function'
-        ? this.tools.tabs.liveTabId(req.tabId)
-        : req.tabId || this.tools.tabs.activeTabId || this.tools.tabs.create().id
+    const tabId = this.tools.tabs.liveTabId(req.tabId)
     const callId = `codex-local-preview-${Date.now()}`
     this.emit({
       requestId: req.requestId,
@@ -606,7 +600,7 @@ export class ChatService {
   /** Build the per-request tool context (conversation id + full-result cache). */
   private toolContext(req: ChatRequest, llm?: LlmComplete): ToolContext {
     return {
-      tabId: req.tabId as string,
+      tabId: this.tools.tabs.liveTabId(req.tabId),
       conversationId: req.conversationId ?? null,
       fullResults: new Map<string, string>(),
       // Carried per-request so concurrent chats can run browser turns under

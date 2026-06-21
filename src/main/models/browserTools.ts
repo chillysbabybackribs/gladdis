@@ -10,8 +10,11 @@ import { orchestrate } from '../pipeline/orchestrate'
 import type { PipelineProgressEvent } from '../pipeline/Runner'
 import { generatePipelineFinalResponse } from '../pipeline/finalResponse'
 import { runUnifiedSearch } from './unifiedSearch'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
+import { KeyStore } from './KeyStore'
+import { GoogleGenAI } from '@google/genai'
+import { CodebaseAuditor } from './CodebaseAuditor'
 
 export interface ToolDef {
   name: string
@@ -33,6 +36,73 @@ export interface ToolOutcome {
 
 const cap = (s: string, n = 24_000) => (s.length > n ? s.slice(0, n) + '\n…[truncated]' : s)
 const execFileAsync = promisify(execFile)
+// A healthy xclip read/write returns in single-digit milliseconds. If it
+// hasn't finished in a few seconds the X selection owner is wedged, so cap the
+// clipboard timeout well below the generic 10-min command ceiling.
+const CLIPBOARD_TIMEOUT_MS = 4_000
+const CLIPBOARD_SELECTIONS = new Set(['clipboard', 'primary'])
+const normalizeSelection = (selection: unknown): 'clipboard' | 'primary' => {
+  const value = String(selection ?? '').trim().toLowerCase()
+  return CLIPBOARD_SELECTIONS.has(value) ? (value as 'clipboard' | 'primary') : 'clipboard'
+}
+const parseTimeoutMs = (value: unknown): number => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return 600_000
+  return Math.min(600_000, Math.max(250, Math.floor(parsed)))
+}
+
+interface SpawnResult {
+  stdout: string
+  stderr: string
+}
+
+// Writes `input` to a command's stdin and waits for it to exit.
+//
+// stdout/stderr are intentionally set to 'ignore' rather than 'pipe'. xclip -i
+// daemonizes itself (it must stay resident to serve the X selection), and the
+// child it forks inherits any open stdio fds. If we keep stdout/stderr piped,
+// those fds never close, so the 'close' event never fires and the call hangs
+// until the timeout fires (minutes). Ignoring them lets the parent see the
+// fork exit immediately. The command produces no output we need anyway.
+const execFileWithInput = (
+  file: string,
+  args: string[],
+  input: string,
+  _maxBuffer = 10 * 1024 * 1024,
+  timeoutMs = 600_000
+): Promise<SpawnResult> => {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ['pipe', 'ignore', 'ignore'] })
+    let timer: NodeJS.Timeout | undefined
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        const err: any = new Error(`Command timed out after ${timeoutMs}ms.`)
+        err.code = 'ETIMEDOUT'
+        err.signal = 'SIGTERM'
+        child.kill('SIGTERM')
+        reject(err)
+      }, timeoutMs)
+    }
+
+    child.on('error', (err) => {
+      if (timer) clearTimeout(timer)
+      reject(err)
+    })
+    child.on('close', (code) => {
+      if (timer) clearTimeout(timer)
+      if (code === 0) {
+        resolve({ stdout: '', stderr: '' })
+        return
+      }
+      const err: any = new Error(`Command failed with exit code ${code}`)
+      err.code = code
+      reject(err)
+    })
+    child.stdin.on('error', () => { /* child gone before we finished writing; 'close'/'error' handles it */ })
+    child.stdin.write(input)
+    child.stdin.end()
+  })
+}
 
 const compactTurn = (text: string, max = 180): string => {
   const snippet = text.replace(/\s+/g, ' ').trim()
@@ -100,7 +170,8 @@ export class BrowserTools {
   constructor(
     public readonly tabs: TabManager,
     public readonly extractor: PageExtractor,
-    public readonly chats: ChatStore
+    public readonly chats: ChatStore,
+    public readonly keys?: KeyStore
   ) {}
 
   setAppCapture(fn: () => Promise<string>): void {
@@ -325,6 +396,11 @@ export class BrowserTools {
             text: cap(`${r.hits.length} hit(s)${r.truncated ? ' (truncated)' : ''}\n${body}`)
           }
         }
+        case 'read_clipboard':
+          return this.readClipboard(args)
+
+        case 'write_clipboard':
+          return this.writeClipboard(args)
 
         case 'run_validation':
           return this.runValidation(args)
@@ -335,11 +411,41 @@ export class BrowserTools {
         case 'publish_changes':
           return this.publishChanges(args)
 
+        case 'audit_codebase': {
+          const root = this.getWorkspaceRoot() || process.cwd();
+          const googleKey = this.keys?.get('google') || process.env.GEMINI_API_KEY;
+          if (!googleKey) {
+            return {
+              ok: false,
+              text: 'Error: Google Gemini API key not found in key storage.'
+            };
+          }
+          const ai = new GoogleGenAI({ apiKey: googleKey });
+          const auditor = new CodebaseAuditor(root, ai);
+          const auditReport = await auditor.runAudit(args.focusPath);
+          return {
+            ok: true,
+            text: auditReport
+          };
+        }
+
         case 'request_tools':
           return this.requestTools(args, ctx)
 
         case 'recall_history':
           return this.recallHistory(args, ctx)
+
+        // === Workspace + Per-Task Memory ===
+        case 'memory_write':
+          return (await import('./memoryStore')).memoryWrite(args)
+        case 'memory_read':
+          return (await import('./memoryStore')).memoryRead(args)
+        case 'memory_list':
+          return (await import('./memoryStore')).memoryList(args)
+        case 'memory_forget':
+          return (await import('./memoryStore')).memoryForget(args)
+        case 'memory_create_task':
+          return (await import('./memoryStore')).memoryCreateTask(args)
 
         default:
           return { ok: false, text: `Unknown tool: ${name}` }
@@ -368,19 +474,76 @@ export class BrowserTools {
     if (!command) {
       return { ok: false, text: 'run_command: "command" is required.' }
     }
+    const timeout = parseTimeoutMs(args.timeout_ms)
     const cwd = (args.cwd ? String(args.cwd).trim() : '') || this.files.getRoot() || process.cwd()
     try {
       // Full access by design: same OS reach as the user, no allowlist, no prompt.
       const { stdout, stderr } = await execFileAsync('bash', ['-lc', command], {
         cwd,
-        timeout: 600_000,
+        timeout,
         maxBuffer: 10 * 1024 * 1024
       })
       const output = [stdout, stderr].filter(Boolean).join('\n').trim()
       return { ok: true, text: cap(`$ ${command}\n${output || '(no output)'}`, 40_000) }
     } catch (err: any) {
+      const timedOut = err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT'
       const output = [err?.stdout, err?.stderr, err?.message].filter(Boolean).join('\n').trim()
-      return { ok: false, text: cap(`$ ${command}\nFAILED:\n${output || 'Command failed.'}`, 40_000) }
+      const prefix = timedOut ? `Command timed out after ${timeout}ms.` : 'Command failed.'
+      return { ok: false, text: cap(`$ ${command}\n${prefix}\n${output || 'Command failed.'}`, 40_000) }
+    }
+  }
+
+  private async readClipboard(args: Record<string, any>): Promise<ToolOutcome> {
+    const selection = normalizeSelection(args.selection)
+    const timeout = Math.min(parseTimeoutMs(args.timeout_ms || CLIPBOARD_TIMEOUT_MS), CLIPBOARD_TIMEOUT_MS)
+    try {
+      const { stdout, stderr } = await execFileAsync('xclip', ['-o', '-selection', selection], {
+        maxBuffer: 10 * 1024 * 1024,
+        timeout
+      })
+      const payload = String(stdout ?? '').trim()
+      if (!payload) {
+        return { ok: true, text: `Clipboard [${selection}] is empty.` }
+      }
+      const extra = String(stderr ?? '').trim()
+      return {
+        ok: true,
+        text: cap(`Clipboard [${selection}]:\n${payload}${extra ? `\n${extra}` : ''}`, 40_000)
+      }
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') {
+        return { ok: false, text: 'read_clipboard: xclip not found. Install with: sudo apt-get install -y xclip' }
+      }
+      const timedOut = err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT'
+      const output = [err?.stdout, err?.stderr, err?.message].filter(Boolean).join('\n').trim()
+      const prefix = timedOut ? `read_clipboard timed out after ${timeout}ms.` : 'read_clipboard failed:'
+      return { ok: false, text: `read_clipboard failed:\n${prefix}\n${output || 'Could not read clipboard.'}` }
+    }
+  }
+
+  private async writeClipboard(args: Record<string, any>): Promise<ToolOutcome> {
+    const text = String(args.text ?? '')
+    if (!text) {
+      return { ok: false, text: 'write_clipboard: "text" is required.' }
+    }
+    const selection = normalizeSelection(args.selection)
+    const argsOut = ['-selection', selection]
+    const timeout = Math.min(parseTimeoutMs(args.timeout_ms || CLIPBOARD_TIMEOUT_MS), CLIPBOARD_TIMEOUT_MS)
+    try {
+      const { stdout, stderr } = await execFileWithInput('xclip', ['-i', ...argsOut], text, 10 * 1024 * 1024, timeout)
+      const output = [stdout, stderr].filter(Boolean).join('\n').trim()
+      return {
+        ok: true,
+        text: `Wrote ${text.length} character(s) to clipboard [${selection}].${output ? `\n${output}` : ''}`
+      }
+    } catch (err: any) {
+      if (err?.code === 'ENOENT') {
+        return { ok: false, text: 'write_clipboard: xclip not found. Install with: sudo apt-get install -y xclip' }
+      }
+      const timedOut = err?.signal === 'SIGTERM' || err?.code === 'ETIMEDOUT' || err?.message?.includes('timed out')
+      const output = [err?.stdout, err?.stderr, err?.message].filter(Boolean).join('\n').trim()
+      const prefix = timedOut ? `write_clipboard timed out after ${timeout}ms.` : 'write_clipboard failed:'
+      return { ok: false, text: `write_clipboard failed:\n${prefix}\n${output || 'Could not write clipboard.'}` }
     }
   }
 

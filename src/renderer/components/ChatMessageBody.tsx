@@ -47,6 +47,8 @@ const TOOL_LABEL: Record<string, string> = {
   edit_file: 'Editing file',
   list_dir: 'Listing dir',
   search_files: 'Searching files',
+  read_clipboard: 'Reading clipboard',
+  write_clipboard: 'Writing clipboard',
   run_validation: 'Validating',
   recall_history: 'Recalling history'
 }
@@ -69,6 +71,8 @@ const TOOL_VERB: Record<string, [string, string]> = {
   edit_file: ['Editing', 'Edited'],
   list_dir: ['Listing', 'Listed'],
   search_files: ['Searching files for', 'Searched files for'],
+  read_clipboard: ['Reading clipboard', 'Read clipboard'],
+  write_clipboard: ['Writing clipboard', 'Wrote to clipboard'],
   run_validation: ['Validating', 'Validated'],
   recall_history: ['Recalling earlier history', 'Recalled earlier history']
 }
@@ -110,6 +114,11 @@ function toolSentence(tool: ToolActivity): string {
     object = a.method ?? ''
   } else if (name === 'run_validation') {
     object = a.check ?? ''
+  } else if (name === 'read_clipboard') {
+    object = `(${String(a.selection || 'clipboard')})`
+  } else if (name === 'write_clipboard') {
+    const text = String(a.text ?? '')
+    object = text.trim() ? `“${text.slice(0, 60)}”` : '(empty text)'
   } else if (name === 'browse_task') {
     object = a.task ? String(a.task).slice(0, 60) : ''
   }
@@ -612,6 +621,12 @@ function renderToolTitle(tool: ToolActivity): ReactNode {
   } else if (name === 'cdp_command') {
     if (a.method) {
       objectNode = <code className="tool-highlight-code">{String(a.method)}</code>
+    }
+  } else if (name === 'read_clipboard') {
+    objectNode = <code className="tool-highlight-code">{String(a.selection || 'clipboard')}</code>
+  } else if (name === 'write_clipboard') {
+    if (a.text) {
+      objectNode = <span className="tool-highlight-query">“{String(a.text).slice(0, 60)}”</span>
     }
   } else if (name === 'run_validation') {
     if (a.check) {

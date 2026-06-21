@@ -22,7 +22,7 @@
  *                   Use this whenever the goal requires more than 1–2 steps.
  *
  *   FS tools      → read_file / write_file / edit_file / list_dir / search_files /
- *                   run_validation / publish_changes.
+ *                   run_validation / publish_changes / run_command / clipboard tools.
  *   MEMORY tool   → recall_history.
  *
  * Token budget: the old free-form loop could inject 30–100 K tokens per turn
@@ -377,6 +377,40 @@ const FS_TOOLS: ToolDef[] = [
     }
   },
   {
+    name: 'read_clipboard',
+    description:
+      'Read the current OS clipboard text (CLIPBOARD selection by default). ' +
+      'Use this to inspect what is in the clipboard before copying code, error text, or task notes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        selection: {
+          type: 'string',
+          enum: ['clipboard', 'primary'],
+          description: 'Clipboard selection to read. Defaults to "clipboard".'
+        }
+      }
+    }
+  },
+  {
+    name: 'write_clipboard',
+    description:
+      'Write plain text to the OS clipboard. This is the preferred way to copy model outputs so you can paste them elsewhere. ' +
+      'For large text, pass it in full; output is truncated only in tool display.',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Text to place on the clipboard.' },
+        selection: {
+          type: 'string',
+          enum: ['clipboard', 'primary'],
+          description: 'Clipboard selection to write. Defaults to "clipboard".'
+        }
+      },
+      required: ['text']
+    }
+  },
+  {
     name: 'publish_changes',
     description:
       'Commit and push local repository changes after successful code edits and validation. ' +
@@ -416,12 +450,33 @@ const FS_TOOLS: ToolDef[] = [
           type: 'string',
           description: 'The full shell command line to execute, e.g. "npm install -g pnpm" or "git clone <url>".'
         },
+        timeout_ms: {
+          type: 'number',
+          description: 'Command timeout in milliseconds. Clamped to 250ms-10min. Defaults to 600000ms.'
+        },
         cwd: {
           type: 'string',
           description: 'Working directory. Defaults to the workspace root.'
         }
       },
       required: ['command']
+    }
+  },
+  {
+    name: 'audit_codebase',
+    description:
+      'Runs a high-speed, cost-effective Gemini 2.5 Flash-lite sub-agent to audit the codebase. ' +
+      'It parses the file tree, package.json, and major configs to return a rich markdown map ' +
+      'of the technology stack, module architecture, core entry points, schemas, and guidelines. ' +
+      'Call this first to understand the workspace layout.',
+    parameters: {
+      type: 'object',
+      properties: {
+        focusPath: {
+          type: 'string',
+          description: 'Optional folder or file path to focus the audit on (e.g. "src/renderer").'
+        }
+      }
     }
   }
 ]
@@ -452,8 +507,80 @@ const MEMORY_TOOLS: ToolDef[] = [
         }
       }
     }
+  },
+  // === Workspace + Per-Task Memory ===
+  {
+    name: 'memory_write',
+    description: 'Write or update entries in working memory. Use scope:"workspace" for project-level state or scope:"task" + task_id for per-task memory.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        task_id: { type: 'string', description: 'Required when scope is "task"' },
+        key: { type: 'string' },
+        value: { type: 'object' }
+      },
+      required: ['scope', 'key', 'value']
+    }
+  },
+  {
+    name: 'memory_read',
+    description: 'Read specific keys from working memory. Supports selective retrieval to keep token usage low.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        task_id: { type: 'string' },
+        keys: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['scope']
+    }
+  },
+  {
+    name: 'memory_list',
+    description: 'List available keys and summaries in workspace or task memory.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        task_id: { type: 'string' }
+      },
+      required: ['scope']
+    }
+  },
+  {
+    name: 'memory_forget',
+    description: 'Delete specific keys or an entire task scope.',
+    parameters: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        task_id: { type: 'string' },
+        keys: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['scope']
+    }
+  },
+  {
+    name: 'memory_create_task',
+    description: 'Create a new isolated task memory scope and return its task_id.',
+    parameters: {
+      type: 'object',
+      properties: {
+        label: { type: 'string', description: 'Optional human-readable label for the task' }
+      }
+    }
   }
 ]
+
+const MEMORY_TOOL_NAMES = [
+  'recall_history',
+  'memory_write',
+  'memory_read',
+  'memory_list',
+  'memory_forget',
+  'memory_create_task'
+] as const;
 
 /** The complete agent tool surface — ordered by call frequency. */
 export const AGENT_TOOLS: ToolDef[] = [

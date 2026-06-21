@@ -20,6 +20,18 @@ export type ReplanFn = (
   remaining: PlanStep[]
 ) => Promise<PlanStep[]>
 
+export type PipelineProgressStatus = 'planned' | 'running' | 'passed' | 'failed' | 'replanned' | 'aborted' | 'skipped'
+
+export interface PipelineProgressEvent {
+  /** Stable sequence number from the execution plan. */
+  step: number
+  /** Total steps if known at emit time. */
+  total?: number
+  title: string
+  status: PipelineProgressStatus
+  detail?: string
+}
+
 const MAX_TOTAL_REPLANS = 1
 const EVIDENCE_TEXT_CHARS = 1_200
 const EVIDENCE_HEADINGS = 12
@@ -38,7 +50,11 @@ export class Runner {
   private inFlight = 0
   private activeTabId: string | null = null
 
-  constructor(private readonly deps: PipelineDeps, private readonly onLog?: (msg: string) => void) {}
+  constructor(
+    private readonly deps: PipelineDeps,
+    private readonly onLog?: (msg: string) => void,
+    private readonly onProgress?: (event: PipelineProgressEvent) => void
+  ) {}
 
   get runningTabId(): string | null {
     return this.activeTabId
@@ -66,30 +82,57 @@ export class Runner {
       let totalReplans = 0
       const evidenceUrls = new Set<string>()
 
+      type QueuedStep = { stepNo: number; step: PlanStep }
       // Work off a mutable queue so replans can splice in a fresh tail.
-      const queue: PlanStep[] = [...plan.steps]
+      const queue: QueuedStep[] = plan.steps.map((step, index) => ({ stepNo: index + 1, step }))
+      let nextStepNo = queue.length + 1
 
       while (queue.length > 0) {
-        const step = queue.shift()!
+        const item = queue.shift()!
+        const step = item.step
+        const stepNo = item.stepNo
+        const title = (step.intent || describeAction(step.action)).slice(0, 140)
         const sStart = Date.now()
         const maxRetries = step.maxRetries ?? defaultMaxRetries(step)
+        const maxAttempts = maxRetries + 1
+        const actionLabel = describeAction(step.action)
         let usedLlm = false
         let status: StepResult['status'] = 'passed'
         let error: string | undefined
         let evidence: StepEvidence | undefined
         let localChecks = 0
+        let attempts = 0
 
-        this.onLog?.(`➡️ [Runner] Executing step: ${step.action.type} ${describeAction(step.action)}`)
+        this.onProgress?.({
+          step: stepNo,
+          title,
+          status: 'running',
+          detail: `Preparing step: ${actionLabel}`
+        })
+        this.onLog?.(`➡️ [Runner] Executing step: ${step.action.type} ${actionLabel}`)
 
         // Pre-condition gate (deterministic).
         if (step.preCondition) {
           localChecks++
+          this.onProgress?.({
+            step: stepNo,
+            title,
+            status: 'running',
+            detail: `Checking pre-condition: ${describeCondition(step.preCondition)}`
+          })
           const pre = await this.check(tabId, step.preCondition)
           if (!pre.ok) {
             // Precondition unmet — treat like a failed step per policy.
             error = `precondition failed: ${pre.reason}`
+            this.onProgress?.({ step: stepNo, title, status: 'failed', detail: `Pre-condition failed: ${pre.reason}` })
             this.onLog?.(`⚠️ [Runner] Pre-condition check failed: ${pre.reason}`)
           } else {
+            this.onProgress?.({
+              step: stepNo,
+              title,
+              status: 'running',
+              detail: `Pre-condition passed: ${describeCondition(step.preCondition)}`
+            })
             this.onLog?.(`✅ [Runner] Pre-condition check passed.`)
           }
         }
@@ -103,8 +146,21 @@ export class Runner {
         let passed = !error
         if (!error) {
           for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            attempts = attempt + 1
+            this.onProgress?.({
+              step: stepNo,
+              title,
+              status: 'running',
+              detail: `Attempt ${attempts}/${maxAttempts}: ${actionLabel}`
+            })
             if (attempt > 0) {
               this.onLog?.(`🔄 [Runner] Retrying step (attempt ${attempt}/${maxRetries})...`)
+              this.onProgress?.({
+                step: stepNo,
+                title,
+                status: 'running',
+                detail: `Retry ${attempt}/${maxRetries}`
+              })
             }
             try {
               await this.execute(tabId, step.action)
@@ -118,6 +174,12 @@ export class Runner {
             localChecks++
             let post: { ok: boolean; reason: string }
             try {
+              this.onProgress?.({
+                step: stepNo,
+                title,
+                status: 'running',
+                detail: `Validating: ${describeCondition(postCond)}`
+              })
               post = await this.check(tabId, postCond)
             } catch (e: any) {
               post = { ok: false, reason: `post-check failed: ${e?.message ?? e}` }
@@ -126,11 +188,34 @@ export class Runner {
               passed = true
               error = undefined
               status = attempt === 0 ? 'passed' : 'retried-pass'
+              this.onProgress?.({
+                step: stepNo,
+                title,
+                status: 'running',
+                detail: attempt === 0
+                  ? `Passed on attempt ${attempts}/${maxAttempts}: ${describeCondition(postCond)}`
+                  : `Passed after ${attempts}/${maxAttempts} retries: ${describeCondition(postCond)}`
+              })
               this.onLog?.(`✅ [Runner] Post-condition check passed.`)
               break
             }
             passed = false
             error = `postcondition not met: ${post.reason}`
+            if (attempt < maxRetries) {
+              this.onProgress?.({
+                step: stepNo,
+                title,
+                status: 'running',
+                detail: `Attempt ${attempts}/${maxAttempts} failed (${post.reason}), retrying...`
+              })
+            } else {
+              this.onProgress?.({
+                step: stepNo,
+                title,
+                status: 'running',
+                detail: `Attempt ${attempts}/${maxAttempts} failed (${post.reason}).`
+              })
+            }
             this.onLog?.(`⚠️ [Runner] Post-condition check failed: ${post.reason}`)
           }
         }
@@ -145,6 +230,12 @@ export class Runner {
             checks += localChecks
             results.push(this.result(step, status, localChecks, usedLlm, error, sStart))
             this.onLog?.(`🛑 [Runner] Aborting run.`)
+            this.onProgress?.({
+              step: stepNo,
+              title,
+              status: 'aborted',
+              detail: error ?? `Aborted after ${attempts} attempt(s).`
+            })
             break
           }
           if (policy === 'retry') {
@@ -157,11 +248,23 @@ export class Runner {
             success = false
             checks += localChecks
             results.push(this.result(step, status, localChecks, usedLlm, error, sStart, evidence))
+            this.onProgress?.({
+              step: stepNo,
+              title,
+              status: 'aborted',
+              detail: error ?? `Max replans (${MAX_TOTAL_REPLANS}) reached.`
+            })
             break
           }
+          this.onProgress?.({
+            step: stepNo,
+            title,
+            status: 'running',
+            detail: `Post-condition failed. Re-planning (${totalReplans + 1}/${MAX_TOTAL_REPLANS + 1}).`
+          })
           this.onLog?.(`🧠 [Runner] Querying LLM for a RE-PLAN...`)
           const capture = await this.deps.capture(tabId)
-          const fresh = await replan(capture, step, queue)
+          const fresh = await replan(capture, step, queue.map((item) => item.step))
           llmCalls++
           usedLlm = true
           totalReplans++
@@ -175,14 +278,33 @@ export class Runner {
             success = false
             checks += localChecks
             results.push(this.result(step, status, localChecks, usedLlm, 're-plan produced no usable steps', sStart, evidence))
+            this.onProgress?.({ step: stepNo, title, status: 'aborted', detail: 'Re-plan produced no usable steps.' })
             break
           }
           if (validFresh.length !== fresh.length) {
             this.onLog?.(`⚠️ [Runner] Dropped ${fresh.length - validFresh.length} malformed step(s) from replan.`)
           }
+
+          const freshQueued = validFresh.map((freshStep, idx) => ({
+            stepNo: nextStepNo + idx,
+            step: freshStep
+          }))
+          const plannedTotal = freshQueued[freshQueued.length - 1].stepNo
+          nextStepNo += freshQueued.length
+          for (const freshStep of freshQueued) {
+            this.onProgress?.({
+              step: freshStep.stepNo,
+              title: (freshStep.step.intent || describeAction(freshStep.step.action)).slice(0, 140),
+              status: 'planned',
+              detail: `Added by re-plan: ${describeAction(freshStep.step.action)}`,
+              total: plannedTotal
+            })
+          }
           // Splice the fresh tail in front of whatever remained.
-          queue.unshift(...validFresh)
+          queue.unshift(...freshQueued)
           error = undefined
+          status = 'replanned'
+          this.onProgress?.({ step: stepNo, title, status: 'replanned', detail: `Replanned with ${freshQueued.length} step(s).` })
           this.onLog?.(`📝 [Runner] RE-PLAN completed. Spliced in ${validFresh.length} new step(s).`)
         } else {
           evidence = await this.captureEvidence(tabId, step, postCond, evidenceUrls)
@@ -190,6 +312,31 @@ export class Runner {
 
         checks += localChecks
         results.push(this.result(step, status, localChecks, usedLlm, error, sStart, evidence))
+        const finalStatus: PipelineProgressEvent['status'] =
+          status === 'passed' || status === 'retried-pass'
+            ? 'passed'
+            : status === 'replanned'
+              ? 'replanned'
+              : status === 'aborted'
+                ? 'aborted'
+                : status === 'skipped'
+                  ? 'skipped'
+                  : 'failed'
+        const detail =
+          error
+            ? error
+            : finalStatus === 'passed' && status === 'retried-pass'
+              ? `Passed after ${attempts}/${maxAttempts} attempt(s).`
+              : finalStatus === 'passed'
+                ? `Passed on first attempt (${attempts || 1}/${maxAttempts}).`
+                : undefined
+        this.onProgress?.({
+          step: stepNo,
+          title,
+          status: finalStatus,
+          detail,
+          total: nextStepNo - 1
+        })
       }
 
       return {
@@ -573,6 +720,17 @@ function truncate(value: string, max: number): string {
 function describe(t: Target | undefined): string {
   if (!t) return '(unknown target)'
   return t.selector ?? `${t.role ?? '?'}:"${t.name ?? ''}"`
+}
+
+function describeCondition(condition: Condition): string {
+  if (condition.kind === 'always') return 'no verification condition'
+  if (condition.kind === 'urlMatches') return `URL matches /${condition.pattern}/`
+  if (condition.kind === 'elementExists')
+    return `element exists: ${condition.target ? describe(condition.target) : '(unknown)' }`
+  if (condition.kind === 'elementGone') return `element gone: ${condition.selector}`
+  if (condition.kind === 'textPresent') return `text present: “${condition.text}”`
+  if (condition.kind === 'networkIdle') return `network idle for ${condition.ms}ms`
+  return `condition ${(condition as { kind: string }).kind}`
 }
 
 function describeAction(a: Action | undefined): string {

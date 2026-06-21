@@ -9,23 +9,13 @@ import {
   type CodexStatus,
   type CodexWorkspace,
   type ModelOption,
-  shouldUseWebResearchTools,
 } from '../../../shared/types'
 import { BrowserTools, type ToolContext } from './browserTools'
 import { selectAgentToolProfile } from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
-import { generatePipelineFinalResponse } from '../pipeline/finalResponse'
-import {
-  SearchQueryOptimizer,
-  AdvancedSearchEngine,
-  DeepResearchAgent,
-  ProgressiveResearchSession
-} from '../pipeline/searchPipeline'
+import { isUsableTabId } from '../TabManager'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
-import { orchestrate } from '../pipeline/orchestrate'
-import type { Runner } from '../pipeline/Runner'
-import { registerRunner, unregisterRunner } from '../pipeline/activeRunners'
 import type { ModelCallLedger } from './ModelCallLedger'
 import { ASK_SYSTEM, CODEX_SYSTEM, buildAgentSystem } from './prompts'
 import {
@@ -329,7 +319,8 @@ export class ChatService {
     try {
       const policy = resolveTurnContextPolicy(req)
       stripStaleActivePageContext(req, policy)
-      if (!req.tabId && policy.browserIntent) req.tabId = this.tools.tabs.activeTabId
+      if (!req.tabId && policy.browserIntent && isUsableTabId(this.tools.tabs.activeTabId))
+        req.tabId = this.tools.tabs.activeTabId
       this.emitContractTrace(req, policy, model.provider)
       const { actionableText, profile: initialProfile } = policy
       // Run the agentic loop (which carries request_tools) for any real task. The
@@ -341,196 +332,6 @@ export class ChatService {
       const hasSelectedFolder = !!this.tools.getWorkspaceRoot()
       const agentic =
         req.mode === 'agent' && (initialProfile.name !== 'conversation' || hasSelectedFolder)
-      // The model decides whether to search/drive the browser by choosing tools;
-      // there is no keyword pre-router. /pipeline stays as an explicit power-user
-      // entry to the deterministic multi-step engine.
-      const isSearchQuery = actionableText.startsWith('/research') ||
-                            actionableText.startsWith('/deepsearch') ||
-                            shouldUseWebResearchTools(actionableText)
-      if (isSearchQuery) {
-        let task = actionableText
-        if (actionableText.startsWith('/research')) {
-          task = actionableText.slice(9).trim()
-        } else if (actionableText.startsWith('/deepsearch')) {
-          task = actionableText.slice(11).trim()
-        }
-        if (!task) {
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text: '💡 Please specify a query or topic for the search pipeline.'
-          })
-          this.emit({ requestId: req.requestId, type: 'done' })
-          return
-        }
-
-        this.emit({
-          requestId: req.requestId,
-          type: 'delta',
-          text: `🔍 **Starting Advanced Search & Deep Research** for: *"${task}"*...\n\n`
-        })
-
-        try {
-          const optimizer = new SearchQueryOptimizer(this, req.modelId)
-          const engine = new AdvancedSearchEngine()
-          const reader = new DeepResearchAgent(this, req.modelId)
-          
-          const session = new ProgressiveResearchSession(
-            optimizer,
-            engine,
-            reader,
-            this,
-            req.modelId,
-            task
-          )
-
-          let tabId = req.tabId
-          if (tabId === 'null' || tabId === 'undefined') {
-            tabId = undefined
-          }
-          if (!tabId) {
-            const activeId = this.tools.tabs?.activeTabId
-            if (activeId && activeId !== 'null' && activeId !== 'undefined') {
-              tabId = activeId
-            } else {
-              tabId = this.tools.tabs?.list().find(t => t.id && t.id !== 'null' && t.id !== 'undefined')?.id
-            }
-          }
-          await session.runSession((progressMsg) => {
-            // Send progressive trace status updates to the UI
-            this.emit({
-              requestId: req.requestId,
-              type: 'delta',
-              text: `* ${progressMsg}\n`
-            })
-          }, tabId)
-
-          const finalReport = session.renderProgressiveOutput()
-          
-          // Emit the final report!
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text: `\n---\n\n${finalReport}\n`
-          })
-
-        } catch (err: any) {
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text: `\n❌ **Deep Research failed with error:** ${err?.message ?? String(err)}\n`
-          })
-        } finally {
-          this.emit({ requestId: req.requestId, type: 'done' })
-        }
-        return
-      }
-
-      if (actionableText.startsWith('/pipeline')) {
-        const task = actionableText.slice(9).trim()
-        if (!task) {
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text: '💡 Please specify a task for the deterministic pipeline. Usage: `/pipeline click on "New issue"`'
-          })
-          this.emit({ requestId: req.requestId, type: 'done' })
-          return
-        }
-
-        let tabId = req.tabId
-        if (!tabId) {
-          const tabsList = this.tools.tabs.list()
-          if (tabsList.length > 0) {
-            tabId = tabsList[0].id
-          } else {
-            const newTab = this.tools.tabs.create()
-            tabId = newTab.id
-          }
-        }
-
-        let pipelineRunner: Runner | undefined
-        try {
-          const browserLlm = this.browserPipelineLlm(model, req.conversationId)
-          const deps = {
-            cdpSend: (id: string, method: string, params?: Record<string, unknown>) =>
-              this.tools.tabs.cdpSend(id, method, params),
-            capture: (id: string) => this.tools.extractor.run(id)
-          }
-
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text: `🚀 **Initializing Deterministic Pipeline**\n` +
-                  `- Task: \`${task}\`\n` +
-                  `- Tab ID: \`${tabId}\`\n` +
-                  `- Model: \`${req.modelId}\`` +
-                  (browserLlm.model.id === req.modelId ? '' : ` (browser planner: \`${browserLlm.model.id}\`)`) +
-                  `\n\n`
-          })
-
-          const traj = await orchestrate({
-            tabId: tabId!,
-            task,
-            deps,
-            llm: browserLlm.llm,
-            onRunnerReady: (runner) => {
-              // Track this runner so CDP events reach it; unregistered in finally.
-              pipelineRunner = runner
-              registerRunner(runner)
-            },
-            onLog: (msg) => {
-              this.emit({
-                requestId: req.requestId,
-                type: 'delta',
-                text: `${msg}\n`
-              })
-            }
-          })
-
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text:
-              `\n🏆 **Pipeline Finished!**\n` +
-              `- Success: \`${traj.success}\`\n` +
-              `- Total Steps: \`${traj.steps.length}\`\n` +
-              `- LLM Calls: \`${traj.llmCalls}\`\n` +
-              `- Deterministic CDP Checks: \`${traj.deterministicChecks}\`\n` +
-              `- Time Taken: \`${(traj.tookMs / 1000).toFixed(1)}s\`\n`
-          })
-
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text: '\n🧾 Capturing final page and generating model response...\n'
-          })
-          const finalCapture = await deps.capture(tabId!)
-          const finalResponse = await generatePipelineFinalResponse({
-            task,
-            trajectory: traj,
-            finalCapture,
-            llm: browserLlm.llm
-          })
-          if (finalResponse) {
-            this.emit({
-              requestId: req.requestId,
-              type: 'delta',
-              text: `\n---\n\n${finalResponse}\n`
-            })
-          }
-        } catch (err: any) {
-          this.emit({
-            requestId: req.requestId,
-            type: 'delta',
-            text: `\n❌ **Pipeline failed with error:** ${err?.message ?? String(err)}\n`
-          })
-        } finally {
-          if (pipelineRunner) unregisterRunner(pipelineRunner)
-          this.emit({ requestId: req.requestId, type: 'done' })
-        }
-        return
-      }
 
       if (model.provider === 'codex') {
         // Codex is self-agentic: it owns its shell/file tools via the app-server
@@ -589,8 +390,8 @@ export class ChatService {
   }
 
   /**
-   * The LLM that drives the browser pipeline (browse_task / /pipeline) for a
-   * turn. The model the user PICKED does the work — no silent substitution.
+   * The LLM that drives the browser pipeline for a turn. The model the user
+   * PICKED does the work — no silent substitution.
    * For every provider this routes through this.complete(model.id, …), which
    * dispatches anthropic/google directly and codex through the app-server.
    */
@@ -619,7 +420,10 @@ export class ChatService {
     const url = extractLocalPreviewUrl(output)
     if (!url) return
 
-    const tabId = req.tabId || this.tools.tabs.activeTabId || this.tools.tabs.create().id
+    const tabId =
+      typeof this.tools.tabs.liveTabId === 'function'
+        ? this.tools.tabs.liveTabId(req.tabId)
+        : req.tabId || this.tools.tabs.activeTabId || this.tools.tabs.create().id
     const callId = `codex-local-preview-${Date.now()}`
     this.emit({
       requestId: req.requestId,
@@ -788,7 +592,14 @@ export class ChatService {
       fullResults: new Map<string, string>(),
       // Carried per-request so concurrent chats can run browser turns under
       // different models without racing a shared field (was BrowserTools.setLlm).
-      llm
+      llm,
+      onProgress: (event) => {
+        this.emit({
+          requestId: req.requestId,
+          type: 'progress_step',
+          ...event
+        })
+      }
     }
   }
 

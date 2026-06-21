@@ -13,6 +13,15 @@ interface Tab {
   favicon: string | null
 }
 
+/**
+ * A tab id is usable only if it is a non-empty string that is not the literal
+ * `"null"` / `"undefined"` produced when a null id is serialized across IPC.
+ * Acts as a type guard so callers narrow `string | null` to `string`.
+ */
+export function isUsableTabId(id: string | null | undefined): id is string {
+  return !!id && id !== 'null' && id !== 'undefined'
+}
+
 export const BROWSER_PARTITION = 'persist:gladdis'
 const DEFAULT_URL = 'https://duckduckgo.com'
 const SEARCH_URL = 'https://duckduckgo.com/?q='
@@ -42,7 +51,7 @@ export class TabManager {
     return `tab-${this.seq}`
   }
 
-  create(url: string = DEFAULT_URL): TabInfo {
+  create(url: string = DEFAULT_URL, options: { background?: boolean } = {}): TabInfo {
     const id = this.nextId()
     const view = new WebContentsView({
       webPreferences: {
@@ -122,7 +131,7 @@ export class TabManager {
     this.tabs.set(id, tab)
     this.order.push(id)
     this.win.contentView.addChildView(view)
-    this.switch(id)
+    if (!options.background) this.switch(id)
     // Fire the load immediately — do NOT gate it on cdp.attach(). Awaiting attach
     // first (a slow/contended CDP round-trip) could leave the first document
     // uncommitted, so the view stayed blank and wc.getURL() empty; the URL bar then
@@ -327,6 +336,26 @@ export class TabManager {
   /** The currently active tab id, or null if no tabs exist. */
   get activeTabId(): string | null {
     return this.activeId
+  }
+
+  /**
+   * Resolve a guaranteed-usable visible tab id, creating one if needed.
+   *
+   * Guards against stale ids that serialize to the *string* `"null"` /
+   * `"undefined"` across the IPC boundary — those are truthy, so a naive
+   * `activeTabId || create()` fallback lets them slip through to CDP and
+   * produces "Unknown tab null". This always returns an id present in the
+   * live tab list, falling back to a freshly created tab.
+   */
+  liveTabId(requested?: string | null): string {
+    const validIds = this.list()
+      .map((t) => t.id)
+      .filter(isUsableTabId)
+    if (isUsableTabId(requested) && validIds.includes(requested)) return requested
+    const active = this.activeTabId
+    if (isUsableTabId(active) && validIds.includes(active)) return active
+    if (validIds.length > 0) return validIds[0]
+    return this.create().id
   }
 
   list(): TabInfo[] {

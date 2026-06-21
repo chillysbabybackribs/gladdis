@@ -43,8 +43,7 @@ export function resolveTurnContextPolicy(req: ChatRequest): TurnContextPolicy {
   const hadActivePagePreamble = userText !== actionableText
   const activePageFollowup = req.contextHints?.activePageFollowup === true
   const activePageIntent = shouldAttachActivePageContext(actionableText) || activePageFollowup
-  const browserIntent =
-    shouldUseBrowserTools(actionableText) || activePageFollowup || actionableText.startsWith('/pipeline')
+  const browserIntent = shouldUseBrowserTools(actionableText) || activePageFollowup
 
   return {
     actionableText,

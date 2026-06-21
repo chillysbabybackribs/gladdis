@@ -129,6 +129,143 @@
 .contract-trace-tools code {
   white-space: normal;
 }
+
+.pipeline-progress {
+  margin: 6px 0 14px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: var(--bg-surface);
+  overflow: hidden;
+  width: min(100%, 760px);
+}
+
+.pipeline-progress-title {
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pipeline-progress-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.pipeline-progress-plan {
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pipeline-progress-plan-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.pipeline-progress-plan-detail {
+  white-space: normal;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pipeline-progress-item {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+}
+
+.pipeline-progress-item-step {
+  color: var(--text-muted);
+  font-weight: 600;
+  width: 18px;
+  text-align: right;
+  flex: 0 0 auto;
+}
+
+.pipeline-progress-item-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+.pipeline-progress-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pipeline-progress-item-head .pipeline-progress-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  line-height: 1.3;
+  flex: 1 1 auto;
+}
+
+.pipeline-progress-item-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  line-height: 1.3;
+  flex: 0 1 auto;
+}
+
+.pipeline-progress-item-status {
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.pipeline-progress-item-status.planned {
+  color: #8ab4ff;
+}
+
+.pipeline-progress-item-status.running {
+  color: #7cb9ff;
+}
+
+.pipeline-progress-item-status.passed {
+  color: #4dbf70;
+}
+
+.pipeline-progress-item-status.replanned {
+  color: #f5a623;
+}
+
+.pipeline-progress-item-status.failed,
+.pipeline-progress-item-status.aborted {
+  color: #ff8a82;
+}
+
+.pipeline-progress-item-status.skipped {
+  color: var(--text-muted);
+}
+
+.pipeline-progress-item-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  max-width: none;
+}
+
 .tool-run {
   margin: 6px 0 14px 4px;
   display: flex;
@@ -477,4 +614,3 @@
     transform: translateY(0);
   }
 }
-

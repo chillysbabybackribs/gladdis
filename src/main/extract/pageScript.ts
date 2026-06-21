@@ -171,9 +171,9 @@ export function extractionScript(): string {
       return out
     }, [] as any[])
 
-    /* ================= 2. Readable content ================= */
+    /* ================= 2. Readable content (clean markdown, no limits) ================= */
     const content = safe(() => {
-      // Heuristic main-content pick: largest text container among likely roots.
+      // Pick the best content container
       const candidates = Array.from(
         document.querySelectorAll('article, main, [role="main"], #content, .content, body')
       )
@@ -186,46 +186,75 @@ export function extractionScript(): string {
           bestLen = len
         }
       }
-      // Strip obvious chrome from a clone before reading.
+
+      // Clone and aggressively strip non-content sections
       const clone = best.cloneNode(true) as Element
-      clone
-        .querySelectorAll('script,style,noscript,nav,header,footer,aside,svg,form,iframe,[aria-hidden="true"]')
-        .forEach((n) => n.remove())
+      const stripSelectors = [
+        'script', 'style', 'noscript', 'nav', 'header', 'footer', 'aside',
+        'svg', 'form', 'iframe', '[aria-hidden="true"]',
+        // Common non-content containers
+        '.nav', '.navbar', '.menu', '.sidebar', '.ad', '.ads', '.advertisement',
+        '.cookie', '.cookies', '.banner', '.promo', '.related', '.recommendations',
+        '.social', '.share', '.comments', '.comment', '.newsletter', '.subscribe',
+        '[role="navigation"]', '[role="banner"]', '[role="complementary"]',
+        '[class*="sidebar"]', '[class*="footer"]', '[class*="header"]',
+        '[id*="sidebar"]', '[id*="footer"]', '[id*="header"]', '[id*="nav"]'
+      ]
+      clone.querySelectorAll(stripSelectors.join(',')).forEach((n) => n.remove())
 
-      const headings = Array.from(clone.querySelectorAll('h1,h2,h3,h4,h5,h6'))
-        .map((h) => ({ level: +h.tagName[1], text: norm(h.textContent || '') }))
-        .filter((h) => h.text)
-        .slice(0, 300)
-
-      // Lightweight markdown: headings + paragraphs + list items in DOM order.
+      // Build clean markdown from remaining content
       const md: string[] = []
+      const seenTexts = new Set<string>()
+
       const walk = (node: Element) => {
         for (const child of Array.from(node.children)) {
           const tag = child.tagName.toLowerCase()
           const txt = norm(child.textContent || '')
-          if (!txt) continue
-          if (/^h[1-6]$/.test(tag)) md.push('#'.repeat(+tag[1]) + ' ' + txt)
-          else if (tag === 'p') md.push(txt)
-          else if (tag === 'li') md.push('- ' + txt)
-          else if (tag === 'pre') md.push('```\n' + txt + '\n```')
-          else if (child.children.length) walk(child)
-          else if (txt.length > 40) md.push(txt)
-          if (md.join('\n').length > CAP.markdown) break
+
+          if (!txt || seenTexts.has(txt)) continue
+
+          if (/^h[1-6]$/.test(tag)) {
+            const level = +tag[1]
+            md.push('#'.repeat(level) + ' ' + txt)
+            seenTexts.add(txt)
+          } else if (tag === 'p') {
+            md.push(txt)
+            seenTexts.add(txt)
+          } else if (tag === 'li') {
+            md.push('- ' + txt)
+            seenTexts.add(txt)
+          } else if (tag === 'pre' || tag === 'code') {
+            md.push('```\n' + txt + '\n```')
+            seenTexts.add(txt)
+          } else if (tag === 'blockquote') {
+            md.push('> ' + txt.replace(/\n/g, '\n> '))
+            seenTexts.add(txt)
+          } else if (child.children.length > 0) {
+            walk(child)
+          } else if (txt.length > 20) {
+            // Catch other meaningful text blocks
+            md.push(txt)
+            seenTexts.add(txt)
+          }
         }
       }
+
       walk(clone)
 
       const text = norm(clone.textContent || '')
       const titleEl = document.querySelector('h1')
+
       return {
         title: norm(titleEl?.textContent || document.title || ''),
         byline:
           (document.querySelector('[rel="author"], .author, [itemprop="author"]')?.textContent &&
             norm(document.querySelector('[rel="author"], .author, [itemprop="author"]')!.textContent!)) ||
           null,
-        text: clamp(text, CAP.text),
-        markdown: clamp(md.join('\n\n'), CAP.markdown),
-        headings,
+        text,
+        markdown: md.join('\n\n'),
+        headings: Array.from(clone.querySelectorAll('h1,h2,h3,h4,h5,h6'))
+          .map((h) => ({ level: +h.tagName[1], text: norm(h.textContent || '') }))
+          .filter((h) => h.text),
         wordCount: text ? text.split(/\s+/).length : 0
       }
     }, {

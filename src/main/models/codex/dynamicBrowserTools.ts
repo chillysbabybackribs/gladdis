@@ -9,7 +9,6 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'search',
   'fetch_page',
   'navigate',
-  'background_web_search',
   'browse_task',
   'read_page',
   'screenshot',
@@ -27,9 +26,8 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
 
 export const CODEX_BROWSER_INSTRUCTIONS =
   'All browser and web work goes through the gladdis.* tools, which drive the visible tab the ' +
-  'user is watching: gladdis.search (hidden web lookup), gladdis.fetch_page/gladdis.navigate ' +
-  '(open a URL in the visible tab), gladdis.background_web_search (off-screen breadth, visible tab ' +
-  'unchanged — pair it with fetch_page or navigate so the user still sees the page), gladdis.browse_task ' +
+  'user is watching: gladdis.search (unified search — hidden SERP + visible tab live digests), ' +
+  'gladdis.fetch_page/gladdis.navigate (open a specific URL), gladdis.browse_task ' +
   '(multi-step flows), gladdis.read_page, and gladdis.screenshot/screenshot_app. ' +
   'When debugging Gladdis itself, use the current visible app/browser first; do not launch a second ' +
   'Gladdis/dev app just to view UI or browser behavior. Only launch a separate instance for startup ' +
@@ -95,12 +93,21 @@ export async function respondToCodexBrowserToolCall(args: {
     return
   }
   if (args.requestId) args.emit({ requestId: args.requestId, type: 'tool_call', tool: `gladdis.${tool}`, args: toolArgs, callId })
-  const tabId = args.tools.tabs.activeTabId || args.tools.tabs.create().id
+  const tabsApi = args.tools.tabs as { liveTabId?: (id?: string | null) => string; activeTabId?: string | null; create: () => { id: string } }
+  const tabId = typeof tabsApi.liveTabId === 'function' ? tabsApi.liveTabId() : tabsApi.activeTabId || tabsApi.create().id
   const ctx: ToolContext = {
     tabId,
     conversationId: args.conversationId ?? undefined,
     llm: args.llm ?? undefined,
-    fullResults: new Map()
+    fullResults: new Map(),
+    onProgress: args.requestId
+      ? (event) =>
+          args.emit({
+            requestId: args.requestId!,
+            type: 'progress_step',
+            ...event
+          })
+      : undefined
   }
   const outcome = await args.tools.run(tool, toolArgs, ctx)
   args.respond(args.msg.id, codexDynamicToolResponse(outcome))

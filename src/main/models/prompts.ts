@@ -37,13 +37,9 @@ const BROWSER_GUIDANCE =
   'All browser actions act on the VISIBLE tab the user is watching — they see the page change. ' +
   'Use your own judgment about which tool fits; there is no fixed script.\n\n' +
 
-  '  • search → web search in the visible tab; returns ranked results. ' +
-  'fetch_page → open a URL in the visible tab and read its digest. ' +
-  'Typical loop: search → open the best result → read → answer (or ask the user a ' +
-  'clarifying question if the request is ambiguous).\n' +
-  '  • background_web_search → fast OFF-SCREEN search for breadth; does NOT change the ' +
-  'visible tab. Optional — use it alongside the visible browser when broad coverage helps, ' +
-  'then open the best hit with fetch_page/navigate so the user still sees the page.\n' +
+  '  • search → unified web search: hidden SERP index, then the best hit opens in the ' +
+  'visible tab. Returns a compact query-scored evidence card (not a full page dump).\n' +
+  '  • fetch_page → deeper read of a specific URL when search evidence is not enough.\n' +
   '  • read_page → structured digest of the current page (content, headings, and an ' +
   'actions table with (x,y) coords + selectors). Get coordinates here before click_xy.\n' +
   '  • navigate / click_xy / type_text / press_key / execute_in_browser / cdp_command → ' +
@@ -97,7 +93,6 @@ const MEMORY_GUIDANCE =
 const BROWSER_TOOL_NAMES = new Set([
   'search',
   'fetch_page',
-  'background_web_search',
   'browse_task',
   'read_page',
   'screenshot',
@@ -161,8 +156,8 @@ export const CODEX_SYSTEM =
   'from a bare resume request.\n\n' +
   'For anything in a browser — viewing, web search, reading a page, screenshots, UI validation — ' +
   'use the `gladdis.*` tools, which drive the visible Chromium tab the user is watching: ' +
-  '`gladdis.search`, `gladdis.fetch_page`, `gladdis.background_web_search` (off-screen breadth — ' +
-  'pair with fetch_page/navigate so the user still sees the page), `gladdis.browse_task`, ' +
+  '`gladdis.search` (unified search — hidden SERP + visible tab live digests), `gladdis.fetch_page`, ' +
+  '`gladdis.browse_task`, ' +
   '`gladdis.read_page`, and `gladdis.screenshot`/`screenshot_app`. Do not spin up a separate ' +
   'browser (Playwright, Puppeteer, headless Chrome, OS URL openers, DevTools-port probing) — that ' +
   'would be a different browser than the one the user sees.\n\n' +

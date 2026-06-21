@@ -1,7 +1,21 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ContractTrace } from '../../../shared/types'
 import { renderMarkdown } from '../lib/markdown'
-import type { Message, ToolActivity } from './chatTypes'
+import type { Message, ProgressStepPart, ToolActivity } from './chatTypes'
+
+const STEP_STATUS_LABEL: Record<ProgressStepPart['status'], string> = {
+  planned: 'Planned',
+  running: 'Running',
+  passed: 'Done',
+  replanned: 'Replanned',
+  failed: 'Failed',
+  aborted: 'Aborted',
+  skipped: 'Skipped'
+}
+
+function summarizeProgressStepStatus(status: ProgressStepPart['status']): string {
+  return STEP_STATUS_LABEL[status]
+}
 
 /**
  * Markdown is the per-token hot path during streaming: marked.parse +
@@ -20,7 +34,6 @@ const TOOL_LABEL: Record<string, string> = {
   execute_in_browser: 'Running script',
   search: 'Searching',
   fetch_page: 'Opening page',
-  background_web_search: 'Background search',
   browse_task: 'Running task',
   read_page: 'Reading page',
   navigate: 'Navigating',
@@ -42,7 +55,6 @@ const TOOL_LABEL: Record<string, string> = {
 const TOOL_VERB: Record<string, [string, string]> = {
   execute_in_browser: ['Running script', 'Ran script'],
   search: ['Searching the web for', 'Searched the web for'],
-  background_web_search: ['Searching the web for', 'Searched the web for'],
   fetch_page: ['Opening', 'Opened'],
   browse_task: ['Running task', 'Ran task'],
   read_page: ['Reading the page', 'Read the page'],
@@ -84,7 +96,7 @@ function toolSentence(tool: ToolActivity): string {
   let object = ''
   if (name === 'read_file' || name === 'write_file' || name === 'edit_file' || name === 'list_dir') {
     object = a.path ? baseName(String(a.path)) : ''
-  } else if (name === 'search' || name === 'background_web_search' || name === 'search_files') {
+  } else if (name === 'search' || name === 'search_files') {
     object = a.query ? `“${String(a.query).slice(0, 60)}”` : ''
   } else if (name === 'fetch_page' || name === 'navigate' || name === 'screenshot_confirmation') {
     object = a.url ? normalizeDisplayUrl(String(a.url)).replace(/^https?:\/\//, '') : ''
@@ -110,6 +122,7 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
   if (message.parts && message.parts.length) {
     const blocks: ReactNode[] = []
     let toolRun: ToolActivity[] = []
+    let progressRun: ProgressStepPart[] = []
     const allTools = message.parts
       .filter((part) => part.kind === 'tool')
       .map((part) => part.tool)
@@ -119,12 +132,26 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       blocks.push(<ToolRun key={`run-${run[0].callId}`} tools={run} />)
       toolRun = []
     }
+    const flushProgress = () => {
+      if (!progressRun.length) return
+      const run = progressRun
+      blocks.push(
+        <PipelineProgress key={`pipeline-progress-${run[0].step}-${run[run.length - 1].step}`} steps={run} />
+      )
+      progressRun = []
+    }
     message.parts.forEach((part, idx) => {
       if (part.kind === 'tool') {
         toolRun.push(part.tool)
         return
       }
+      if (part.kind === 'progress_step') {
+        flushTools()
+        progressRun.push(part)
+        return
+      }
       flushTools()
+      flushProgress()
       if (part.kind === 'contract') {
         blocks.push(<ContractTraceLine key={`contract-${idx}`} trace={part.trace} tools={allTools} />)
         return
@@ -134,6 +161,7 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       }
     })
     flushTools()
+    flushProgress()
     return <>{blocks}</>
   }
 
@@ -154,6 +182,48 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
     </>
   )
 })
+
+function PipelineProgress({ steps }: { steps: ProgressStepPart[] }) {
+  const ordered = [...steps].sort((a, b) => a.step - b.step)
+  const latest = new Map<number, ProgressStepPart>()
+  for (const step of ordered) latest.set(step.step, step)
+  const latestSteps = [...latest.entries()]
+    .map(([step, part]) => ({ step, part }))
+    .sort((a, b) => a.step - b.step)
+  const planStep = latestSteps.find(({ step }) => step === 0)?.part
+  const rendered = latestSteps
+    .filter(({ step }) => step > 0)
+    .map(({ part }) => part)
+
+  return (
+    <section className="pipeline-progress">
+      <div className="pipeline-progress-title">Browser task progress</div>
+      {planStep && (
+        <div className="pipeline-progress-plan">
+          <span className="pipeline-progress-plan-label">Plan ready</span>
+          <span className="pipeline-progress-item-status planned">{summarizeProgressStepStatus('planned')}</span>
+          <span className="pipeline-progress-plan-detail">{planStep.detail ?? 'Ready to run.'}</span>
+        </div>
+      )}
+      <ol className="pipeline-progress-list">
+        {rendered.map((step) => (
+          <li key={`progress-${step.step}`} className={`pipeline-progress-item ${step.status}`}>
+            <span className="pipeline-progress-item-step">{step.step}.</span>
+            <div className="pipeline-progress-item-body">
+              <div className="pipeline-progress-item-head">
+                <span className="pipeline-progress-item-title">{step.title}</span>
+                <span className={`pipeline-progress-item-status ${step.status}`}>
+                  {summarizeProgressStepStatus(step.status)}
+                </span>
+              </div>
+              {step.detail && <span className="pipeline-progress-item-detail">{step.detail}</span>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
 
 export type ContractValidationState =
   | 'no-edits'
@@ -386,7 +456,7 @@ export function deriveExecutionSummary(tools: ToolActivity[]): TraceExecutionSum
 
     const name = baseToolName(tool.tool)
     const args = (tool.args ?? {}) as Record<string, unknown>
-    if (name === 'search' || name === 'background_web_search') {
+    if (name === 'search') {
       searchCalls += 1
       const key = String(args.query ?? '').trim().toLowerCase()
       if (key && seenSearches.has(key)) duplicateSearches += 1
@@ -520,7 +590,7 @@ function renderToolTitle(tool: ToolActivity): ReactNode {
       const displayPath = baseName(String(a.path))
       objectNode = <code className="tool-highlight-code" title={String(a.path)}>{displayPath}</code>
     }
-  } else if (name === 'search' || name === 'background_web_search' || name === 'search_files') {
+  } else if (name === 'search' || name === 'search_files') {
     if (a.query) {
       objectNode = <span className="tool-highlight-query">“{String(a.query).slice(0, 60)}”</span>
     }

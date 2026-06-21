@@ -7,8 +7,9 @@ import { digestPage } from './PageDigest'
 import { AGENT_TOOLS, toolGroupNames } from './agentTools'
 import type { LlmComplete } from '../pipeline/Planner'
 import { orchestrate } from '../pipeline/orchestrate'
+import type { PipelineProgressEvent } from '../pipeline/Runner'
 import { generatePipelineFinalResponse } from '../pipeline/finalResponse'
-import { runHiddenSearch, type HiddenSearchResult } from './hiddenSearch'
+import { runUnifiedSearch } from './unifiedSearch'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 
@@ -78,6 +79,7 @@ export interface ToolContext {
   conversationId?: string | null
   fullResults?: Map<string, string>
   llm?: LlmComplete
+  onProgress?: (event: PipelineProgressEvent) => void
   /**
    * Tools the model has pulled in this turn via request_tools, on top of the
    * lean starting profile. The provider loop rebuilds its tool list from
@@ -185,9 +187,6 @@ export class BrowserTools {
         case 'fetch_page':
           return this.fetchPage(args, ctx)
 
-        case 'background_web_search':
-          return this.backgroundWebSearch(args)
-
         // ── Task (pipeline) ───────────────────────────────────────────────────
 
         case 'browse_task': {
@@ -204,6 +203,7 @@ export class BrowserTools {
           const trajectory = await orchestrate({
             tabId, task, site, deps,
             llm,
+            onProgress: ctx.onProgress,
             onLog: (msg) => console.log(msg)
           })
           const finalCapture = await this.extractor.run(tabId)
@@ -591,25 +591,30 @@ export class BrowserTools {
   }
 
   /**
-   * Web search — the SERP lookup is an internal link-grab and stays HIDDEN; it
-   * never appears in the visible tab. Returns ranked results to the model, which
-   * then opens the chosen result with fetch_page/navigate (THAT is what moves the
-   * visible tab the user is watching — to a real destination, not a results page).
+   * Unified web search: hidden embedded-Chromium SERP discovery, ranked aggregation,
+   * then top hits opened in the visible tab for live CDP extraction.
    */
   private async search(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
     const query = String(args.query ?? '').trim()
     if (!query) return { ok: false, text: 'search: "query" is required.' }
-    // Per-task memory: don't re-run an identical search this task — reuse results.
     const memKey = `search:${query.toLowerCase()}`
     const prior = this.taskScope(ctx).get(memKey)
     if (prior) {
-      return { ok: true, text: `(already searched this query this task — reusing prior results; pick a result to open with fetch_page, or refine the query)\n${prior}` }
+      return { ok: true, text: `(already searched this query this task — reusing prior results)\n${prior}` }
     }
-    const page = await runHiddenSearch(query, clampInt(args.limit, 1, 12, 8))
-    if (!page.ok) return { ok: false, text: `search: ${page.reason ?? 'no results'}` }
-    const text = formatResults(`SEARCH: ${query}`, page.results)
-    this.rememberDone(ctx, memKey, text)
-    return { ok: page.results.length > 0, text }
+    const outcome = await runUnifiedSearch(
+      { tabs: this.tabs, extractor: this.extractor },
+      {
+        query,
+        tabId: ctx.tabId,
+        limitPerQuery: clampInt(args.limit, 1, 8, 4),
+        digestTop: clampInt(args.digest_top, 0, 3, 2),
+        focus: args.focus ? String(args.focus) : undefined
+      }
+    )
+    if (!outcome.ok) return { ok: false, text: outcome.text }
+    this.rememberDone(ctx, memKey, outcome.text)
+    return { ok: true, text: outcome.text }
   }
 
   /**
@@ -664,22 +669,6 @@ export class BrowserTools {
       this.rememberDone(ctx, `fetch:${finalUrl}`, timedDigest)
     }
     return { ok: true, text: timedDigest }
-  }
-
-  /**
-   * Off-screen web search for breadth. Does NOT touch the visible tab — the
-   * model uses this alongside the visible browser, then opens the best result
-   * with fetch_page/navigate so the user still sees the page change.
-   */
-  private async backgroundWebSearch(args: Record<string, any>): Promise<ToolOutcome> {
-    const query = String(args.query ?? '').trim()
-    if (!query) return { ok: false, text: 'background_web_search: "query" is required.' }
-    const page = await runHiddenSearch(query, clampInt(args.limit, 1, 12, 8))
-    if (!page.ok) return { ok: false, text: `background_web_search: ${page.reason ?? 'no results'}` }
-    return {
-      ok: page.results.length > 0,
-      text: formatResults(`BACKGROUND WEB SEARCH (off-screen — visible tab unchanged): ${query}`, page.results)
-    }
   }
 
   /** Trusted mouse click via CDP (press + release). */
@@ -780,15 +769,6 @@ function normalizeUrl(raw: string): string {
   } catch {
     return raw.trim().replace(/[/#]+$/, '').toLowerCase()
   }
-}
-
-/** Format a ranked search-results list as compact model-facing text. */
-function formatResults(header: string, results: HiddenSearchResult[]): string {
-  if (results.length === 0) return `${header}\n(no results)`
-  const body = results
-    .map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}${r.snippet ? `\n   ${r.snippet}` : ''}`)
-    .join('\n')
-  return `${header} — ${results.length} result(s)\n${body}`
 }
 
 function searchQueryArgs(args: Record<string, any>): { query: string; regex: boolean } {

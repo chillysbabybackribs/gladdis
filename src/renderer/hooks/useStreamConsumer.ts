@@ -91,6 +91,28 @@ export function applyStreamEventToMessages(
     }
     return out
   }
+
+  if (event.type === 'progress_step') {
+    const existingIndex = parts.findIndex((part) => part.kind === 'progress_step' && part.step === event.step)
+    const stepPart = {
+      kind: 'progress_step',
+      step: event.step,
+      total: event.total,
+      status: event.status,
+      title: event.title,
+      detail: event.detail
+    } as const
+
+    const nextParts = parts.slice()
+    if (existingIndex === -1) {
+      nextParts.push(stepPart)
+    } else {
+      nextParts[existingIndex] = { ...nextParts[existingIndex], ...stepPart }
+    }
+    out[index] = { ...message, parts: nextParts }
+    return out
+  }
+
   return messages
 }
 

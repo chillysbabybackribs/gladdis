@@ -1,4 +1,5 @@
 import type { ContractTrace } from '../../../shared/types'
+import type { PipelineProgressStep } from '../../../shared/types'
 
 export interface ToolActivity {
   callId: string
@@ -11,6 +12,10 @@ export interface ToolActivity {
   preview?: string
 }
 
+export interface ProgressStepPart extends PipelineProgressStep {
+  kind: 'progress_step'
+}
+
 /**
  * One ordered fragment of an assistant turn. The agent loop interleaves prose
  * and tool calls, so a turn is stored as a sequence of parts in arrival order.
@@ -19,6 +24,7 @@ export type Part =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; tool: ToolActivity }
   | { kind: 'contract'; trace: ContractTrace }
+  | ProgressStepPart
 
 /** Append a text delta to the last text part, opening a new one if the most
  *  recent part is a tool (so prose after a tool starts its own segment). */

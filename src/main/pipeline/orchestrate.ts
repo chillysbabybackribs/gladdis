@@ -2,7 +2,7 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { PageCapture } from '../../../shared/types'
 import { Planner, normalizePlanSteps, type LlmComplete } from './Planner'
-import { Runner, type ReplanFn } from './Runner'
+import { Runner, type PipelineProgressEvent, type ReplanFn } from './Runner'
 import type { PipelineDeps, Plan, PlanStep, Trajectory } from './types'
 
 const MAX_REPLAN_ACTIONS = 30
@@ -46,6 +46,8 @@ export interface OrchestrateOpts {
   onRunnerReady?: (runner: Runner) => void
   /** Real-time callback to stream log lines back to the host/user. */
   onLog?: (msg: string) => void
+  /** Real-time callback for step-by-step progress updates. */
+  onProgress?: (event: PipelineProgressEvent) => void
 }
 
 /** The replan path: re-perceive live state, ask the model for a fresh tail.
@@ -117,7 +119,17 @@ function compactStep(step: PlanStep): Pick<PlanStep, 'intent' | 'action' | 'post
 }
 
 export async function orchestrate(opts: OrchestrateOpts): Promise<Trajectory> {
-  const { tabId, task, site, deps, llm, outDir = 'pipeline-runs', onRunnerReady, onLog } = opts
+  const {
+    tabId,
+    task,
+    site,
+    deps,
+    llm,
+    outDir = 'pipeline-runs',
+    onRunnerReady,
+    onLog,
+    onProgress
+  } = opts
 
   onLog?.(`🎬 [Pipeline] Starting task: "${task}"`)
 
@@ -130,9 +142,25 @@ export async function orchestrate(opts: OrchestrateOpts): Promise<Trajectory> {
   const planner = new Planner(llm)
   const plan: Plan = await planner.plan(task, landing, site)
   onLog?.(`📝 [Pipeline] Plan generated with ${plan.steps.length} step(s).`)
+  onProgress?.({
+    step: 0,
+    total: Math.max(plan.steps.length, 1),
+    title: 'Plan ready',
+    status: 'planned',
+    detail: `Generated ${plan.steps.length} step(s): "${task}".`
+  })
+  for (const step of plan.steps.entries()) {
+    onProgress?.({
+      step: step[0] + 1,
+      total: plan.steps.length,
+      title: step[1].intent.slice(0, 140),
+      status: 'planned',
+      detail: `Planned: ${step[1].intent.slice(0, 120)}`
+    })
+  }
 
   // 3. Execute deterministically; the model only re-enters on a failed check.
-  const runner = new Runner(deps, onLog)
+  const runner = new Runner(deps, onLog, onProgress)
   onRunnerReady?.(runner)
   const trajectory = await runner.run(tabId, plan, makeReplan(llm))
 

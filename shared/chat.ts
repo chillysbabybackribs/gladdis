@@ -227,10 +227,15 @@ export interface ContractTrace {
   }
 }
 
+export interface StoredProgressStepPart extends PipelineProgressStep {
+  kind: 'progress_step'
+}
+
 export type StoredMessagePart =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; tool: StoredToolActivity }
   | { kind: 'contract'; trace: ContractTrace }
+  | StoredProgressStepPart
 
 /** A persisted chat message: the full renderer-visible shape. */
 export interface StoredMessage {
@@ -357,6 +362,16 @@ export type TtsResult =
   | { ok: true; audio: string; format: 'mp3' }
   | { ok: false; reason: 'no-key' | 'error'; message?: string }
 
+export type ProgressStepStatus = 'planned' | 'running' | 'passed' | 'replanned' | 'failed' | 'aborted' | 'skipped'
+
+export interface PipelineProgressStep {
+  step: number
+  total?: number
+  status: ProgressStepStatus
+  title: string
+  detail?: string
+}
+
 /** Streamed chunk events pushed main -> renderer, keyed by requestId. */
 export type ChatStreamEvent =
   | { requestId: string; assistantMessageId?: string; type: 'delta'; text: string }
@@ -395,6 +410,7 @@ export type ChatStreamEvent =
       durationMs?: number
       preview: string
     }
+  | ({ requestId: string; assistantMessageId?: string; type: 'progress_step' } & PipelineProgressStep)
 
 /**
  * Which providers are usable (never the keys themselves).

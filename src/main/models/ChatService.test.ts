@@ -51,20 +51,20 @@ function makeService(workspaceRoot: string | null = null) {
 }
 
 describe('ChatService provider hardening', () => {
-  it('exposes the model-driven browser surface (search/fetch_page/background_web_search), not the old engine', () => {
+  it('exposes a single unified search tool plus fetch_page', () => {
     const toolNames = AGENT_TOOLS.map((tool) => tool.name)
-    expect(toolNames).toEqual(expect.arrayContaining(['search', 'navigate', 'background_web_search']))
-    // The over-engineered app-owned search tool is gone.
+    expect(toolNames).toEqual(expect.arrayContaining(['search', 'navigate', 'fetch_page']))
+    expect(toolNames).not.toContain('background_web_search')
     expect(toolNames).not.toContain('search_task')
     expect(toolNames).not.toContain('search_web')
     expect(toolNames).not.toContain('check_page')
   })
 
   it('gives all three providers ONE browser surface (Codex sees the same tools)', () => {
-    // Codex's browser tools are derived from AGENT_TOOLS — same surface, namespaced.
     expect(CODEX_BROWSER_TOOL_NAMES.has('search')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('navigate')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('background_web_search')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('fetch_page')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('background_web_search')).toBe(false)
     expect(CODEX_BROWSER_TOOL_NAMES.has('search_task')).toBe(false)
     expect(CODEX_BROWSER_TOOL_NAMES.has('check_page')).toBe(false)
   })

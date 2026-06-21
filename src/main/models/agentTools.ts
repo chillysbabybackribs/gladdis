@@ -12,12 +12,8 @@
  *                   formats the result through PageDigest. The LLM receives a
  *                   clean, structured "paper" — no raw HTML, no base64 images.
  *
- *   SEARCH tools  → `search` (visible-tab web search + ranked results),
- *                   `fetch_page` (open a URL in the visible tab + read it), and
- *                   `background_web_search` (off-screen breadth, visible tab
- *                   untouched). The model drives the loop: query → open → read →
- *                   answer (or ask a clarifying question). No hidden scoring,
- *                   no app-side "is this good enough" gate.
+ *   SEARCH tools  → `search` (compact SERP index + live evidence card),
+ *                   `fetch_page` (full bounded digest when deeper read needed).
  *
  *   TASK tool     → `browse_task`. Multi-step browser goal handled entirely by
  *                   the deterministic pipeline (Planner → Runner → finalResponse).
@@ -197,12 +193,23 @@ const CAPTURE_TOOLS: ToolDef[] = [
 const SEARCH_TOOLS: ToolDef[] = [
   {
     name: 'search',
-    description: 'Web search (hidden lookup). Open best result with fetch_page/navigate.',
+    description:
+      'Web search via embedded Chromium (DuckDuckGo). Searches your query exactly as given — ' +
+      'it does NOT invent query variants, so phrase the query well, and if you want alternate ' +
+      'phrasings issue multiple search calls. ' +
+      'Returns a SERP index (with instant answers) plus live evidence extracted from the top ' +
+      'results probed in background tabs. ' +
+      'Paywalls, cookie walls, and login gates are detected and flagged automatically. ' +
+      'If it returns "no results", the reason (timeout / bot-challenge / empty) is included — ' +
+      'on a transient failure retry or fetch_page one of your earlier hits rather than rephrasing blindly. ' +
+      'Use fetch_page when you need a deeper read of a specific URL beyond what the evidence already provides.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The search query.' },
-        limit: { type: 'number', description: 'Max results. Default 8.' }
+        limit: { type: 'number', description: 'Max SERP hits to return (1–8). Default 4.' },
+        digest_top: { type: 'number', description: 'Top hits to probe for live evidence (0–3). Default 2.' },
+        focus: { type: 'string', description: 'Optional keyword to weight excerpt selection.' }
       },
       required: ['query']
     }
@@ -210,8 +217,8 @@ const SEARCH_TOOLS: ToolDef[] = [
   {
     name: 'fetch_page',
     description:
-      'Open a URL in the visible tab, wait for navigation to settle, and return a bounded page digest. ' +
-      'Use this after search/background_web_search when you need to inspect the chosen result.',
+      'Open a specific URL in the visible tab, wait for navigation to settle, and return a bounded page digest. ' +
+      'Use when you already have a URL (from search results or the user) and need a deeper read.',
     parameters: {
       type: 'object',
       properties: {
@@ -226,19 +233,6 @@ const SEARCH_TOOLS: ToolDef[] = [
         }
       },
       required: ['url']
-    }
-  },
-  {
-    name: 'background_web_search',
-    description:
-      'Off-screen web search for breadth. Does not change the visible tab; open useful results with fetch_page/navigate.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'The search query.' },
-        limit: { type: 'number', description: 'Max results. Default 8.' }
-      },
-      required: ['query']
     }
   }
 ]
@@ -463,7 +457,7 @@ const MEMORY_TOOLS: ToolDef[] = [
 
 /** The complete agent tool surface — ordered by call frequency. */
 export const AGENT_TOOLS: ToolDef[] = [
-  ...SEARCH_TOOLS,     // search, fetch_page, background_web_search
+  ...SEARCH_TOOLS,     // search, fetch_page
   ...TASK_TOOLS,       // browse_task for multi-step browser work
   ...PERCEIVE_TOOLS,   // read_page
   ...CAPTURE_TOOLS,    // screenshot, screenshot_app

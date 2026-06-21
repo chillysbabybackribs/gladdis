@@ -30,7 +30,7 @@ const LOCAL_PATH_RE =
   /(?:^|\s)(?:\.{1,2}\/|~\/|\/[\w.-]|[\w.-]+\/[\w./-]*|[\w.-]+\.(?:ts|tsx|js|jsx|json|md|css|html|cjs|mjs|yml|yaml|toml|lock|env))\b/i
 
 const LOCAL_ACTION_RE =
-  /\b(?:read|inspect|search|find|list|show|open|edit|modify|patch|write|create|delete|rename|move|refactor|implement|fix|debug|test|typecheck|lint|build|run|execute|commit|diff|grep|rg|cat|sed|install|reinstall|uninstall|update|upgrade|npm|pnpm|yarn|npx|pip|pipx|apt|apt-get|brew|sudo|git)\b/i
+  /\b(?:read|inspect|search|find|list|show|open|edit|modify|patch|write|create|delete|rename|move|refactor|implement|fix|debug|test|typecheck|lint|build|run|execute|commit|diff|grep|rg|cat|sed|install|reinstall|uninstall|update|upgrade|wire(?:\s?up)?|integrate|register|hook(?:\s?up)?|configure|enable|add|npm|pnpm|yarn|npx|pip|pipx|apt|apt-get|brew|sudo|git)\b/i
 
 const LOCAL_TARGET_RE =
   /\b(?:repo|repository|codebase|project|source|filesystem|files?|folders?|directories?|path|workspace|working folder|selected folder|terminal|shell|command|app|ui|frontend|component|src|package\.json|tsconfig|vite|electron|react|typescript|packages?|dependenc(?:y|ies)|deps?|tool|tooling|librar(?:y|ies)|modules?|cli|binar(?:y|ies))\b/i
@@ -57,6 +57,22 @@ export function shouldContinueActivePageContext(text: string): boolean {
   if (shouldAttachActivePageContext(t)) return true
   if (URL_RE.test(t) || WEB_SEARCH_RE.test(t) || shouldUseWorkspaceContext(t)) return false
   return ACTIVE_PAGE_FOLLOWUP_RE.test(t)
+}
+
+/**
+ * True for a bare affirmative/continuation ("yes", "do it", "go ahead", "wire it
+ * up") that carries NO routing signal of its own. Such a turn should inherit the
+ * previous turn's tool profile instead of collapsing to conversation-only — the
+ * user is approving the action the assistant just proposed, not starting a new
+ * kind of task. Reuses the same follow-up vocabulary as the active-page path.
+ */
+export function isBareContinuation(text: string): boolean {
+  const t = text.trim()
+  if (!t || t.length > 140) return false
+  // If the message routes on its own merits, it is not a bare continuation.
+  if (URL_RE.test(t) || WEB_SEARCH_RE.test(t) || shouldUseWorkspaceContext(t)) return false
+  if (BROWSER_CONTROL_RE.test(t)) return false
+  return ACTIVE_PAGE_FOLLOWUP_RE.test(t) || /^\s*(?:do it|go ahead|wire it up|set it up|proceed|continue|go for it)\b/i.test(t)
 }
 
 /** True when browser/search tools should be available for this turn. */

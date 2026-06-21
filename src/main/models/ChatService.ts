@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai'
 import type { KeyStore } from './KeyStore'
 import {
   MODELS,
+  isBareContinuation,
   type ChatRequest,
   type ChatStreamEvent,
   type CodexStatus,
@@ -688,6 +689,15 @@ export class ChatService {
   private agentToolProfile(req: ChatRequest): ReturnType<typeof selectAgentToolProfile> {
     const last = req.messages[req.messages.length - 1]
     const userText = last?.role === 'user' ? stripActivePagePreamble(last.content) : ''
+    // A bare "yes"/"do it"/"wire it up" carries no routing signal, so on its own it
+    // collapses to the conversation profile (1 tool) and the model can only TALK about
+    // the work it just promised. When the turn is a bare continuation, inherit the
+    // previous user turn's profile so the approved action keeps its tools.
+    if (isBareContinuation(userText)) {
+      const prevUser = [...req.messages].slice(0, -1).reverse().find((m) => m.role === 'user')
+      const prevText = prevUser ? stripActivePagePreamble(prevUser.content) : ''
+      if (prevText) return selectAgentToolProfile(prevText)
+    }
     return selectAgentToolProfile(userText)
   }
 

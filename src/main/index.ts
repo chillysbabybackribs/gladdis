@@ -10,6 +10,9 @@ import { BrowserTools } from './models/browserTools'
 import { ModelCallLedger } from './models/ModelCallLedger'
 import { synthesizeSpeech } from './models/tts'
 import { broadcastCdpEvent } from './pipeline/activeRunners'
+import installExtension, {
+  REACT_DEVELOPER_TOOLS
+} from 'electron-devtools-installer'
 import {
   IPC,
   type CdpCommand,
@@ -248,6 +251,14 @@ function registerIpc(): void {
 
 app.whenReady().then(async () => {
   await TabManager.ensureSession()
+  if (process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true') {
+    try {
+      const name = await installExtension(REACT_DEVELOPER_TOOLS)
+      console.log(`Added Extension:  ${name}`)
+    } catch (err) {
+      console.log('An error occurred: ', err)
+    }
+  }
   createWindow()
 })
 

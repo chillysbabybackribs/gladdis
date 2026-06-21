@@ -150,6 +150,39 @@ describe('ChatService provider hardening', () => {
     }
   })
 
+  it('keeps tools on a bare "yes"/"do it" that continues the previous turn', () => {
+    const { service } = makeService('/tmp/proj')
+    const profileFor = (messages: Array<{ role: string; content: string }>) =>
+      (service as any).agentToolProfile({ messages } as any) as { name: string; tools: Array<{ name: string }> }
+
+    // The exact failure from the trace: assistant offers to wire up a package,
+    // user says "yes", and the turn must NOT collapse to conversation (1 tool).
+    const continued = profileFor([
+      { role: 'user', content: 'wire up electron-devtools-installer in the main process' },
+      { role: 'assistant', content: 'Sure — want me to run the install or show the code first?' },
+      { role: 'user', content: 'yes' }
+    ])
+    expect(continued.tools.map((t) => t.name)).toContain('run_command')
+    expect(continued.name).not.toBe('conversation')
+
+    for (const affirm of ['do it', 'go ahead', 'wire it up', 'proceed']) {
+      const p = profileFor([
+        { role: 'user', content: 'edit src/main/index.ts to register the devtools' },
+        { role: 'assistant', content: 'Ready when you are.' },
+        { role: 'user', content: affirm }
+      ])
+      expect(p.tools.map((t) => t.name), affirm).toContain('run_command')
+    }
+
+    // A bare "yes" after a NON-filesystem turn must not invent filesystem tools.
+    const afterChat = profileFor([
+      { role: 'user', content: 'tell me a joke' },
+      { role: 'assistant', content: 'Why did the dev cross the road?' },
+      { role: 'user', content: 'yes' }
+    ])
+    expect(afterChat.tools.map((t) => t.name)).not.toContain('run_command')
+  })
+
   it('does not let install/update wording hijack web or conversational turns', () => {
     // The install short-circuit must stay narrow: plain-English "update"/"set up"
     // phrasings about news/web content must not be pulled into a filesystem turn.

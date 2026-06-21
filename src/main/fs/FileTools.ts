@@ -10,24 +10,6 @@ import { createReadStream } from 'fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { createInterface } from 'readline'
 import { promisify } from 'util'
-import { Worker } from 'worker_threads'
-import { cpus } from 'os'
-
-const poolSize = Math.max(2, Math.min(cpus().length - 1, 6))
-let workerPool: Worker[] = []
-
-function initWorkerPool() {
-  if (workerPool.length > 0) return
-  for (let i = 0; i < poolSize; i++) {
-    const w = new Worker(new URL('./rgWorker.ts', import.meta.url))
-    workerPool.push(w)
-  }
-}
-
-function getWorker(): Worker {
-  initWorkerPool()
-  return workerPool[Math.floor(Math.random() * workerPool.length)]
-}
 
 /**
  * Raw filesystem operations the agent can drive. Whole-filesystem scope —
@@ -263,8 +245,7 @@ export class FileTools {
     if (!query.trim()) return { root, hits: [], truncated: false }
     const limit = Math.max(1, Math.min(MAX_ENTRIES, Math.floor(maxResults) || MAX_ENTRIES))
     const context = Math.max(0, Math.min(MAX_SEARCH_CONTEXT_LINES, Math.floor(contextLines) || 0))
-    initWorkerPool()
-    return searchWithRipgrepPool(root, query, glob, context, limit, regex)
+    return searchWithRipgrep(root, query, glob, context, limit, regex)
   }
 
   private async tryReadString(abs: string): Promise<string | null> {
@@ -276,9 +257,13 @@ export class FileTools {
   }
 }
 
-const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', 'dist', 'out', '.next', 'build'])
-
-async function searchWithNode(
+/**
+ * Run rg twice in parallel — once for content matches, once (for fixed-string
+ * queries) for file-name/path matches — then merge and rank through the shared
+ * finalizeSearch. rg already parallelizes across files internally, so no worker
+ * pool is needed; the two lanes just overlap their process time.
+ */
+async function searchWithRipgrep(
   root: string,
   query: string,
   glob: string | undefined,
@@ -286,91 +271,14 @@ async function searchWithNode(
   limit: number,
   regex: boolean
 ): Promise<{ root: string; hits: SearchHit[]; truncated: boolean }> {
-  const ignoreCase = shouldIgnoreCase(query)
   const laneLimit = searchLaneLimit(limit)
-  const matcher = regex
-    ? new RegExp(query, ignoreCase ? 'i' : '')
-    : ignoreCase
-      ? { test: (line: string) => line.toLowerCase().includes(query.toLowerCase()) }
-      : { test: (line: string) => line.includes(query) }
-  const re = glob ? globToRegExp(glob) : null
-  const contentHits: SearchHit[] = []
-  const pathHits: SearchHit[] = []
-  const pending: Promise<void>[] = []
-  let truncated = false
-
-  const walk = async (dir: string): Promise<void> => {
-    if (contentHits.length >= laneLimit && pathHits.length >= laneLimit) {
-      truncated = true
-      return
-    }
-    let names: string[]
-    try {
-      names = await readdir(dir)
-    } catch {
-      return
-    }
-    for (const name of names) {
-      if (contentHits.length >= laneLimit && pathHits.length >= laneLimit) {
-        truncated = true
-        return
-      }
-      if (SKIP_DIRS.has(name)) continue
-      const full = join(dir, name)
-      let st
-      try {
-        st = await stat(full)
-      } catch {
-        continue
-      }
-      if (st.isDirectory()) {
-        await walk(full)
-      } else if (st.isFile()) {
-        if (re && !re.test(name)) continue
-        if (st.size > MAX_SEARCH_FILE_BYTES) continue
-        if (!regex && pathHits.length < laneLimit) {
-          const pathHit = buildPathHit(root, full, query)
-          if (pathHit) pathHits.push(pathHit)
-        } else if (!regex && pathHits.length >= laneLimit) {
-          truncated = true
-        }
-        const scan = searchFile(full, matcher, contentHits, laneLimit, context, () => truncated = true)
-        pending.push(scan)
-        if (pending.length >= SEARCH_CONCURRENCY) await pending.shift()
-      }
-    }
-  }
-
-  await walk(root)
-  await Promise.all(pending)
-  return finalizeSearch(root, query, limit, regex, { hits: contentHits, truncated }, { hits: pathHits, truncated })
-}
-
-async function searchWithRipgrepPool(
-  root: string,
-  query: string,
-  glob: string | undefined,
-  context: number,
-  limit: number,
-  regex: boolean
-): Promise<{ root: string; hits: SearchHit[]; truncated: boolean }> {
-  const worker = getWorker()
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('rg worker timeout')), 30000)
-    worker.once('message', (msg: any) => {
-      clearTimeout(t)
-      if (!msg.success) return reject(new Error(msg.error))
-      // parse + finalize still happens in main for simplicity; rg does the heavy lifting
-      // simple rg JSON lines parse (fallback to empty on error)
-      let parsed: SearchHit[] = []
-      try {
-        const lines = (msg.data || '').trim().split('\n').filter(Boolean)
-        parsed = lines.map((l: string) => JSON.parse(l)).filter((j: any) => j.type === 'match').slice(0, limit)
-      } catch {}
-      resolve({ root, hits: parsed as any, truncated: parsed.length >= limit })
-    })
-    worker.postMessage({ query, root, options: { include: glob, contextLines: context, maxResults: limit } })
-  })
+  const [content, paths] = await Promise.all([
+    searchContentWithRipgrep(root, query, glob, context, laneLimit, regex),
+    regex
+      ? Promise.resolve({ hits: [] as SearchHit[], truncated: false })
+      : searchPathsWithRipgrep(root, query, glob, laneLimit)
+  ])
+  return finalizeSearch(root, query, limit, regex, content, paths)
 }
 
 async function searchContentWithRipgrep(
@@ -556,48 +464,6 @@ async function readLineRange(
     startLine: s,
     endLine: Math.min(e, Math.max(s, totalLines)),
     defaultWindow
-  }
-}
-
-async function searchFile(
-  path: string,
-  matcher: { test: (line: string) => boolean },
-  hits: SearchHit[],
-  limit: number,
-  contextLines: number,
-  markTruncated: () => void
-): Promise<void> {
-  try {
-    const text = await readFile(path, 'utf8')
-    const lines = text.split('\n')
-    for (let i = 0; i < lines.length; i += 1) {
-      if (hits.length >= limit) {
-        markTruncated()
-        return
-      }
-      const line = lines[i]
-      if (matcher.test(line)) {
-        const lineNo = i + 1
-        const startLine = Math.max(1, lineNo - contextLines)
-        const endLine = Math.min(lines.length, lineNo + contextLines)
-        const snippet = lines
-          .slice(startLine - 1, endLine)
-          .map((snippetLine, idx) => `${startLine + idx}: ${snippetLine}`.slice(0, 320))
-          .join('\n')
-        hits.push({
-          path,
-          kind: 'content',
-          line: lineNo,
-          text: line.slice(0, 240),
-          startLine,
-          endLine,
-          snippet,
-          score: 0
-        })
-      }
-    }
-  } catch {
-    /* unreadable / non-utf8-ish files are skipped like before */
   }
 }
 

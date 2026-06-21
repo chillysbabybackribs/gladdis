@@ -89,11 +89,18 @@ export class TabManager {
     this.order.push(id)
     this.win.contentView.addChildView(view)
     this.switch(id)
-    void wc.loadURL(url).catch((err) => {
-      console.warn(`[tab ${id}] load failed:`, (err as Error)?.message ?? err)
-    }).finally(() => {
-      this.onChange()
-    })
+    void (async () => {
+      try {
+        await cdp.attach()
+      } catch (err) {
+        console.error(`[tab ${id}] cdp attach failed during creation:`, err)
+      }
+      wc.loadURL(url).catch((err) => {
+        console.warn(`[tab ${id}] load failed:`, (err as Error)?.message ?? err)
+      }).finally(() => {
+        this.onChange()
+      })
+    })()
     return this.info(tab)
   }
 

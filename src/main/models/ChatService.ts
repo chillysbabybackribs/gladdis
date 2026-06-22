@@ -748,12 +748,16 @@ export class ChatService {
   private anthropic(): Anthropic {
     const apiKey = this.keys.get('anthropic')
     if (!apiKey) throw new Error('No Anthropic API key configured')
-    return new Anthropic({ apiKey })
+    // SDK retries 429/5xx with backoff (honoring Retry-After) internally; this
+    // is the Anthropic/Google equivalent of fetchWithRetry on the raw providers.
+    return new Anthropic({ apiKey, maxRetries: 4 })
   }
   private google(): GoogleGenAI {
     const apiKey = this.keys.get('google')
     if (!apiKey) throw new Error('No Google API key configured')
-    return new GoogleGenAI({ apiKey })
+    // SDK already retries 429/5xx with backoff; set attempts explicitly so the
+    // safeguard is visible alongside Anthropic's maxRetries and fetchWithRetry.
+    return new GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 5 } } })
   }
   /** OpenAI API key retrieval helper. */
   private openAiKey(): string {

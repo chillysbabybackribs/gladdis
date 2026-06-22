@@ -9,12 +9,18 @@ import {
   type SupervisorTransition
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
+import { fetchWithRetry } from './retry'
 
 type FinishUsage = {
   inputTokens?: number
   outputTokens?: number
   cachedInputTokens?: number
   reasoningOutputTokens?: number
+}
+
+type HistoryCompactionPolicy = {
+  maxMessages: number
+  keepTailMessages: number
 }
 type ActiveAuditCall = {
   addOutput: (chunk: unknown) => void
@@ -117,11 +123,19 @@ export function usageFromOpenAi(usage: any): FinishUsage | undefined {
   if (!usage) return undefined
   const inputTokens = typeof usage.prompt_tokens === 'number' ? usage.prompt_tokens : undefined
   const outputTokens = typeof usage.completion_tokens === 'number' ? usage.completion_tokens : undefined
+  const cachedInputTokens =
+    typeof usage.prompt_tokens_details?.cached_tokens === 'number'
+      ? usage.prompt_tokens_details.cached_tokens
+      : typeof usage.input_tokens_details?.cached_tokens === 'number'
+        ? usage.input_tokens_details.cached_tokens
+        : undefined
   const reasoningOutputTokens =
     typeof usage.completion_tokens_details?.reasoning_tokens === 'number'
       ? usage.completion_tokens_details.reasoning_tokens
       : undefined
-  return { inputTokens, outputTokens, reasoningOutputTokens }
+  return inputTokens == null && outputTokens == null && cachedInputTokens == null && reasoningOutputTokens == null
+    ? undefined
+    : { inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens }
 }
 
 export function toOpenAiMessages(req: ChatRequest): OpenAiMessage[] {
@@ -135,7 +149,7 @@ async function openAiFetchJson(args: {
   body: Record<string, any>
   conversationId?: string | null
 }): Promise<any> {
-  const res = await fetch(CHAT_COMPLETIONS_URL, {
+  const res = await fetchWithRetry(CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: openAiHeaders(args.apiKey, args.conversationId),
     body: JSON.stringify(args.body)
@@ -293,12 +307,16 @@ async function streamOpenAiChat(args: {
   onText: (text: string) => void
   conversationId?: string | null
 }): Promise<StreamedTurn> {
-  const res = await fetch(CHAT_COMPLETIONS_URL, {
-    method: 'POST',
-    headers: openAiHeaders(args.apiKey, args.conversationId),
-    body: JSON.stringify({ ...args.body, stream: true, stream_options: { include_usage: true } }),
-    signal: args.signal
-  })
+  const res = await fetchWithRetry(
+    CHAT_COMPLETIONS_URL,
+    {
+      method: 'POST',
+      headers: openAiHeaders(args.apiKey, args.conversationId),
+      body: JSON.stringify({ ...args.body, stream: true, stream_options: { include_usage: true } }),
+      signal: args.signal
+    },
+    { signal: args.signal }
+  )
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => '')
     throw new Error(`OpenAI stream failed (${res.status}): ${detail.slice(0, 500)}`)

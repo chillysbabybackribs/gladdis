@@ -9,6 +9,7 @@ import {
   type SupervisorTransition,
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
+import { fetchWithRetry } from './retry'
 
 // xAI exposes an OpenAI-compatible Chat Completions API. We talk to it with
 // plain fetch + SSE — no SDK — matching the repo's existing OpenAI-compatible
@@ -132,12 +133,16 @@ function grokReasoningEffort(modelId: string, stage: string): GrokReasoningEffor
 
 /** One non-streaming chat completion. Throws on a non-2xx response. */
 async function grokFetchJson(args: GrokFetchArgs): Promise<any> {
-  const res = await fetch(CHAT_COMPLETIONS_URL, {
-    method: 'POST',
-    headers: grokHeaders(args.apiKey, args.conversationId),
-    body: JSON.stringify({ ...args.body, stream: false }),
-    signal: args.signal
-  })
+  const res = await fetchWithRetry(
+    CHAT_COMPLETIONS_URL,
+    {
+      method: 'POST',
+      headers: grokHeaders(args.apiKey, args.conversationId),
+      body: JSON.stringify({ ...args.body, stream: false }),
+      signal: args.signal
+    },
+    { signal: args.signal }
+  )
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
     throw new Error(`xAI request failed (${res.status}): ${detail.slice(0, 500)}`)
@@ -240,12 +245,16 @@ async function streamGrokChat(args: {
   onText: (text: string) => void
   conversationId?: string | null
 }): Promise<StreamedTurn> {
-  const res = await fetch(CHAT_COMPLETIONS_URL, {
-    method: 'POST',
-    headers: grokHeaders(args.apiKey, args.conversationId),
-    body: JSON.stringify({ ...args.body, stream: true, stream_options: { include_usage: true } }),
-    signal: args.signal
-  })
+  const res = await fetchWithRetry(
+    CHAT_COMPLETIONS_URL,
+    {
+      method: 'POST',
+      headers: grokHeaders(args.apiKey, args.conversationId),
+      body: JSON.stringify({ ...args.body, stream: true, stream_options: { include_usage: true } }),
+      signal: args.signal
+    },
+    { signal: args.signal }
+  )
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => '')
     throw new Error(`xAI stream failed (${res.status}): ${detail.slice(0, 500)}`)

@@ -108,7 +108,7 @@ export function ChatPanel({
   modelIdRef.current = modelId
 
   const persistence = useConversationPersistence({
-    enabled: panelId === 'left',
+    panel: panelId,
     convIdRef,
     messagesRef,
     modelIdRef,
@@ -140,17 +140,14 @@ export function ChatPanel({
     return off
   }, [])
 
-  // Restore the last-active conversation on mount (left panel only — the
-  // right panel is intentionally ephemeral so the user always has a clean
-  // sandbox).
+  // Restore each panel's own last-active conversation. lastActive is scoped
+  // by panelId in the main process, so the left panel never steals a chat
+  // that was last touched on the right (and vice versa) — chats are sticky
+  // to whichever side they were created on.
   useEffect(() => {
-    if (panelId !== 'left') {
-      restoredRef.current = true
-      return
-    }
     void (async () => {
       try {
-        const id = await window.gladdis.chats.lastActive()
+        const id = await window.gladdis.chats.lastActive(panelId)
         const conv = id ? await window.gladdis.chats.get(id) : null
         if (conv && conv.messages.length) {
           setConvId(conv.id)
@@ -451,6 +448,7 @@ export function ChatPanel({
             currentId={convId}
             initialTab={settingsTab}
             keyStatus={keyStatus}
+            panel={panelId}
             refreshKey={historyRev}
             onClose={() => setShowSettings(false)}
             onKeysSaved={setKeyStatus}

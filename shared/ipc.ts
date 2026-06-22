@@ -37,9 +37,17 @@ export const IPC = {
   BROWSER_EXEC: 'browser:exec',
   /** Text-to-speech: renderer sends text, main returns synthesized audio. */
   TTS_SPEAK: 'tts:speak',
+  // Real-PTY terminal (xterm.js <-> @lydell/node-pty in main)
+  TERMINAL_CREATE: 'terminal:create',
+  TERMINAL_WRITE: 'terminal:write',
+  TERMINAL_RESIZE: 'terminal:resize',
+  TERMINAL_KILL: 'terminal:kill',
+  TERMINAL_SET_CWD: 'terminal:setCwd',
   // main -> renderer (send)
   TABS_UPDATED: 'tabs:updated',
   CDP_EVENT: 'cdp:event',
   CHAT_STREAM: 'chat:stream',
-  AUDIT_EVENT: 'audit:event'
+  AUDIT_EVENT: 'audit:event',
+  TERMINAL_DATA: 'terminal:data',
+  TERMINAL_EXIT: 'terminal:exit'
 } as const

@@ -6,7 +6,12 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        input: { index: resolve(__dirname, 'src/main/index.ts') }
+        input: { index: resolve(__dirname, 'src/main/index.ts') },
+        // @lydell/node-pty loads a platform-specific .node binary at runtime
+        // (require('@lydell/node-pty-${platform}-${arch}')), which Rollup cannot
+        // bundle. Externalize it (and its platform subpackages) so the main
+        // process resolves them from node_modules at runtime.
+        external: [/^@lydell\/node-pty/]
       }
     }
   },

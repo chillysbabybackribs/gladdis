@@ -2,7 +2,12 @@ import { app } from 'electron'
 import { readFileSync, existsSync } from 'fs'
 import { writeFile, rename } from 'fs/promises'
 import { join } from 'path'
-import type { Conversation, ConversationMeta, ConversationSearchHit } from '../../../shared/types'
+import type {
+  ChatPanelSide,
+  Conversation,
+  ConversationMeta,
+  ConversationSearchHit
+} from '../../../shared/types'
 
 /** Minimal structural-sharing helper (no extra deps). */
 function produce<T extends object>(base: T, recipe: (draft: T) => void): T {
@@ -72,6 +77,10 @@ export class ChatStore {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as Conversation[]
       for (const c of raw) {
         if (c && typeof c.id === 'string') {
+          // Legacy convs (pre-panel-tag) default to 'left' — that was the only
+          // side intentionally persistent before this field existed, so this
+          // keeps existing history visible exactly where the user expects it.
+          if (c.panel !== 'left' && c.panel !== 'right') c.panel = 'left'
           this.convos.set(c.id, c)
         }
       }
@@ -143,16 +152,18 @@ export class ChatStore {
     this.persist()
   }
 
-  list(): ConversationMeta[] {
+  list(panel?: ChatPanelSide): ConversationMeta[] {
     return [...this.convos.values()]
+      .filter((c) => (panel ? (c.panel ?? 'left') === panel : true))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(({ id, title, summary, createdAt, updatedAt, continuesFromId }) => ({
+      .map(({ id, title, summary, createdAt, updatedAt, continuesFromId, panel: side }) => ({
         id,
         title,
         summary,
         createdAt,
         updatedAt,
-        continuesFromId: continuesFromId ?? null
+        continuesFromId: continuesFromId ?? null,
+        panel: side ?? 'left'
       }))
   }
 
@@ -190,6 +201,14 @@ export class ChatStore {
       d.continuesFromId = conv.continuesFromId === undefined
         ? (prev?.continuesFromId ?? null)
         : conv.continuesFromId
+      // Panel ownership is sticky: once a chat has been tagged to a side, no
+      // future save can flip it. This is what stops a conversation from
+      // "switching sides" if it later gets opened or continued from the
+      // opposite panel (the renderer scopes its history modal by panel, so
+      // this is belt-and-suspenders against any cross-panel write path).
+      const desired =
+        conv.panel === 'left' || conv.panel === 'right' ? conv.panel : undefined
+      d.panel = prev?.panel ?? desired ?? 'left'
     })
     this.convos.set(stored.id, stored)
     this.persist()
@@ -211,11 +230,18 @@ export class ChatStore {
     return out
   }
 
-  /** Most recently updated non-empty conversation other than the current one. */
+  /**
+   * Most recently updated non-empty conversation other than the current one,
+   * scoped to the current chat's panel side. Used by recall_history when a
+   * fresh chat has no explicit lineage, so the implicit "previous" never
+   * crosses panels — each side recalls its own chain.
+   */
   previousConversation(currentId: string): Conversation | null {
+    const currentPanel = this.convos.get(currentId)?.panel ?? 'left'
     let best: Conversation | null = null
     for (const c of this.convos.values()) {
       if (c.id === currentId || c.messages.length === 0) continue
+      if ((c.panel ?? 'left') !== currentPanel) continue
       if (!best || c.updatedAt > best.updatedAt) best = c
     }
     return best
@@ -225,17 +251,23 @@ export class ChatStore {
     if (this.convos.delete(id)) this.persist()
   }
 
-  /** Id of the most recently updated conversation, for launch restore. */
-  lastActive(): string | null {
+  /**
+   * Id of the most recently updated conversation, for launch restore. When a
+   * panel is supplied, only that panel's chats are eligible — so the left
+   * panel always restores a left chat and the right panel restores a right
+   * chat, even if the other side was the most recent overall writer.
+   */
+  lastActive(panel?: ChatPanelSide): string | null {
     let best: Conversation | null = null
     for (const c of this.convos.values()) {
+      if (panel && (c.panel ?? 'left') !== panel) continue
       if (!best || c.updatedAt > best.updatedAt) best = c
     }
     return best?.id ?? null
   }
 
   /** Explicit search across saved chats; never injected automatically. */
-  search(query: string, limit = SEARCH_LIMIT): ConversationSearchHit[] {
+  search(query: string, limit = SEARCH_LIMIT, panel?: ChatPanelSide): ConversationSearchHit[] {
     const trimmed = query.trim()
     if (!trimmed) return []
     const lowerQuery = trimmed.toLowerCase()
@@ -243,6 +275,8 @@ export class ChatStore {
     const hits: ConversationSearchHit[] = []
 
     for (const conv of this.convos.values()) {
+      if (panel && (conv.panel ?? 'left') !== panel) continue
+      const side: ChatPanelSide = conv.panel ?? 'left'
       let best: ConversationSearchHit | null = null
       const titleScore = scoreText(conv.title, lowerQuery, tokens)
       conv.messages.forEach((message, index) => {
@@ -257,6 +291,7 @@ export class ChatStore {
           createdAt: conv.createdAt,
           updatedAt: conv.updatedAt,
           continuesFromId: conv.continuesFromId ?? null,
+          panel: side,
           role: message.role,
           messageIndex: index,
           excerpt: compactExcerpt(excerptSource, trimmed),
@@ -273,6 +308,7 @@ export class ChatStore {
           createdAt: conv.createdAt,
           updatedAt: conv.updatedAt,
           continuesFromId: conv.continuesFromId ?? null,
+          panel: side,
           role: 'user',
           messageIndex: 0,
           excerpt: compactExcerpt(conv.title, trimmed),

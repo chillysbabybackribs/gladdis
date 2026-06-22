@@ -34,33 +34,28 @@ export function attachContextMenu(
     const flags = params.editFlags ?? {}
     const canCopySelection = hasText(selectionText) && flags.canCopy !== false
 
-    if (params.isEditable) {
-      template.push(
-        { role: 'undo', enabled: !!flags.canUndo },
-        { role: 'redo', enabled: !!flags.canRedo },
-        { type: 'separator' },
-        { role: 'cut', enabled: !!flags.canCut },
-        { role: 'copy', enabled: !!flags.canCopy },
-        { role: 'paste', enabled: !!flags.canPaste },
-        { role: 'selectAll', enabled: flags.canSelectAll !== false }
-      )
-    } else {
-      if (canCopySelection) template.push({ role: 'copy', enabled: true })
-      if (hasText(linkURL)) {
-        if (template.length) template.push({ type: 'separator' })
-        if (opts.openLinkInNewTab) {
-          template.push({
-            label: 'Open Link in New Tab',
-            click: () => opts.openLinkInNewTab?.(linkURL)
-          })
-        }
+    template.push(
+      { role: 'undo', enabled: !!flags.canUndo },
+      { role: 'redo', enabled: !!flags.canRedo },
+      { type: 'separator' },
+      { role: 'cut', enabled: !!flags.canCut },
+      { role: 'copy', enabled: params.isEditable ? !!flags.canCopy : canCopySelection },
+      { role: 'paste', enabled: !!flags.canPaste },
+      { role: 'selectAll', enabled: flags.canSelectAll !== false }
+    )
+
+    if (!params.isEditable && hasText(linkURL)) {
+      template.push({ type: 'separator' })
+      if (opts.openLinkInNewTab) {
         template.push({
-          label: 'Copy Link Address',
-          click: () => clipboard.writeText(linkURL)
+          label: 'Open Link in New Tab',
+          click: () => opts.openLinkInNewTab?.(linkURL)
         })
       }
-      if (template.length) template.push({ type: 'separator' })
-      template.push({ role: 'selectAll', enabled: flags.canSelectAll !== false })
+      template.push({
+        label: 'Copy Link Address',
+        click: () => clipboard.writeText(linkURL)
+      })
     }
 
     if (opts.inspectElement && typeof params.x === 'number' && typeof params.y === 'number') {

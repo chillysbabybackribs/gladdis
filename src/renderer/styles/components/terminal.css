@@ -1,0 +1,166 @@
+/* ===== Real-PTY terminal: dock chrome, splitter, footer toggle =============
+   The xterm.js canvas itself is styled by @xterm/xterm/css/xterm.css (loaded by
+   the hook). Theme colors come from the JS-level CURSOR_THEME. Everything below
+   is the chrome around the canvas.                                            */
+
+.terminal-dock {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Bottom mode: absolutely positioned overlay between workspace-main and the
+   footer rail. Left/right are set inline by Workspace.tsx so the dock fits
+   the live drawer-aware free space. Top edge gets the drag splitter. */
+.terminal-dock-bottom {
+  position: absolute;
+  z-index: 8;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 -8px 16px -12px rgba(0, 0, 0, 0.4);
+}
+
+/* Side modes: fill the host drawer entirely. */
+.terminal-dock-left,
+.terminal-dock-right {
+  width: 100%;
+  height: 100%;
+}
+
+/* Splitter sits at the very top edge in bottom mode; horizontal version of
+   .drawer-splitter (which is vertical). The shield trick to keep pointermove
+   firing over the native WebContentsView is handled by TerminalDock.tsx. */
+.terminal-splitter {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: row-resize;
+  z-index: 9;
+}
+.terminal-splitter-grip {
+  width: 40px;
+  height: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.12s ease;
+}
+.terminal-splitter:hover .terminal-splitter-grip {
+  background: var(--accent);
+}
+
+.terminal-header {
+  flex: 0 0 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.terminal-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  margin-right: auto;
+  user-select: none;
+}
+
+.terminal-dock-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.terminal-dock-btn {
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.terminal-dock-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+.terminal-dock-btn.is-active {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.terminal-close {
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+}
+.terminal-close:hover {
+  color: var(--danger);
+  background: rgba(228, 106, 97, 0.08);
+}
+
+.terminal-body {
+  flex: 1 1 0;
+  min-height: 0;
+  position: relative;
+  background: var(--bg-panel);
+}
+
+/* The slot div is the visible mount target; the singleton xterm container is
+   appended into it by the hook. Make sure xterm fills the slot. */
+.terminal-slot {
+  position: absolute;
+  inset: 0;
+  padding: 4px 6px 4px 10px;
+  overflow: hidden;
+}
+.terminal-slot .gladdis-terminal-container,
+.terminal-slot .xterm,
+.terminal-slot .xterm-viewport,
+.terminal-slot .xterm-screen {
+  width: 100% !important;
+  height: 100% !important;
+}
+.terminal-slot .xterm-viewport {
+  background: var(--bg-panel) !important;
+}
+
+/* ===== Footer toggle ====================================================== */
+
+.footer-terminal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: color 0.12s ease;
+}
+.footer-terminal-toggle:hover {
+  color: var(--text-primary);
+}
+.footer-terminal-toggle.is-open {
+  color: var(--text-primary);
+}
+.footer-terminal-label {
+  white-space: nowrap;
+}

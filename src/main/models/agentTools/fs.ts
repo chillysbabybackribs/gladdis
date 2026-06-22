@@ -219,5 +219,45 @@ export const FS_TOOLS: ToolDef[] = [
         }
       }
     }
+  },
+  {
+    name: 'launch_web_dev_server',
+    description:
+      'Launches a local development server or preview server asynchronously and optionally loads it in the embedded browser. ' +
+      'Monitors startup logs to auto-detect the URL and port, or waits for a specified port/URL to become responsive.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description: 'The action to perform: "start", "stop", "status", or "restart". Defaults to "start".',
+          enum: ['start', 'stop', 'status', 'restart']
+        },
+        command: {
+          type: 'string',
+          description: 'The command to run to start the dev server (e.g. "npm run dev", "vite"). If omitted, the tool will try to auto-detect a script from package.json.'
+        },
+        cwd: {
+          type: 'string',
+          description: 'The working directory where the server command should be run (relative to workspace root or absolute).'
+        },
+        port: {
+          type: 'number',
+          description: 'Expected port number the server will listen on. If provided, the tool waits until this port becomes responsive.'
+        },
+        url: {
+          type: 'string',
+          description: 'Expected URL / health endpoint to hit (e.g. "http://localhost:3000/"). If provided, the tool polls this URL until it responds.'
+        },
+        open_browser: {
+          type: 'boolean',
+          description: 'Whether to automatically open the dev server URL in a new browser tab once it is ready. Defaults to true.'
+        },
+        timeout_ms: {
+          type: 'number',
+          description: 'Maximum time in milliseconds to wait for the server to become ready. Defaults to 30000.'
+        }
+      }
+    }
   }
 ]

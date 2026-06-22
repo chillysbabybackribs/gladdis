@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react'
-import type { Conversation } from '../../../shared/types'
+import type { ChatPanelSide, Conversation } from '../../../shared/types'
 import type { Message } from '../components/chatTypes'
 
 const SAVE_DEBOUNCE_MS = 400
 
 export interface ConversationPersistenceArgs {
-  /** Whether persistence is enabled for this panel (left = on, right = off). */
-  enabled: boolean
+  /** Which side owns this chat. Stamped on every save so the conv is sticky to this panel. */
+  panel: ChatPanelSide
   /** Live conversation id ref — must always reflect the current chat. */
   convIdRef: MutableRefObject<string>
   /** Live messages ref — used by the debounced save to read latest state without re-binding. */
@@ -67,7 +67,7 @@ export function useConversationPersistence(
   args: ConversationPersistenceArgs
 ): ConversationPersistence {
   const {
-    enabled,
+    panel,
     convIdRef,
     messagesRef,
     modelIdRef,
@@ -84,18 +84,18 @@ export function useConversationPersistence(
   const lastSavedSignatureRef = useRef<string | null>(null)
   const titledIdsRef = useRef<Set<string>>(new Set())
 
-  // Right panel does not persist; mark as "restored" up-front so debounced
-  // save no-ops out cleanly if it somehow gets called.
-  useEffect(() => {
-    if (!enabled) restoredRef.current = true
-  }, [enabled])
-
   const conversationSignature = (
     conversationId: string,
     createdAt: number,
     nextMessages: Message[],
     parentId: string | null = continuesFromIdRef.current
-  ) => JSON.stringify({ id: conversationId, createdAt, continuesFromId: parentId, messages: nextMessages })
+  ) => JSON.stringify({
+    id: conversationId,
+    createdAt,
+    continuesFromId: parentId,
+    panel,
+    messages: nextMessages
+  })
 
   const buildConversation = (
     conversationId = convIdRef.current,
@@ -106,6 +106,7 @@ export function useConversationPersistence(
     id: conversationId,
     title: '', // derived in the main process from the first user message
     continuesFromId: parentId,
+    panel,
     createdAt,
     updatedAt: Date.now(),
     messages: nextMessages

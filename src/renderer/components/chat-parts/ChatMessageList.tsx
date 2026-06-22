@@ -20,7 +20,7 @@ export function ChatMessageList({
       <div className="chat-empty">
         Ask anything.
         <br />
-        The browser on the right is fully owned via CDP.
+        The browser on the left is fully owned via CDP.
       </div>
     )
   }

@@ -11,12 +11,15 @@ import { BrowserTools } from './models/browserTools'
 import { ModelCallLedger } from './models/ModelCallLedger'
 import { synthesizeSpeech } from './models/tts'
 import { broadcastCdpEvent } from './pipeline/activeRunners'
+import { registerTerminalIpc, sendIfLive } from './terminal'
+import type { PtyHost } from './terminal/PtyHost'
 import installExtension, {
   REACT_DEVELOPER_TOOLS
 } from 'electron-devtools-installer'
 import {
   IPC,
   type CdpCommand,
+  type ChatPanelSide,
   type ChatRequest,
   type Conversation,
   type Provider,
@@ -33,6 +36,7 @@ let extractor: PageExtractor
 let audit: ModelCallLedger
 let workspace: WorkspaceStore
 let tools: BrowserTools
+let ptyHost: PtyHost
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const trustLocalCertificates = process.env.GLADDIS_TRUST_LOCAL_CERTS === '1'
@@ -262,15 +266,17 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.AUDIT_LIST, () => audit.list())
 
-  // Chat history persistence
-  ipcMain.handle(IPC.CHATS_LIST, () => chats.list())
+  // Chat history persistence. Both panels persist independently and each
+  // restores its own side on launch, so the optional `panel` arg is what
+  // keeps left and right chats from ever appearing on the wrong side.
+  ipcMain.handle(IPC.CHATS_LIST, (_e, panel?: ChatPanelSide) => chats.list(panel))
   ipcMain.handle(IPC.CHATS_GET, (_e, id: string) => chats.get(id))
   ipcMain.handle(IPC.CHATS_SAVE, (_e, conv: Conversation) => chats.save(conv))
   ipcMain.on(IPC.CHATS_SAVE_SYNC, (e, conv: Conversation) => {
     e.returnValue = chats.save(conv)
   })
   ipcMain.handle(IPC.CHATS_DELETE, (_e, id: string) => chats.delete(id))
-  ipcMain.handle(IPC.CHATS_LAST_ACTIVE, () => chats.lastActive())
+  ipcMain.handle(IPC.CHATS_LAST_ACTIVE, (_e, panel?: ChatPanelSide) => chats.lastActive(panel))
   ipcMain.handle(IPC.CHATS_TITLE, async (_e, id: string, modelId: string) => {
     const conv = chats.get(id)
     if (!conv) return null
@@ -281,7 +287,10 @@ function registerIpc(): void {
     if (title) chats.setTitle(id, title)
     return title
   })
-  ipcMain.handle(IPC.CHATS_SEARCH, (_e, query: string, limit?: number) => chats.search(query, limit))
+  ipcMain.handle(
+    IPC.CHATS_SEARCH,
+    (_e, query: string, limit?: number, panel?: ChatPanelSide) => chats.search(query, limit, panel)
+  )
 
   // Deep page extraction (perception layer)
   ipcMain.handle(IPC.EXTRACT_RUN, (_e, tabId: string) => extractor.run(tabId))
@@ -292,6 +301,15 @@ function registerIpc(): void {
   // Exec bridge: run JS inside a tab's page context, structured result back.
   ipcMain.handle(IPC.BROWSER_EXEC, (_e, tabId: string, jsCode: string) =>
     tabs.executeJavaScript(tabId, jsCode)
+  )
+
+  // Real PTY terminal — the human's interactive shell, separate from any
+  // tool-loop shell access the model already has. Defaults its cwd to the
+  // user-chosen workspace folder so the three "where am I" answers
+  // (terminal, Codex shell, fs tools) all line up.
+  ptyHost = registerTerminalIpc(
+    () => workspace.get().folder,
+    (channel, payload) => sendIfLive(uiView.webContents, channel, payload)
   )
 }
 
@@ -310,4 +328,9 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', () => {
+  // Kill every live shell so we don't orphan PTY processes when the app exits.
+  ptyHost?.disposeAll()
 })

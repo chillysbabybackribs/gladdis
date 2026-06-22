@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type {
+  ChatPanelSide,
   CodexStatus,
   ConversationMeta,
   ConversationSearchHit,
@@ -16,6 +17,8 @@ interface Props {
   currentId: string | null
   initialTab?: Tab
   keyStatus: KeyStatus
+  /** History list + search are scoped to this side so chats stay where they were created. */
+  panel: ChatPanelSide
   refreshKey: number
   onClose: () => void
   onKeysSaved: (status: KeyStatus) => void
@@ -47,6 +50,7 @@ export function ChatSettingsModal({
   currentId,
   initialTab = 'history',
   keyStatus,
+  panel,
   refreshKey,
   onClose,
   onKeysSaved,
@@ -74,16 +78,16 @@ export function ChatSettingsModal({
   )
 
   useEffect(() => {
-    void window.gladdis.chats.list().then(setItems)
-  }, [refreshKey])
+    void window.gladdis.chats.list(panel).then(setItems)
+  }, [refreshKey, panel])
   useEffect(() => {
     const query = searchQuery.trim()
     if (!query) {
       setSearchHits([])
       return
     }
-    void window.gladdis.chats.search(query, 8).then(setSearchHits)
-  }, [searchQuery])
+    void window.gladdis.chats.search(query, 8, panel).then(setSearchHits)
+  }, [searchQuery, panel])
   useEffect(() => {
     void window.gladdis.workspace.get().then(setWorkspace)
   }, [])

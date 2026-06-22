@@ -1,7 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChatPanel } from './ChatPanel'
 import { BrowserPanel } from './BrowserPanel'
 import { Splitter, DRAWER_MIN } from './Splitter'
+import { TerminalDock, type TerminalDockPos } from './TerminalDock'
+import { TerminalToggle } from './TerminalToggle'
+import { useTerminal } from '../hooks/useTerminal'
 
 const LEFT_KEY = 'gladdis:drawer:left'
 const RIGHT_KEY = 'gladdis:drawer:right'
@@ -9,13 +12,32 @@ const LEFT_FRAC_KEY = 'gladdis:drawer:left:frac'
 const RIGHT_FRAC_KEY = 'gladdis:drawer:right:frac'
 const LEFT_ZOOM_KEY = 'gladdis:chat:left:zoom'
 const RIGHT_ZOOM_KEY = 'gladdis:chat:right:zoom'
+const TERMINAL_DOCK_KEY = 'gladdis:terminal:dock'
+const TERMINAL_LAST_DOCK_KEY = 'gladdis:terminal:lastDock'
+const TERMINAL_HEIGHT_KEY = 'gladdis:terminal:height'
 
 const DEFAULT_LEFT_FRAC = 0.16
 const DEFAULT_RIGHT_FRAC = 0.16
+const DEFAULT_TERMINAL_HEIGHT = 280
 const ZOOM_MIN = 0.85
 const ZOOM_MAX = 1.6
 const ZOOM_STEP = 0.1
 const ZOOM_DEFAULT = 1
+
+type TerminalDockState = 'closed' | TerminalDockPos
+
+function loadTerminalDock(): TerminalDockState {
+  const v = safeGetItem(TERMINAL_DOCK_KEY)
+  return v === 'bottom' || v === 'left' || v === 'right' ? v : 'closed'
+}
+function loadLastDock(): TerminalDockPos {
+  const v = safeGetItem(TERMINAL_LAST_DOCK_KEY)
+  return v === 'left' || v === 'right' ? v : 'bottom'
+}
+function loadTerminalHeight(): number {
+  const v = parseFloat(safeGetItem(TERMINAL_HEIGHT_KEY) ?? '')
+  return Number.isFinite(v) && v >= 120 ? v : DEFAULT_TERMINAL_HEIGHT
+}
 
 function safeGetItem(key: string): string | null {
   try {
@@ -137,14 +159,45 @@ export function Workspace() {
   const [rightFrac, setRightFrac] = useState(() => loadFrac(RIGHT_FRAC_KEY, DEFAULT_RIGHT_FRAC))
   const [leftZoom, setLeftZoom] = useState(() => loadZoom(LEFT_ZOOM_KEY))
   const [rightZoom, setRightZoom] = useState(() => loadZoom(RIGHT_ZOOM_KEY))
+  const [terminalDock, setTerminalDockState] = useState<TerminalDockState>(loadTerminalDock)
+  const [terminalHeight, setTerminalHeight] = useState<number>(loadTerminalHeight)
+  const [lastDock, setLastDock] = useState<TerminalDockPos>(loadLastDock)
+  const terminalHostRef = useRef<HTMLDivElement>(null)
+  const terminalHandle = useTerminal(terminalHostRef)
 
   const leftWidth = leftOpen ? `${Math.max(DRAWER_MIN, leftFrac) * 100}%` : '0px'
   const rightWidth = rightOpen ? `${Math.max(DRAWER_MIN, rightFrac) * 100}%` : '0px'
 
+  // Sending the terminal to a side dock guarantees that side's drawer is open
+  // (otherwise the terminal would render into a width:0 column and vanish).
+  // Closing the dock or moving it elsewhere leaves drawer state untouched.
+  const setTerminalDock = (next: TerminalDockState) => {
+    setTerminalDockState(next)
+    safeSetItem(TERMINAL_DOCK_KEY, next)
+    if (next !== 'closed') {
+      setLastDock(next)
+      safeSetItem(TERMINAL_LAST_DOCK_KEY, next)
+    }
+    if (next === 'left' && !leftOpen) {
+      setLeftOpen(true)
+      safeSetItem(LEFT_KEY, '1')
+    }
+    if (next === 'right' && !rightOpen) {
+      setRightOpen(true)
+      safeSetItem(RIGHT_KEY, '1')
+    }
+  }
+
+  // Drawer toggle interactions with the terminal:
+  //   • Opening a drawer occupied by the terminal -> kick terminal to bottom
+  //     so the chat reappears (sticky-last preserved on dock state).
+  //   • Closing a drawer occupied by the terminal -> kick to bottom too, so
+  //     the user never loses their shell session by hitting the chevron.
   const toggleLeft = () => {
     setLeftOpen((open) => {
       const next = !open
       safeSetItem(LEFT_KEY, next ? '1' : '0')
+      if (terminalDock === 'left') setTerminalDock('bottom')
       return next
     })
   }
@@ -152,6 +205,7 @@ export function Workspace() {
     setRightOpen((open) => {
       const next = !open
       safeSetItem(RIGHT_KEY, next ? '1' : '0')
+      if (terminalDock === 'right') setTerminalDock('bottom')
       return next
     })
   }
@@ -174,30 +228,126 @@ export function Workspace() {
     safeSetItem(RIGHT_ZOOM_KEY, String(next))
   }
 
+  const toggleTerminal = () => {
+    setTerminalDock(terminalDock === 'closed' ? lastDock : 'closed')
+  }
+
+  const onTerminalHeightChange = (h: number) => {
+    setTerminalHeight(h)
+    safeSetItem(TERMINAL_HEIGHT_KEY, String(h))
+  }
+
+  // Bottom dock pushes the BROWSER up, never the chats. We do that by mounting
+  // <TerminalDock dock="bottom"/> inside .workspace-center and applying its
+  // height as paddingBottom only to that column. The drawers are siblings of
+  // .workspace-center inside .workspace-main-row, so their height is untouched.
+  // The native WebContentsView shrinks automatically because .browser-stage is
+  // flex:1 inside .browser inside .workspace-center, and useSlotBounds reports
+  // the new rect to TabManager.
+
+  const bottomDockActive = terminalDock === 'bottom'
+  const leftDockActive = terminalDock === 'left' && leftOpen
+  const rightDockActive = terminalDock === 'right' && rightOpen
+
   return (
     <div className="workspace">
-      <div className="workspace-main" ref={rowRef}>
-        {/* Left drawer */}
-        <div
-          className={`drawer drawer-left ${leftOpen ? 'open' : 'closed'}`}
-          style={{ width: leftWidth }}
-        >
-          <ChatPanel panelId="left" zoom={leftZoom} footerSlot={leftOpen ? leftFooterSlot : null} />
-        </div>
-        {leftOpen && <Splitter containerRef={rowRef} onFraction={onLeftFrac} side="left" />}
+      {/* Singleton xterm canvas lives inside this hidden host div. TerminalSlot
+          adopts the xterm container via appendChild so the same shell session
+          and the same scrollback survive moving between dock positions. */}
+      <div
+        id="gladdis-terminal-host"
+        ref={terminalHostRef}
+        style={{
+          position: 'absolute',
+          visibility: 'hidden',
+          pointerEvents: 'none',
+          width: 0,
+          height: 0,
+          left: -99999,
+          top: -99999,
+          overflow: 'hidden'
+        }}
+      />
 
-        {/* Center native browser — fills the remaining space. */}
-        <div className="workspace-center">
-          <BrowserPanel />
-        </div>
+      <div className="workspace-main">
+        <div className="workspace-main-row" ref={rowRef}>
+          {/* Left drawer */}
+          <div
+            className={`drawer drawer-left ${leftOpen ? 'open' : 'closed'}`}
+            style={{ width: leftWidth }}
+          >
+            {leftDockActive ? (
+              <>
+                <div style={{ display: 'none' }}>
+                  <ChatPanel panelId="left" zoom={leftZoom} footerSlot={null} />
+                </div>
+                <TerminalDock
+                  dock="left"
+                  handle={terminalHandle}
+                  onClose={() => setTerminalDock('closed')}
+                  onDockChange={setTerminalDock}
+                />
+              </>
+            ) : (
+              <ChatPanel
+                panelId="left"
+                zoom={leftZoom}
+                footerSlot={leftOpen ? leftFooterSlot : null}
+              />
+            )}
+          </div>
+          {leftOpen && <Splitter containerRef={rowRef} onFraction={onLeftFrac} side="left" />}
 
-        {/* Right drawer */}
-        {rightOpen && <Splitter containerRef={rowRef} onFraction={onRightFrac} side="right" />}
-        <div
-          className={`drawer drawer-right ${rightOpen ? 'open' : 'closed'}`}
-          style={{ width: rightWidth }}
-        >
-          <ChatPanel panelId="right" zoom={rightZoom} footerSlot={rightOpen ? rightFooterSlot : null} />
+          {/* Center native browser — fills the remaining space. The bottom
+              terminal dock is positioned absolutely inside this column so it
+              only shortens the browser, never the adjacent chat drawers. */}
+          <div
+            className={`workspace-center ${bottomDockActive ? 'has-bottom-terminal' : ''}`}
+            style={
+              bottomDockActive ? { paddingBottom: `${terminalHeight}px` } : undefined
+            }
+          >
+            <BrowserPanel />
+            {bottomDockActive && (
+              <TerminalDock
+                dock="bottom"
+                handle={terminalHandle}
+                onClose={() => setTerminalDock('closed')}
+                onDockChange={setTerminalDock}
+                height={terminalHeight}
+                onHeightChange={onTerminalHeightChange}
+              />
+            )}
+          </div>
+
+          {/* Right drawer */}
+          {rightOpen && (
+            <Splitter containerRef={rowRef} onFraction={onRightFrac} side="right" />
+          )}
+          <div
+            className={`drawer drawer-right ${rightOpen ? 'open' : 'closed'}`}
+            style={{ width: rightWidth }}
+          >
+            {rightDockActive ? (
+              <>
+                <div style={{ display: 'none' }}>
+                  <ChatPanel panelId="right" zoom={rightZoom} footerSlot={null} />
+                </div>
+                <TerminalDock
+                  dock="right"
+                  handle={terminalHandle}
+                  onClose={() => setTerminalDock('closed')}
+                  onDockChange={setTerminalDock}
+                />
+              </>
+            ) : (
+              <ChatPanel
+                panelId="right"
+                zoom={rightZoom}
+                footerSlot={rightOpen ? rightFooterSlot : null}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -215,7 +365,7 @@ export function Workspace() {
           >
             <DrawerChevron side="left" open={leftOpen} />
           </button>
-          {leftOpen && (
+          {leftOpen && !leftDockActive && (
             <>
               <div className="footer-action-slot" ref={setLeftFooterSlot} />
               <ChatZoomControl side="left" zoom={leftZoom} onChange={onLeftZoom} />
@@ -223,11 +373,13 @@ export function Workspace() {
           )}
         </div>
         <div className="workspace-footer-spacer" />
+        <TerminalToggle open={terminalDock !== 'closed'} onClick={toggleTerminal} />
+        <div className="workspace-footer-spacer" />
         <div
           className={`footer-chat-controls right ${rightOpen ? 'is-open' : ''}`}
           style={{ width: rightOpen ? rightWidth : undefined }}
         >
-          {rightOpen && (
+          {rightOpen && !rightDockActive && (
             <>
               <div className="footer-action-slot right" ref={setRightFooterSlot} />
               <ChatZoomControl side="right" zoom={rightZoom} onChange={onRightZoom} />

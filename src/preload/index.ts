@@ -3,6 +3,7 @@ import {
   IPC,
   type CdpCommand,
   type CdpEventPayload,
+  type ChatPanelSide,
   type ChatRequest,
   type ChatStreamEvent,
   type Conversation,
@@ -11,6 +12,9 @@ import {
   type Provider,
   type TabInfo,
   type TabsUpdatedState,
+  type TerminalDataEvent,
+  type TerminalExitEvent,
+  type TerminalSpawnOpts,
   type ViewBounds
 } from '../../shared/types'
 
@@ -80,14 +84,15 @@ const api: GladdisApi = {
     }
   },
   chats: {
-    list: () => ipcRenderer.invoke(IPC.CHATS_LIST),
+    list: (panel?: ChatPanelSide) => ipcRenderer.invoke(IPC.CHATS_LIST, panel),
     get: (id: string) => ipcRenderer.invoke(IPC.CHATS_GET, id),
     save: (conv: Conversation) => ipcRenderer.invoke(IPC.CHATS_SAVE, conv),
     saveSync: (conv: Conversation) => ipcRenderer.sendSync(IPC.CHATS_SAVE_SYNC, conv),
     delete: (id: string) => ipcRenderer.invoke(IPC.CHATS_DELETE, id),
-    lastActive: () => ipcRenderer.invoke(IPC.CHATS_LAST_ACTIVE),
+    lastActive: (panel?: ChatPanelSide) => ipcRenderer.invoke(IPC.CHATS_LAST_ACTIVE, panel),
     autoTitle: (id: string, modelId: string) => ipcRenderer.invoke(IPC.CHATS_TITLE, id, modelId),
-    search: (query: string, limit?: number) => ipcRenderer.invoke(IPC.CHATS_SEARCH, query, limit)
+    search: (query: string, limit?: number, panel?: ChatPanelSide) =>
+      ipcRenderer.invoke(IPC.CHATS_SEARCH, query, limit, panel)
   },
   extract: {
     run: (tabId: string) => ipcRenderer.invoke(IPC.EXTRACT_RUN, tabId),
@@ -95,6 +100,24 @@ const api: GladdisApi = {
   },
   browser: {
     exec: (tabId: string, jsCode: string) => ipcRenderer.invoke(IPC.BROWSER_EXEC, tabId, jsCode)
+  },
+  terminal: {
+    create: (opts: TerminalSpawnOpts) => ipcRenderer.invoke(IPC.TERMINAL_CREATE, opts),
+    write: (id: string, data: string) => ipcRenderer.send(IPC.TERMINAL_WRITE, id, data),
+    resize: (id: string, cols: number, rows: number) =>
+      ipcRenderer.send(IPC.TERMINAL_RESIZE, id, cols, rows),
+    kill: (id: string) => ipcRenderer.invoke(IPC.TERMINAL_KILL, id),
+    setCwd: (id: string, folder: string) => ipcRenderer.send(IPC.TERMINAL_SET_CWD, id, folder),
+    onData: (cb: (e: TerminalDataEvent) => void) => {
+      const listener = (_e: unknown, payload: TerminalDataEvent) => cb(payload)
+      ipcRenderer.on(IPC.TERMINAL_DATA, listener)
+      return () => ipcRenderer.removeListener(IPC.TERMINAL_DATA, listener)
+    },
+    onExit: (cb: (e: TerminalExitEvent) => void) => {
+      const listener = (_e: unknown, payload: TerminalExitEvent) => cb(payload)
+      ipcRenderer.on(IPC.TERMINAL_EXIT, listener)
+      return () => ipcRenderer.removeListener(IPC.TERMINAL_EXIT, listener)
+    }
   }
 }
 

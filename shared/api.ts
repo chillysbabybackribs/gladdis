@@ -7,6 +7,7 @@ import type {
   ViewBounds
 } from './browser'
 import type {
+  ChatPanelSide,
   ChatRequest,
   ChatStreamEvent,
   CodexStatus,
@@ -22,6 +23,12 @@ import type {
 } from './chat'
 import type { PageCapture } from './extraction'
 import type { ModelOption } from './models'
+import type {
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalInfo,
+  TerminalSpawnOpts
+} from './terminal'
 
 export interface GladdisApi {
   tabs: {
@@ -81,8 +88,8 @@ export interface GladdisApi {
     onEvent: (cb: (event: ModelCallEvent) => void) => () => void
   }
   chats: {
-    /** Conversation headers, newest-updated first. */
-    list: () => Promise<ConversationMeta[]>
+    /** Conversation headers, newest-updated first; pass a panel to scope by side. */
+    list: (panel?: ChatPanelSide) => Promise<ConversationMeta[]>
     /** Full conversation (messages included), or null if missing. */
     get: (id: string) => Promise<Conversation | null>
     /** Upsert a conversation; returns its persisted form. */
@@ -91,12 +98,16 @@ export interface GladdisApi {
     saveSync: (conv: Conversation) => Conversation
     /** Delete a conversation by id. */
     delete: (id: string) => Promise<void>
-    /** Id of the most recently updated conversation, or null. */
-    lastActive: () => Promise<string | null>
+    /** Id of the most recently updated conversation for `panel`, or null. */
+    lastActive: (panel?: ChatPanelSide) => Promise<string | null>
     /** Generate and persist a short title for a saved conversation. */
     autoTitle: (id: string, modelId: string) => Promise<string | null>
-    /** Explicit full-history search across saved chats. */
-    search: (query: string, limit?: number) => Promise<ConversationSearchHit[]>
+    /** Explicit full-history search across saved chats, optionally scoped to a side. */
+    search: (
+      query: string,
+      limit?: number,
+      panel?: ChatPanelSide
+    ) => Promise<ConversationSearchHit[]>
   }
   extract: {
     /** Deeply extract the page in a tab (deterministic, CDP-driven). */
@@ -107,5 +118,21 @@ export interface GladdisApi {
   browser: {
     /** Run JS inside a tab's page context. */
     exec: (tabId: string, jsCode: string) => Promise<ExecResult>
+  }
+  terminal: {
+    /** Spawn a new PTY session and return its id (one shell per id). */
+    create: (opts: TerminalSpawnOpts) => Promise<TerminalInfo>
+    /** Send keystrokes / raw bytes into the PTY's stdin. */
+    write: (id: string, data: string) => void
+    /** Resize the PTY (FitAddon-driven, fires on dock or window resize). */
+    resize: (id: string, cols: number, rows: number) => void
+    /** Kill the shell process and release the PTY. */
+    kill: (id: string) => Promise<void>
+    /** Convenience: `cd <folder>` inside the running shell. */
+    setCwd: (id: string, folder: string) => void
+    /** Stream of ANSI bytes from the PTY (xterm.write consumes directly). */
+    onData: (cb: (e: TerminalDataEvent) => void) => () => void
+    /** Fires once when the shell exits or is killed. */
+    onExit: (cb: (e: TerminalExitEvent) => void) => () => void
   }
 }

@@ -40,6 +40,7 @@ import {
   runSearchTool
 } from './tools/searchTools'
 import { runShellCommand } from './tools/shellTools'
+import { runLaunchWebDevServer } from './tools/devServerTool'
 import {
   runAuditCodebase,
   runBrowseTask,
@@ -295,6 +296,8 @@ export class BrowserTools {
           return runValidation(this.taskDeps(), args)
         case 'run_command':
           return runShellCommand({ files: this.files }, args)
+        case 'launch_web_dev_server':
+          return runLaunchWebDevServer({ files: this.files, tabs: this.tabs }, args)
         case 'publish_changes':
           return runPublishChanges(this.taskDeps(), args)
 

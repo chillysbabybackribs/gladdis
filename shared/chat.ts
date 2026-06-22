@@ -194,6 +194,15 @@ export type ModelCallEvent =
 
 /** ---- Chat persistence ---- */
 
+/**
+ * Which side a conversation belongs to. Each saved chat is sticky to one side:
+ * it restores there on launch, only shows up in that side's history modal, and
+ * never migrates because some other side happened to update last. Legacy convs
+ * persisted before this field existed are treated as `'left'` (the only side
+ * that was ever intended to persist), so existing history stays put.
+ */
+export type ChatPanelSide = 'left' | 'right'
+
 /** A single tool invocation, persisted alongside its assistant turn. */
 export interface StoredToolActivity {
   callId: string
@@ -374,6 +383,8 @@ export interface Conversation {
   codexThreadId?: string | null
   /** Previous conversation this fresh chat continues from, if any. */
   continuesFromId?: string | null
+  /** Which dock side owns this chat; sticky once set (defaults to 'left' on load). */
+  panel?: ChatPanelSide
   createdAt: number
   updatedAt: number
   messages: StoredMessage[]
@@ -387,6 +398,7 @@ export interface ConversationMeta {
   createdAt: number
   updatedAt: number
   continuesFromId?: string | null
+  panel?: ChatPanelSide
 }
 
 /** One explicit past-chat search hit. */
@@ -397,6 +409,7 @@ export interface ConversationSearchHit {
   createdAt: number
   updatedAt: number
   continuesFromId?: string | null
+  panel?: ChatPanelSide
   role: 'user' | 'assistant'
   messageIndex: number
   excerpt: string

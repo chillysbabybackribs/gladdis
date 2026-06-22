@@ -20,10 +20,16 @@
 
 .workspace-main {
   position: relative;
-  display: flex;
   flex: 1 1 0;
   min-height: 0;
   width: 100%;
+}
+
+.workspace-main-row {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
 }
 
 /* A side chat drawer. Collapses to width:0 with a smooth width transition; the
@@ -53,12 +59,17 @@
 
 /* Center browser column — fills whatever space the drawers leave. Painted the
    browser canvas color so any 1-frame gap while the native view catches up to
-   the animating hole reads as page, not a flash. */
+   the animating hole reads as page, not a flash. `position: relative` so the
+   bottom terminal dock (when active) is positioned against this column only —
+   the chat drawers next to it are untouched. paddingBottom is applied inline
+   when the bottom terminal dock is open, transitioned for smoothness. */
 .workspace-center {
   flex: 1 1 0;
   min-width: 0;
   height: 100%;
+  position: relative;
   background: var(--bg-surface);
+  transition: padding-bottom 0.18s ease;
 }
 
 /* Drag handle between a drawer and the browser. */

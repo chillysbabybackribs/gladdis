@@ -208,7 +208,7 @@ function KeysPane(props: {
       <KeyField label="Anthropic" set={props.status.anthropic} value={props.anthropic} onChange={props.setAnthropic} />
       <KeyField label="Google (Gemini)" set={props.status.google} placeholder="AIza..." value={props.google} onChange={props.setGoogle} />
       <KeyField label="Grok (xAI)" set={props.status.grok} placeholder="xai-..." value={props.grok} onChange={props.setGrok} />
-      <KeyField label="OpenAI (audible replies)" set={props.status.openai} value={props.openai} onChange={props.setOpenai} />
+      <KeyField label="OpenAI (chat & speech)" set={props.status.openai} value={props.openai} onChange={props.setOpenai} />
       <div className="modal-field">
         <span className="modal-label">OpenAI Codex <span className="key-pill set">status</span></span>
         <p className="modal-note">{props.codexLine}</p>

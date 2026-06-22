@@ -373,7 +373,9 @@ export function ChatPanel({
           ? keyStatus.anthropic
           : model.provider === 'grok'
             ? keyStatus.grok
-            : keyStatus.google
+            : model.provider === 'openai'
+              ? keyStatus.openai
+              : keyStatus.google
     if (!usable) {
       setSettingsTab('keys')
       setShowSettings(true)

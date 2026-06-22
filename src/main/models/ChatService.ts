@@ -54,6 +54,12 @@ import {
   streamGrokPlain,
   titleGrok
 } from './providers/grok'
+import {
+  completeOpenAi,
+  runOpenAiToolLoop,
+  streamOpenAiPlain,
+  titleOpenAi
+} from './providers/openai'
 export {
   extractLocalPreviewUrl,
   hasActivePagePreamble,
@@ -248,9 +254,11 @@ export class ChatService {
       const raw =
         model.provider === 'anthropic'
           ? await this.titleAnthropic(model.id, instruction)
-          : model.provider === 'grok'
-            ? await this.titleGrok(model.id, instruction)
-            : await this.titleGoogle(model.id, instruction)
+          : model.provider === 'openai'
+            ? await this.titleOpenAi(model.id, instruction)
+            : model.provider === 'grok'
+              ? await this.titleGrok(model.id, instruction)
+              : await this.titleGoogle(model.id, instruction)
       const title = raw.trim().replace(/^["'\s]+|["'\s.]+$/g, '').replace(/\s+/g, ' ')
       return title || null
     } catch (e) {
@@ -271,6 +279,15 @@ export class ChatService {
   private async titleGoogle(modelId: string, prompt: string): Promise<string> {
     return titleGoogle({
       ai: this.google(),
+      audit: this.audit,
+      modelId,
+      prompt
+    })
+  }
+
+  private async titleOpenAi(modelId: string, prompt: string): Promise<string> {
+    return titleOpenAi({
+      apiKey: this.openAiKey(),
       audit: this.audit,
       modelId,
       prompt
@@ -327,6 +344,17 @@ export class ChatService {
           user,
           maxOutputTokens,
           stage: options.stage ?? 'complete'
+        })
+      } else if (model.provider === 'openai') {
+        return completeOpenAi({
+          apiKey: this.openAiKey(),
+          audit: this.audit,
+          modelId,
+          system,
+          user,
+          maxOutputTokens,
+          stage: options.stage ?? 'complete',
+          conversationId: options.conversationId
         })
       } else if (model.provider === 'grok') {
         return completeGrok({
@@ -424,6 +452,10 @@ export class ChatService {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         if (agentic) await this.agentAnthropic(req, model.id, controller.signal, browserLlm)
         else await this.streamAnthropic(req, model.id, controller.signal)
+      } else if (model.provider === 'openai') {
+        const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
+        if (agentic) await this.agentOpenAi(req, model.id, controller.signal, browserLlm)
+        else await this.streamOpenAi(req, model.id, controller.signal)
       } else if (model.provider === 'grok') {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         if (agentic) await this.agentGrok(req, model.id, controller.signal, browserLlm)
@@ -574,6 +606,20 @@ export class ChatService {
       signal,
       system: ASK_SYSTEM,
       maxOutputTokens: MAX_OUTPUT_TOKENS
+    })
+  }
+
+  private async streamOpenAi(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
+    this.logSystemPrompt('openai', 'plain', ASK_SYSTEM)
+    return streamOpenAiPlain({
+      apiKey: this.openAiKey(),
+      audit: this.audit,
+      emit: this.emit,
+      req,
+      modelId,
+      signal,
+      system: ASK_SYSTEM,
+      maxTokens: MAX_OUTPUT_TOKENS
     })
   }
 
@@ -789,6 +835,48 @@ export class ChatService {
     }
   }
 
+  /* ============================ AGENT MODE (OpenAI) ============================ */
+
+  private async agentOpenAi(
+    req: ChatRequest,
+    modelId: string,
+    signal: AbortSignal,
+    browserLlm?: LlmComplete
+  ): Promise<void> {
+    const profile = this.agentToolProfile(req)
+    const agentSystem = await buildAgentSystem(profile.tools)
+    const workspaceBlock = this.workspaceSystemBlock(profile)
+    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
+    supervisor.start()
+    this.logSystemPrompt('openai', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
+    try {
+      await runOpenAiToolLoop({
+        apiKey: this.openAiKey(),
+        audit: this.audit,
+        emit: this.emit,
+        req,
+        modelId,
+        signal,
+        browserLlm,
+        tools: this.tools,
+        ctx: this.toolContext(req, browserLlm),
+        toolDefs: profile.tools,
+        agentSystem,
+        workspaceBlock,
+        maxTokens: MAX_OUTPUT_TOKENS,
+        keepResults: VERBATIM_TOOL_RESULTS,
+        supervisor: {
+          iterationStarted: supervisor.iterationStarted,
+          transition: supervisor.transition
+        }
+      })
+      supervisor.complete()
+    } catch (err) {
+      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
+      throw err
+    }
+  }
+
   /* ============================ AGENT MODE (Grok) ============================ */
 
   private async agentGrok(
@@ -841,6 +929,12 @@ export class ChatService {
     const apiKey = this.keys.get('google')
     if (!apiKey) throw new Error('No Google API key configured')
     return new GoogleGenAI({ apiKey })
+  }
+  /** OpenAI API key retrieval helper. */
+  private openAiKey(): string {
+    const apiKey = this.keys.get('openai')
+    if (!apiKey) throw new Error('No OpenAI API key configured')
+    return apiKey
   }
   /** Grok uses xAI's OpenAI-compatible REST API directly, so we pass the raw key. */
   private grokKey(): string {

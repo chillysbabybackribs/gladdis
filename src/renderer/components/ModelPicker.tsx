@@ -39,6 +39,8 @@ export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }:
         return keyStatus.google
       case 'grok':
         return keyStatus.grok
+      case 'openai':
+        return keyStatus.openai
       default:
         return false
     }

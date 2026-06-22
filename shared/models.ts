@@ -1,6 +1,5 @@
-// 'openai' is used ONLY as a KeyStore slot for the text-to-speech feature
-// (audible replies). It is never a chat model provider — no ModelOption carries
-// it — so the provider branches in ChatService/ModelPicker never see it.
+// 'openai' is a key slot for the text-to-speech feature (audible replies)
+// and now also a fully supported chat model provider for modern OpenAI models.
 // 'grok' (xAI) is a real chat provider, reached over xAI's OpenAI-compatible API.
 export type Provider = 'anthropic' | 'google' | 'codex' | 'openai' | 'grok'
 
@@ -39,6 +38,11 @@ export const MODELS: ModelOption[] = [
   { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google', availability: 'verified' },
   { id: 'grok-4.3', label: 'Grok 4.3', provider: 'grok', availability: 'speculative' },
   { id: 'grok-build-0.1', label: 'Grok Build 0.1', provider: 'grok', availability: 'speculative' },
+  { id: 'openai-gpt-5.5', label: 'GPT 5.5', provider: 'openai', availability: 'verified' },
+  { id: 'openai-gpt-5.4', label: 'GPT 5.4', provider: 'openai', availability: 'verified' },
+  { id: 'openai-gpt-5.4-pro', label: 'GPT 5.4 Pro', provider: 'openai', availability: 'verified' },
+  { id: 'openai-gpt-5.4-mini', label: 'GPT 5.4 Mini', provider: 'openai', availability: 'verified' },
+  { id: 'openai-gpt-5.4-nano', label: 'GPT 5.4 Nano', provider: 'openai', availability: 'verified' },
   { id: 'gpt-5.5', label: 'Codex · GPT-5.5', provider: 'codex' },
   { id: 'gpt-5.4', label: 'Codex · GPT-5.4', provider: 'codex' },
   { id: 'gpt-5.4-mini', label: 'Codex · GPT-5.4 Mini', provider: 'codex' },

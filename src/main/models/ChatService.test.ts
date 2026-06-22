@@ -340,7 +340,7 @@ describe('ChatService provider hardening', () => {
     const broker = tools.setCapabilityBroker.mock.calls[0][0]
 
     await broker.repoOverview(
-      { requestId: 'req-loop', assistantMessageId: 'assistant-loop', taskId: 'task-loop' },
+      { requestId: 'req-loop', assistantMessageId: 'assistant-loop', taskId: 'task-loop', iteration: 4 },
       { workspaceRoot: '/tmp/selected-project', focus: 'chat service' }
     )
 
@@ -351,6 +351,7 @@ describe('ChatService provider hardening', () => {
       taskId: 'task-loop',
       event: 'phase_changed',
       phase: 'inspect',
+      iteration: 4,
       summary: 'Gathering repository overview.'
     }))
   })

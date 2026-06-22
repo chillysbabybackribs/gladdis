@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useMemo, useState, type ReactNode } from 'react'
 import type { ContractTrace } from '../../../shared/types'
 import { renderMarkdown } from '../lib/markdown'
 import type {
@@ -10,6 +10,22 @@ import type {
   ToolActivity,
   VerificationStatePart
 } from './chatTypes'
+import { ToolRun } from './chat-parts/ToolRun'
+
+/**
+ * Shallow array compare — element references must match. Used by `memo`
+ * comparators below so an array prop (`parts`/`steps`/`tools`) rebuilt with
+ * the same content (immutable update style: spread + appended new tail)
+ * skips re-rendering the heavy children whose internals haven't changed.
+ */
+function shallowArrayEqual<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
 
 const STEP_STATUS_LABEL: Record<ProgressStepPart['status'], string> = {
   planned: 'Planned',
@@ -37,103 +53,6 @@ const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
   const html = useMemo(() => renderMarkdown(text), [text])
   return <div className="md" dangerouslySetInnerHTML={{ __html: html }} />
 })
-
-const TOOL_LABEL: Record<string, string> = {
-  execute_in_browser: 'Running script',
-  search: 'Searching',
-  fetch_page: 'Opening page',
-  browse_task: 'Running task',
-  read_page: 'Reading page',
-  navigate: 'Navigating',
-  screenshot_confirmation: 'Confirming screenshot',
-  click_xy: 'Clicking',
-  type_text: 'Typing',
-  press_key: 'Pressing key',
-  cdp_command: 'CDP command',
-  read_file: 'Reading file',
-  write_file: 'Writing file',
-  edit_file: 'Editing file',
-  list_dir: 'Listing dir',
-  search_files: 'Searching files',
-  read_clipboard: 'Reading clipboard',
-  write_clipboard: 'Writing clipboard',
-  run_validation: 'Validating',
-  recall_history: 'Recalling history'
-}
-
-/** Verb pair for a tool: [present-continuous (running), past (settled)]. */
-const TOOL_VERB: Record<string, [string, string]> = {
-  execute_in_browser: ['Running script', 'Ran script'],
-  search: ['Searching the web for', 'Searched the web for'],
-  fetch_page: ['Opening', 'Opened'],
-  browse_task: ['Running task', 'Ran task'],
-  read_page: ['Reading the page', 'Read the page'],
-  navigate: ['Navigating to', 'Navigated to'],
-  screenshot_confirmation: ['Confirming', 'Confirmed'],
-  click_xy: ['Clicking', 'Clicked'],
-  type_text: ['Typing', 'Typed'],
-  press_key: ['Pressing', 'Pressed'],
-  cdp_command: ['Running', 'Ran'],
-  read_file: ['Reading', 'Read'],
-  write_file: ['Writing', 'Wrote'],
-  edit_file: ['Editing', 'Edited'],
-  list_dir: ['Listing', 'Listed'],
-  search_files: ['Searching files for', 'Searched files for'],
-  read_clipboard: ['Reading clipboard', 'Read clipboard'],
-  write_clipboard: ['Writing clipboard', 'Wrote to clipboard'],
-  run_validation: ['Validating', 'Validated'],
-  recall_history: ['Recalling earlier history', 'Recalled earlier history']
-}
-
-/** Trailing-path basename, so "/a/b/ChatPanel.tsx" reads as "ChatPanel.tsx". */
-function baseName(path: string): string {
-  const trimmed = path.replace(/\/+$/, '')
-  const tail = trimmed.split('/').filter(Boolean).pop() ?? trimmed
-  return tail || path
-}
-
-/**
- * One clean natural-language line for a tool call, e.g. "Read ChatPanel.tsx" or
- * "Searching the web for performance tuning". Tense follows status: running
- * reads present-continuous, settled reads past; an error appends "— failed".
- */
-function toolSentence(tool: ToolActivity): string {
-  const name = baseToolName(tool.tool)
-  const a = (tool.args ?? {}) as Record<string, any>
-  const [running, past] = TOOL_VERB[name] ?? [TOOL_LABEL[name] ?? name, TOOL_LABEL[name] ?? name]
-  // Past tense only on success; a failed/in-flight call reads present-continuous
-  // ("Validating typecheck — failed", not "Validated … — failed").
-  const verb = tool.status === 'ok' ? past : running
-
-  let object = ''
-  if (name === 'read_file' || name === 'write_file' || name === 'edit_file' || name === 'list_dir') {
-    object = a.path ? baseName(String(a.path)) : ''
-  } else if (name === 'search' || name === 'search_files') {
-    object = a.query ? `“${String(a.query).slice(0, 60)}”` : ''
-  } else if (name === 'fetch_page' || name === 'navigate' || name === 'screenshot_confirmation') {
-    object = a.url ? normalizeDisplayUrl(String(a.url)).replace(/^https?:\/\//, '') : ''
-  } else if (name === 'click_xy') {
-    object = `at (${a.x}, ${a.y})`
-  } else if (name === 'type_text') {
-    object = a.text ? `“${String(a.text).slice(0, 40)}”` : ''
-  } else if (name === 'press_key') {
-    object = a.key ?? ''
-  } else if (name === 'cdp_command') {
-    object = a.method ?? ''
-  } else if (name === 'run_validation') {
-    object = a.check ?? ''
-  } else if (name === 'read_clipboard') {
-    object = `(${String(a.selection || 'clipboard')})`
-  } else if (name === 'write_clipboard') {
-    const text = String(a.text ?? '')
-    object = text.trim() ? `“${text.slice(0, 60)}”` : '(empty text)'
-  } else if (name === 'browse_task') {
-    object = a.task ? String(a.task).slice(0, 60) : ''
-  }
-
-  const sentence = object ? `${verb} ${object}` : verb
-  return tool.status === 'error' ? `${sentence} — failed` : sentence
-}
 
 const LOOP_EVENT_LABEL: Record<LoopStatePart['event'], string> = {
   task_started: 'Task started',
@@ -176,11 +95,19 @@ const LOOP_PHASE_LABEL: Record<LoopStatePart['phase'], string> = {
   done: 'Done'
 }
 
+/** Activity parts that are collapsed together into one quiet reasoning group. */
+type ActivityPart =
+  | LoopStatePart
+  | CapabilityActivityPart
+  | VerificationStatePart
+  | TaskMemoryPart
+
 export const ChatMessageBody = memo(function ChatMessageBody({ message }: { message: Message }) {
   if (message.parts && message.parts.length) {
     const blocks: ReactNode[] = []
     let toolRun: ToolActivity[] = []
     let progressRun: ProgressStepPart[] = []
+    let activityRun: ActivityPart[] = []
     const allTools = message.parts
       .filter((part) => part.kind === 'tool')
       .map((part) => part.tool)
@@ -198,42 +125,41 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       )
       progressRun = []
     }
+    const flushActivity = () => {
+      if (!activityRun.length) return
+      const run = activityRun
+      blocks.push(<ActivityGroup key={`activity-${blocks.length}`} parts={run} />)
+      activityRun = []
+    }
+    const flushAll = () => {
+      flushTools()
+      flushProgress()
+      flushActivity()
+    }
     message.parts.forEach((part, idx) => {
       if (part.kind === 'tool') {
+        flushActivity()
         toolRun.push(part.tool)
         return
       }
       if (part.kind === 'progress_step') {
         flushTools()
+        flushActivity()
         progressRun.push(part)
         return
       }
-      if (part.kind === 'loop_state') {
+      if (
+        part.kind === 'loop_state' ||
+        part.kind === 'capability_activity' ||
+        part.kind === 'verification_state' ||
+        part.kind === 'task_memory'
+      ) {
         flushTools()
         flushProgress()
-        blocks.push(<LoopStateCard key={`loop-${idx}`} part={part} />)
+        activityRun.push(part)
         return
       }
-      if (part.kind === 'capability_activity') {
-        flushTools()
-        flushProgress()
-        blocks.push(<CapabilityActivityCard key={`capability-${idx}`} part={part} />)
-        return
-      }
-      if (part.kind === 'verification_state') {
-        flushTools()
-        flushProgress()
-        blocks.push(<VerificationStateCard key={`verification-${idx}`} part={part} />)
-        return
-      }
-      if (part.kind === 'task_memory') {
-        flushTools()
-        flushProgress()
-        blocks.push(<TaskMemoryCard key={`memory-${idx}`} part={part} />)
-        return
-      }
-      flushTools()
-      flushProgress()
+      flushAll()
       if (part.kind === 'contract') {
         blocks.push(<ContractTraceLine key={`contract-${idx}`} trace={part.trace} tools={allTools} />)
         return
@@ -242,8 +168,7 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
         blocks.push(<MarkdownBlock key={idx} text={part.text} />)
       }
     })
-    flushTools()
-    flushProgress()
+    flushAll()
     return <>{blocks}</>
   }
 
@@ -265,17 +190,22 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
   )
 })
 
-function PipelineProgress({ steps }: { steps: ProgressStepPart[] }) {
-  const ordered = [...steps].sort((a, b) => a.step - b.step)
-  const latest = new Map<number, ProgressStepPart>()
-  for (const step of ordered) latest.set(step.step, step)
-  const latestSteps = [...latest.entries()]
-    .map(([step, part]) => ({ step, part }))
-    .sort((a, b) => a.step - b.step)
-  const planStep = latestSteps.find(({ step }) => step === 0)?.part
-  const rendered = latestSteps
-    .filter(({ step }) => step > 0)
-    .map(({ part }) => part)
+const PipelineProgress = memo(function PipelineProgress({ steps }: { steps: ProgressStepPart[] }) {
+  // Each text-delta render of ChatMessageBody used to redo this sort + Map
+  // build. Cache by the steps reference so renders that don't change the
+  // pipeline run skip the work entirely.
+  const { planStep, rendered } = useMemo(() => {
+    const ordered = [...steps].sort((a, b) => a.step - b.step)
+    const latest = new Map<number, ProgressStepPart>()
+    for (const step of ordered) latest.set(step.step, step)
+    const latestSteps = [...latest.entries()]
+      .map(([step, part]) => ({ step, part }))
+      .sort((a, b) => a.step - b.step)
+    return {
+      planStep: latestSteps.find(({ step }) => step === 0)?.part,
+      rendered: latestSteps.filter(({ step }) => step > 0).map(({ part }) => part)
+    }
+  }, [steps])
 
   return (
     <section className="pipeline-progress">
@@ -305,29 +235,52 @@ function PipelineProgress({ steps }: { steps: ProgressStepPart[] }) {
       </ol>
     </section>
   )
+}, (prev, next) => shallowArrayEqual(prev.steps, next.steps))
+
+function CompactEventCard({
+  title,
+  meta,
+  detail,
+  tone = 'neutral'
+}: {
+  title: string
+  meta?: string | null
+  detail?: string | null
+  tone?: 'neutral' | 'live' | 'error' | 'success'
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const hasDetail = !!detail?.trim()
+  return (
+    <section className={`activity-card ${tone} ${expanded ? 'expanded' : ''}`}>
+      <button
+        type="button"
+        className={`activity-card-header ${hasDetail ? 'toggle' : ''}`}
+        onClick={() => hasDetail && setExpanded((open) => !open)}
+        aria-expanded={hasDetail ? expanded : undefined}
+      >
+        <span className="activity-card-dot" />
+        <span className="activity-card-title">{title}</span>
+        {meta && <span className="activity-card-meta">{meta}</span>}
+        {hasDetail && <span className="activity-card-caret">{expanded ? 'Hide' : 'Details'}</span>}
+      </button>
+      {hasDetail && expanded ? (
+        <div className="activity-card-body">
+          <pre>{detail}</pre>
+        </div>
+      ) : null}
+    </section>
+  )
 }
 
 function LoopStateCard({ part }: { part: LoopStatePart }) {
+  const detail = [part.summary, part.reason].filter(Boolean).join('\n')
   return (
-    <section className="tool-run">
-      <div className="tool-run-group">
-        <div className="tool-run-group-header">
-          <span className="tool-run-group-title">
-            {LOOP_EVENT_LABEL[part.event]}: {LOOP_PHASE_LABEL[part.phase]}
-          </span>
-          <span className="tool-run-group-duration">Iteration {part.iteration}</span>
-        </div>
-        {(part.summary || part.reason) && (
-          <div className="tool-run-group-body">
-            <div className="tool-call-output">
-              <div className="tool-call-output-box">
-                <pre className="tool-call-output-pre">{part.summary ?? part.reason}</pre>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
+    <CompactEventCard
+      title={`${LOOP_EVENT_LABEL[part.event]}: ${LOOP_PHASE_LABEL[part.phase]}`}
+      meta={`Iteration ${part.iteration}`}
+      detail={detail || null}
+      tone={part.event === 'task_completed' ? 'success' : part.event === 'task_blocked' || part.event === 'task_aborted' ? 'error' : 'live'}
+    />
   )
 }
 
@@ -337,25 +290,12 @@ function CapabilityActivityCard({ part }: { part: CapabilityActivityPart }) {
     .filter(Boolean)
     .join(' · ')
   return (
-    <section className="tool-run">
-      <div className={`tool-run-group ${part.event === 'capability_failed' ? 'error' : ''}`}>
-        <div className="tool-run-group-header">
-          <span className="tool-run-group-title">{title}</span>
-          {part.durationMs != null && (
-            <span className="tool-run-group-duration">{formatMs(part.durationMs)}</span>
-          )}
-        </div>
-        {(part.summary || meta) && (
-          <div className="tool-run-group-body">
-            <div className="tool-call-output">
-              <div className="tool-call-output-box">
-                <pre className="tool-call-output-pre">{[part.summary, meta].filter(Boolean).join('\n')}</pre>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
+    <CompactEventCard
+      title={title}
+      meta={part.durationMs != null ? formatMs(part.durationMs) : meta}
+      detail={[part.summary, meta].filter(Boolean).join('\n') || null}
+      tone={part.event === 'capability_failed' ? 'error' : part.event === 'capability_completed' || part.event === 'capability_cache_hit' ? 'success' : 'live'}
+    />
   )
 }
 
@@ -370,22 +310,11 @@ function VerificationStateCard({ part }: { part: VerificationStatePart }) {
     .filter(Boolean)
     .join('\n')
   return (
-    <section className="tool-run">
-      <div className={`tool-run-group ${part.status === 'fail' || part.status === 'blocked' ? 'error' : ''}`}>
-        <div className="tool-run-group-header">
-          <span className="tool-run-group-title">{title}</span>
-        </div>
-        {(part.summary || extra) && (
-          <div className="tool-run-group-body">
-            <div className="tool-call-output">
-              <div className="tool-call-output-box">
-                <pre className="tool-call-output-pre">{[part.summary, extra].filter(Boolean).join('\n')}</pre>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
+    <CompactEventCard
+      title={title}
+      detail={[part.summary, extra].filter(Boolean).join('\n') || null}
+      tone={part.status === 'fail' || part.status === 'blocked' ? 'error' : part.event === 'verification_passed' ? 'success' : 'live'}
+    />
   )
 }
 
@@ -398,24 +327,98 @@ function TaskMemoryCard({ part }: { part: TaskMemoryPart }) {
     .filter(Boolean)
     .join('\n')
   return (
-    <section className="tool-run">
-      <div className="tool-run-group">
-        <div className="tool-run-group-header">
-          <span className="tool-run-group-title">{title}</span>
-        </div>
-        {(part.summary || extra) && (
-          <div className="tool-run-group-body">
-            <div className="tool-call-output">
-              <div className="tool-call-output-box">
-                <pre className="tool-call-output-pre">{[part.summary, extra].filter(Boolean).join('\n')}</pre>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </section>
+    <CompactEventCard
+      title={title}
+      detail={[part.summary, extra].filter(Boolean).join('\n') || null}
+    />
   )
 }
+
+/** One-line label for any collapsed activity part. */
+function activityLabel(part: ActivityPart): string {
+  switch (part.kind) {
+    case 'loop_state':
+      return `${LOOP_EVENT_LABEL[part.event]}: ${LOOP_PHASE_LABEL[part.phase]}`
+    case 'capability_activity':
+      return `${CAPABILITY_EVENT_LABEL[part.event]} ${part.capability}${part.cached ? ' (cached)' : ''}`
+    case 'verification_state':
+      return part.check
+        ? `${VERIFICATION_EVENT_LABEL[part.event]}: ${part.check}`
+        : VERIFICATION_EVENT_LABEL[part.event]
+    case 'task_memory':
+      return `${part.event.replaceAll('_', ' ')} (${part.scope})`
+  }
+}
+
+function activityTone(part: ActivityPart): 'neutral' | 'live' | 'error' | 'success' {
+  switch (part.kind) {
+    case 'loop_state':
+      if (part.event === 'task_completed') return 'success'
+      if (part.event === 'task_blocked' || part.event === 'task_aborted') return 'error'
+      return 'live'
+    case 'capability_activity':
+      if (part.event === 'capability_failed') return 'error'
+      if (part.event === 'capability_completed' || part.event === 'capability_cache_hit') return 'success'
+      return 'live'
+    case 'verification_state':
+      if (part.status === 'fail' || part.status === 'blocked') return 'error'
+      if (part.event === 'verification_passed') return 'success'
+      return 'live'
+    case 'task_memory':
+      return 'neutral'
+  }
+}
+
+function renderActivityCard(part: ActivityPart, idx: number): ReactNode {
+  switch (part.kind) {
+    case 'loop_state':
+      return <LoopStateCard key={`loop-${idx}`} part={part} />
+    case 'capability_activity':
+      return <CapabilityActivityCard key={`capability-${idx}`} part={part} />
+    case 'verification_state':
+      return <VerificationStateCard key={`verification-${idx}`} part={part} />
+    case 'task_memory':
+      return <TaskMemoryCard key={`memory-${idx}`} part={part} />
+  }
+}
+
+const TERMINAL_TONES = new Set(['success', 'error'])
+
+/**
+ * Collapses a run of loop/capability/verification/memory events into a single
+ * quiet, Cursor-style reasoning block: one summary row (the most recent event)
+ * that expands to the full step list. Keeps the timeline readable so tool cards
+ * and prose carry the visual weight.
+ *
+ * Memoized so streaming text-delta renders of ChatMessageBody skip the body
+ * whenever the activity slice hasn't changed.
+ */
+const ActivityGroup = memo(function ActivityGroup({ parts }: { parts: ActivityPart[] }) {
+  const [expanded, setExpanded] = useState(false)
+  const last = parts[parts.length - 1]
+  const tone = activityTone(last)
+  // While the run is mid-flight (no terminal event yet) keep the live pulse.
+  const isLive = !TERMINAL_TONES.has(tone)
+  const groupTone = isLive ? 'live' : tone
+  return (
+    <section className={`activity-run ${groupTone} ${expanded ? 'expanded' : ''}`}>
+      <button
+        type="button"
+        className="activity-run-header"
+        onClick={() => setExpanded((open) => !open)}
+        aria-expanded={expanded}
+      >
+        <span className="activity-card-dot" />
+        <span className="activity-run-title">{activityLabel(last)}</span>
+        {parts.length > 1 && (
+          <span className="activity-run-count">{parts.length} steps</span>
+        )}
+        <span className="activity-card-caret">{expanded ? 'Hide' : 'Steps'}</span>
+      </button>
+      {expanded && <div className="activity-run-body">{parts.map(renderActivityCard)}</div>}
+    </section>
+  )
+}, (prev, next) => shallowArrayEqual(prev.parts, next.parts))
 
 export type ContractValidationState =
   | 'no-edits'
@@ -425,14 +428,26 @@ export type ContractValidationState =
   | 'validated-after-repair'
   | 'auto-validated'
 
-function ContractTraceLine({ trace, tools }: { trace: ContractTrace; tools: ToolActivity[] }) {
+const ContractTraceLine = memo(function ContractTraceLine({
+  trace,
+  tools
+}: {
+  trace: ContractTrace
+  tools: ToolActivity[]
+}) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(false)
-  const validation = deriveValidationState(tools)
-  const execution = deriveExecutionSummary(tools)
+  // The two derive* functions each iterate the full tools array. Cache by
+  // tools reference so a streaming text delta that doesn't change tool state
+  // doesn't pay the O(n) walk twice (validation + execution) per render.
+  const validation = useMemo(() => deriveValidationState(tools), [tools])
+  const execution = useMemo(() => deriveExecutionSummary(tools), [tools])
   const toolCount = trace.tools.length
   const profile = PROFILE_LABEL[trace.profile] ?? trace.profile
-  const debugPayload = buildTraceDebugPayload(trace, validation, tools)
+  const debugPayload = useMemo(
+    () => buildTraceDebugPayload(trace, validation, tools),
+    [trace, validation, tools]
+  )
   const copyTrace = async () => {
     try {
       await navigator.clipboard.writeText(JSON.stringify(debugPayload, null, 2))
@@ -504,7 +519,7 @@ function ContractTraceLine({ trace, tools }: { trace: ContractTrace; tools: Tool
       )}
     </div>
   )
-}
+}, (prev, next) => prev.trace === next.trace && shallowArrayEqual(prev.tools, next.tools))
 
 function TraceInput({ label, value }: { label: string; value?: string }) {
   return (
@@ -738,304 +753,43 @@ function isEditTool(tool: string): boolean {
 function baseToolName(tool: string): string {
   return tool.startsWith('gladdis.') ? tool.slice('gladdis.'.length) : tool
 }
-
-const ChevronIcon = () => (
-  <svg className="tool-chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="6 9 12 15 18 9" />
-  </svg>
-)
-
-const Spinner = () => (
-  <svg className="tool-spinner" viewBox="0 0 24 24">
-    <circle className="path" cx="12" cy="12" r="10" fill="none" strokeWidth="3" />
-  </svg>
-)
-
-const CheckIcon = () => (
-  <svg className="tool-check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="20 6 9 17 4 12" />
-  </svg>
-)
-
-const ErrorIcon = () => (
-  <svg className="tool-error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10" />
-    <line x1="12" y1="8" x2="12" y2="12" />
-    <line x1="12" y1="16" x2="12.01" y2="16" />
-  </svg>
-)
-
-function isEditOrWriteTool(tool: string): boolean {
-  const name = baseToolName(tool)
-  return name === 'edit_file' || name === 'write_file'
-}
-
-function renderToolTitle(tool: ToolActivity): ReactNode {
-  const name = baseToolName(tool.tool)
-  const a = (tool.args ?? {}) as Record<string, any>
-  const [running, past] = TOOL_VERB[name] ?? [TOOL_LABEL[name] ?? name, TOOL_LABEL[name] ?? name]
-  const verb = tool.status === 'ok' ? past : running
-
-  let objectNode: ReactNode = null
-  if (name === 'read_file' || name === 'write_file' || name === 'edit_file' || name === 'list_dir') {
-    if (a.path) {
-      const displayPath = baseName(String(a.path))
-      objectNode = <code className="tool-highlight-code" title={String(a.path)}>{displayPath}</code>
-    }
-  } else if (name === 'search' || name === 'search_files') {
-    if (a.query) {
-      objectNode = <span className="tool-highlight-query">“{String(a.query).slice(0, 60)}”</span>
-    }
-  } else if (name === 'fetch_page' || name === 'navigate' || name === 'screenshot_confirmation') {
-    if (a.url) {
-      const cleanUrl = normalizeDisplayUrl(String(a.url)).replace(/^https?:\/\//, '')
-      objectNode = <code className="tool-highlight-code" title={String(a.url)}>{cleanUrl}</code>
-    }
-  } else if (name === 'click_xy') {
-    objectNode = <span>at <strong className="tool-highlight-coords">({a.x}, {a.y})</strong></span>
-  } else if (name === 'type_text') {
-    if (a.text) {
-      objectNode = <span className="tool-highlight-query">“{String(a.text).slice(0, 40)}”</span>
-    }
-  } else if (name === 'press_key') {
-    if (a.key) {
-      objectNode = <code className="tool-highlight-code">{String(a.key)}</code>
-    }
-  } else if (name === 'cdp_command') {
-    if (a.method) {
-      objectNode = <code className="tool-highlight-code">{String(a.method)}</code>
-    }
-  } else if (name === 'read_clipboard') {
-    objectNode = <code className="tool-highlight-code">{String(a.selection || 'clipboard')}</code>
-  } else if (name === 'write_clipboard') {
-    if (a.text) {
-      objectNode = <span className="tool-highlight-query">“{String(a.text).slice(0, 60)}”</span>
-    }
-  } else if (name === 'run_validation') {
-    if (a.check) {
-      objectNode = <code className="tool-highlight-code">{String(a.check)}</code>
-    }
-  } else if (name === 'run_command') {
-    if (a.command) {
-      objectNode = <code className="tool-highlight-code" title={String(a.command)}>{String(a.command).slice(0, 60)}{String(a.command).length > 60 ? '…' : ''}</code>
-    }
-  } else if (name === 'browse_task') {
-    if (a.task) {
-      objectNode = <span className="tool-highlight-query">“{String(a.task).slice(0, 60)}”</span>
-    }
-  }
-
-  return (
-    <span className="tool-title-text">
-      {verb} {objectNode}
-      {tool.status === 'error' && <span className="tool-title-failed"> — failed</span>}
-    </span>
-  )
-}
-
-function DiffViewer({ preview }: { preview: string }) {
-  if (!preview) return null
-  
-  const lines = preview.split('\n')
-  return (
-    <div className="diff-viewer">
-      {lines.map((line, idx) => {
-        let className = 'diff-line diff-line-context'
-        if (line.startsWith('+')) {
-          className = 'diff-line diff-line-added'
-        } else if (line.startsWith('-')) {
-          className = 'diff-line diff-line-removed'
-        }
-        return (
-          <div key={idx} className={className}>
-            {line}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function ToolCallCard({ tool }: { tool: ToolActivity }) {
-  const isRunning = tool.status === 'running'
-  const isError = tool.status === 'error'
-  
-  const [expanded, setExpanded] = useState(isRunning || isError)
-
-  useEffect(() => {
-    if (isRunning || isError) {
-      setExpanded(true)
-    }
-  }, [isRunning, isError])
-
-  let statusIcon = <CheckIcon />
-  if (isRunning) {
-    statusIcon = <Spinner />
-  } else if (isError) {
-    statusIcon = <ErrorIcon />
-  }
-
-  const durationLabel = tool.durationMs ? formatMs(tool.durationMs) : null
-  const hasDetails = !!(tool.preview || tool.args)
-
-  return (
-    <div className={`tool-call-card ${tool.status} ${expanded ? 'expanded' : 'collapsed'}`}>
-      <button
-        type="button"
-        className="tool-call-card-header"
-        onClick={() => {
-          if (hasDetails) setExpanded((s) => !s)
-        }}
-        disabled={!hasDetails}
-        aria-expanded={expanded}
-        title={hasDetails ? (expanded ? 'Collapse tool details' : 'Expand tool details') : undefined}
-      >
-        <span className="tool-call-card-status">{statusIcon}</span>
-        <span className="tool-call-card-title">
-          {renderToolTitle(tool)}
-        </span>
-        {durationLabel && (
-          <span className="tool-call-card-duration">{durationLabel}</span>
-        )}
-        {hasDetails && (
-          <span className="tool-call-card-caret">
-            <ChevronIcon />
-          </span>
-        )}
-      </button>
-      
-      {expanded && hasDetails && (
-        <div className="tool-call-card-body">
-          {!!tool.args && (
-            <div className="tool-call-args">
-              <span className="tool-call-args-label">Parameters:</span>
-              <pre className="tool-call-args-pre">
-                {JSON.stringify(sanitizeToolArgs(tool.args), null, 2)}
-              </pre>
-            </div>
-          )}
-          {tool.preview && (
-            <div className="tool-call-output">
-              <span className="tool-call-output-label">Result:</span>
-              <div className="tool-call-output-box">
-                {isEditOrWriteTool(tool.tool) ? (
-                  <DiffViewer preview={tool.preview} />
-                ) : (
-                  <pre className="tool-call-output-pre">{tool.preview}</pre>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ToolRun({ tools }: { tools: ToolActivity[] }) {
-  const isRunning = tools.some((t) => t.status === 'running')
-  const hasError = tools.some((t) => t.status === 'error')
-  
-  const [expanded, setExpanded] = useState(isRunning || hasError)
-  
-  useEffect(() => {
-    if (isRunning || hasError) {
-      setExpanded(true)
-    }
-  }, [isRunning, hasError])
-
-  const totalDuration = tools.reduce((acc, t) => acc + (resolvedDurationMs(t) ?? 0), 0)
-  const durationLabel = totalDuration > 0 ? formatMs(totalDuration) : null
-  const failedCount = tools.filter((t) => t.status === 'error').length
-
-  let statusIcon = <CheckIcon />
-  let statusClass = 'ok'
-  if (isRunning) {
-    statusIcon = <Spinner />
-    statusClass = 'running'
-  } else if (hasError) {
-    statusIcon = <ErrorIcon />
-    statusClass = 'error'
-  }
-
-  return (
-    <section className="tool-run">
-      <div className={`tool-run-group ${statusClass} ${expanded ? 'expanded' : 'collapsed'}`}>
-        <button
-          type="button"
-          className="tool-run-group-header"
-          onClick={() => setExpanded((s) => !s)}
-          aria-expanded={expanded}
-          title={expanded ? 'Collapse tool run' : 'Expand tool run'}
-        >
-          <span className="tool-run-group-status">{statusIcon}</span>
-          <span className="tool-run-group-title">
-            {isRunning ? 'Running tools...' : `Used ${tools.length} ${tools.length === 1 ? 'tool' : 'tools'}`}
-          </span>
-          {failedCount > 0 && (
-            <span className="tool-run-group-failed-badge">
-              {failedCount} failed
-            </span>
-          )}
-          {durationLabel && (
-            <span className="tool-run-group-duration">{durationLabel}</span>
-          )}
-          <span className="tool-run-group-caret">
-            <ChevronIcon />
-          </span>
-        </button>
-        
-        {expanded && (
-          <div className="tool-run-group-body">
-            {tools.map((tool) => (
-              <ToolCallCard key={tool.callId} tool={tool} />
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  )
-}
-
-function resolvedDurationMs(tool: ToolActivity): number | null {
-  if (typeof tool.durationMs === 'number') return Math.max(0, tool.durationMs)
-  if (typeof tool.startedAt === 'number' && typeof tool.endedAt === 'number') {
-    return Math.max(0, tool.endedAt - tool.startedAt)
-  }
-  return null
-}
-
 function formatMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`
   if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.round(ms / 1000)}s`
+  if (ms < 1000 * 60) return `${Math.round(ms / 1000)}s`
+  return `${(ms / 1000 / 60).toFixed(1)}min`
 }
-
-function extractDigestUrl(preview?: string): string {
-  if (!preview) return ''
-  const match = preview.match(/\bURL:\s*(\S+)/i)
-  return match ? normalizeDisplayUrl(match[1]) : ''
-}
-
-function sanitizeToolArgs(args: unknown): unknown {
-  if (!args || typeof args !== 'object') return args ?? null
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-    if (typeof value === 'string') out[key] = value.length > 500 ? `${value.slice(0, 500)}…` : value
-    else if (typeof value === 'number' || typeof value === 'boolean' || value == null) out[key] = value
-    else out[key] = '[object]'
-  }
-  return out
-}
-
-function normalizeDisplayUrl(raw: string): string {
+function normalizeDisplayUrl(url: string, maxLength = 80): string {
   try {
-    const url = new URL(raw)
-    url.hash = ''
-    let value = url.toString().toLowerCase()
-    if (value.endsWith('/')) value = value.slice(0, -1)
-    return value
+    const parsed = new URL(url)
+    const path = parsed.pathname.length > 1 ? parsed.pathname : ''
+    const display = `${parsed.hostname}${path}${parsed.search}${parsed.hash}`
+    return display.length > maxLength ? `${display.slice(0, maxLength - 1)}…` : display
   } catch {
-    return raw.trim().replace(/[/#]+$/, '').toLowerCase()
+    return url
   }
+}
+function sanitizeToolArgs(args: unknown): unknown {
+  if (!args || typeof args !== 'object') return args
+  const sanitized = { ...args } as Record<string, unknown>
+  if ('text' in sanitized && typeof sanitized.text === 'string' && sanitized.text.length > 200) {
+    sanitized.text = `${sanitized.text.slice(0, 200)}…`
+  }
+  return sanitized
+}
+function extractDigestUrl(preview: string | null | undefined): string | null {
+  if (!preview) return null
+  const match = preview.match(/(?:Final URL|URL): (https?:\/\/[^\s]+)/)
+  return match ? normalizeDisplayUrl(match[1]) : null
+}
+function resolvedDurationMs(tool: ToolActivity): number | null {
+  if (tool.durationMs != null) return tool.durationMs
+  if (tool.startedAt && tool.endedAt) {
+    try {
+      return new Date(tool.endedAt).getTime() - new Date(tool.startedAt).getTime()
+    } catch {
+      return null
+    }
+  }
+  return null
 }

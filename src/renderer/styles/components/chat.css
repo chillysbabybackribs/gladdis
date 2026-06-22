@@ -1,5 +1,7 @@
 /* ---------------- Chat panel (left) ---------------- */
 .chat {
+  /* The vars below this comment ARE zoom-scaled by ChatPanel's inline style.
+     They define conversation typography only (messages, markdown, padding). */
   --chat-zoom: 1;
   --chat-message-size: 15px;
   --chat-md-h1-size: 20px;
@@ -9,10 +11,14 @@
   --chat-pre-code-size: 12px;
   --chat-small-size: 11.5px;
   --chat-tiny-size: 10px;
-  --chat-message-gap: 18px;
-  --chat-pad-y: 20px;
-  --chat-pad-x: 18px;
-  --chat-composer-h: 104px;
+  --chat-message-gap: 14px;
+  --chat-pad-y: 16px;
+  --chat-pad-x: 16px;
+  /* The composer is application chrome — its height is intentionally fixed so
+     the input box looks identical across panels regardless of either panel's
+     chat zoom. Do NOT add this var to the inline zoom-scaled style or the
+     left/right composers will visibly drift again. */
+  --chat-composer-h: 164px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -41,11 +47,53 @@
   flex-direction: column;
   gap: var(--chat-message-gap);
   user-select: text;
+  /* No global smooth-scroll: streaming pins must land instantly, and a smooth
+     setting here also animates every user wheel/key gesture, which feels
+     laggy. The jump-to-latest button opts in to smooth scroll via the JS API. */
+  scroll-behavior: auto;
+  /* Anchor scroll position to the bottom by default so that content growth
+     during streaming naturally extends downward instead of pulling the
+     viewport upward. Combined with JS pinning, this is the suspenders-and-
+     belt that keeps the latest reply onscreen. */
+  overflow-anchor: auto;
+  /* Soften momentum scroll on touch hardware so a flick-up registers as one
+     gesture instead of a noisy stream of micro-events. */
+  scrollbar-gutter: stable;
+}
+/* Floating jump-to-latest button — appears only when the user has scrolled
+   away from the bottom. Anchored to the bottom of .chat so it stays above
+   the composer regardless of which messages are rendered. */
+.chat-jump-bottom {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(var(--chat-composer-h) + 10px);
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-faint);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.32);
+  z-index: 4;
+  cursor: pointer;
+  opacity: 0.92;
+  transition: opacity 0.12s ease, transform 0.12s ease, background 0.12s ease;
+}
+.chat-jump-bottom:hover {
+  opacity: 1;
+  background: var(--bg-active);
+  transform: translateX(-50%) translateY(-1px);
+}
+.chat-jump-bottom:active {
+  transform: translateX(-50%) translateY(0);
 }
 .chat-msg {
   min-width: 0;
   max-width: 92%;
-  line-height: 1.6;
+  line-height: 1.55;
   font-size: var(--chat-message-size);
   overflow-wrap: anywhere;
 }
@@ -78,12 +126,13 @@
   background: var(--bg-elevated);
 }
 .chat-msg.user {
-  background: var(--accent-dim);
-  color: #fff;
   align-self: stretch;
   max-width: 100%;
-  padding: 9px 13px;
+  padding: 10px 13px;
   border-radius: var(--radius-lg);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 .chat-msg-meta {
   font-size: var(--chat-small-size);
@@ -105,40 +154,41 @@
   position: relative;
   flex: 0 0 var(--chat-composer-h);
   height: var(--chat-composer-h);
-  padding: 10px 12px 12px;
+  padding: 9px 12px 11px;
   border-top: 1px solid var(--border-subtle);
   min-width: 0;
 }
 
-/* Elevated card — clearly the control surface. */
 .composer-box {
   height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: var(--radius-lg);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02), 0 8px 24px rgba(0, 0, 0, 0.28);
-  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  box-shadow: none;
+  transition: border-color 0.14s ease, background 0.14s ease;
   min-width: 0;
+  overflow: visible;
 }
 .composer-box:focus-within {
-  border-color: var(--accent-dim);
-  box-shadow: 0 0 0 1px var(--accent-dim), 0 8px 28px rgba(0, 0, 0, 0.35);
+  border-color: rgba(61, 111, 214, 0.28);
+  box-shadow: none;
 }
 .composer-context {
-  flex: 0 0 32px;
+  flex: 0 0 38px;
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 6px 8px 0;
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 .composer-turn-controls {
   display: flex;
   align-items: center;
   min-width: 0;
   width: 100%;
-  gap: 8px;
+  gap: 6px;
 }
 
 /* Input */
@@ -154,24 +204,27 @@
   background: transparent;
   color: var(--text-primary);
   font-family: inherit;
-  font-size: var(--chat-message-size);
+  /* Composer is chrome, not content: hold the typography constant so chat
+     zoom never resizes the input box. (--chat-message-size is the zoom-scaled
+     content size; we deliberately don't use it here.) */
+  font-size: 15px;
   line-height: 1.5;
-  padding: 9px 12px 5px;
+  padding: 11px 13px 6px;
   overflow-y: auto;
 }
 .composer-input::placeholder {
-  color: var(--text-muted);
+  color: rgba(162, 170, 180, 0.68);
 }
 
 /* Toolbar — send / stop only (screenshots are model tools, not buttons). */
 .composer-bar {
-  flex: 0 0 43px;
+  flex: 0 0 46px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
   gap: 8px;
-  padding: 6px 8px 7px;
+  padding: 7px 10px 9px;
 }
 
 .composer-bar-left {
@@ -188,14 +241,14 @@
 }
 /* New-chat (+) button, bottom-left: ghost button matching the audio toggle. */
 .composer-new {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--text-secondary);
   background: transparent;
-  border: 1px solid var(--border-strong);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   transition: background 0.12s ease, color 0.12s ease, transform 0.08s ease;
 }
 .composer-new:hover:not(:disabled) {
@@ -213,35 +266,25 @@
   display: inline-flex;
   align-items: center;
   min-width: 0;
-  gap: 5px;
-  font-size: var(--chat-small-size);
+  /* Composer chrome — fixed size regardless of chat zoom. Only shown while a
+     stream is in flight ("working…"); the keyboard-hint variant was removed
+     because Enter-to-send is universal and the chip added visual noise. */
+  font-size: 11.5px;
   color: var(--text-muted);
   white-space: nowrap;
 }
-.composer-hint kbd {
-  font-family: var(--font-mono);
-  font-size: var(--chat-tiny-size);
-  padding: 1px 5px;
-  border: 1px solid var(--border-strong);
-  border-bottom-width: 2px;
-  border-radius: 4px;
-  color: var(--text-secondary);
-}
-.hint-sep {
-  opacity: 0.85;
-}
 .composer-send {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 8px;
   color: #fff;
   background: var(--accent);
   transition: background 0.12s ease, opacity 0.12s ease, transform 0.08s ease;
 }
 .composer-send:hover:not(:disabled) {
-  background: #5aa0fb;
+  background: #6694ff;
 }
 .composer-send:active:not(:disabled) {
   transform: translateY(1px);
@@ -253,11 +296,11 @@
 }
 /* Audible-replies toggle: ghost button, lights up to accent when on. */
 .composer-audio {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 8px;
   color: var(--text-muted);
   background: transparent;
   transition: color 0.12s ease, background 0.12s ease, transform 0.08s ease;
@@ -281,7 +324,7 @@
 }
 .composer-audio-caret {
   width: 16px;
-  height: 30px;
+  height: 32px;
   display: grid;
   place-items: center;
   border-radius: 5px;
@@ -300,9 +343,9 @@
   bottom: calc(100% + 8px);
   width: 200px;
   background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-faint);
   border-radius: var(--radius-lg);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.36);
   padding: 10px;
   z-index: 6;
   display: flex;
@@ -335,7 +378,7 @@
   padding: 4px 6px;
   border-radius: 6px;
   background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-faint);
   color: var(--text-primary);
   font-size: 12px;
 }
@@ -348,7 +391,7 @@
   border-radius: 6px;
   color: var(--text-secondary);
   background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-faint);
   transition: color 0.12s ease, background 0.12s ease;
 }
 .audio-preview:hover:not(:disabled) {
@@ -371,9 +414,9 @@
   right: 12px;
   bottom: calc(100% - 6px);
   background: var(--bg-elevated);
-  border: 1px solid var(--border-strong);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: var(--radius-lg);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
   padding: 5px;
   z-index: 5;
   max-height: 240px;

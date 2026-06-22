@@ -30,11 +30,12 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 0 6px;
+  padding: 0 10px;
   max-width: 180px;
   min-width: 0;
-  border-radius: var(--radius);
+  border-radius: 999px;
   color: var(--text-secondary);
+  border: 1px solid transparent;
 }
 .composer-turn-controls .workspace-btn {
   margin-left: auto;
@@ -42,13 +43,14 @@
 }
 .workspace-btn.set {
   color: var(--text-primary);
-  background: var(--bg-elevated);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 .workspace-btn svg {
   flex: none;
 }
 .workspace-label {
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.1px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -65,15 +67,15 @@
   display: block;
   width: 100%;
   max-width: 100%;
-  padding: 4px 6px;
+  padding: 5px 10px;
   text-align: left;
-  font-size: 13.5px;
+  font-size: 12.5px;
   font-weight: 500;
   letter-spacing: 0.1px;
   color: var(--text-secondary);
   background: transparent;
-  border: none;
-  border-radius: var(--radius);
+  border: 1px solid transparent;
+  border-radius: 999px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -84,7 +86,7 @@
 .model-picker-btn:hover,
 .model-picker-btn.open {
   color: var(--text-primary);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.03);
 }
 .model-menu {
   position: absolute;
@@ -94,9 +96,9 @@
   min-width: min(210px, calc(100cqw - 16px));
   max-width: calc(100cqw - 16px);
   background: var(--bg-surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: var(--radius-lg);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
   padding: 5px;
   z-index: 20;
 }
@@ -113,7 +115,7 @@
   color: var(--text-secondary);
 }
 .model-menu-item:hover {
-  background: var(--bg-elevated);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
 }
 /* Selected row: marked by weight + a trailing tick, no color. */
@@ -140,6 +142,18 @@
   font-weight: 400;
   color: var(--text-muted);
   letter-spacing: 0.2px;
+}
+/* Preview pill: speculative model ids the provider may not have shipped yet. */
+.model-preview {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 1px 6px;
 }
 
 /* Streaming typing indicator */
@@ -178,31 +192,31 @@
 /* Markdown rendering of assistant output */
 .md {
   font-size: var(--chat-message-size);
-  line-height: 1.65;
+  line-height: 1.6;
   user-select: text;
 }
 .md > *:first-child { margin-top: 0; }
 .md > *:last-child { margin-bottom: 0; }
-.md p { margin: 0 0 10px; }
-.md h1, .md h2, .md h3 { margin: 16px 0 7px; line-height: 1.3; }
+.md p { margin: 0 0 8px; }
+.md h1, .md h2, .md h3 { margin: 14px 0 6px; line-height: 1.3; }
 .md h1 { font-size: var(--chat-md-h1-size); }
 .md h2 { font-size: var(--chat-md-h2-size); }
 .md h3 { font-size: var(--chat-md-h3-size); }
-.md ul, .md ol { margin: 0 0 8px; padding-left: 20px; }
+.md ul, .md ol { margin: 0 0 7px; padding-left: 20px; }
 .md li { margin: 2px 0; }
 .md a { color: var(--accent); text-decoration: none; }
 .md a:hover { text-decoration: underline; }
 .md code {
   font-family: var(--font-mono);
   font-size: var(--chat-code-size);
-  background: var(--bg-app);
-  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 4px;
   padding: 1px 5px;
 }
 .md pre {
-  background: var(--bg-app);
-  border: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: var(--radius);
   padding: 10px 12px;
   overflow-x: auto;
@@ -218,7 +232,7 @@
 .md blockquote {
   margin: 0 0 8px;
   padding: 2px 0 2px 12px;
-  border-left: 3px solid var(--border-strong);
+  border-left: 3px solid rgba(255, 255, 255, 0.12);
   color: var(--text-secondary);
 }
 .md table {
@@ -227,12 +241,12 @@
   font-size: var(--chat-pre-code-size);
 }
 .md th, .md td {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   padding: 5px 9px;
   text-align: left;
 }
-.md th { background: var(--bg-elevated); }
-.md hr { border: none; border-top: 1px solid var(--border-subtle); margin: 12px 0; }
+.md th { background: rgba(255, 255, 255, 0.04); }
+.md hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.06); margin: 12px 0; }
 
 /* Keys modal. Scoped to the chat panel (.chat is position:relative + overflow:hidden)
    so the overlay stays over the renderer DOM and never lands under the native

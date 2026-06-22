@@ -17,6 +17,11 @@ import { KeyStore } from './KeyStore'
 import { GoogleGenAI } from '@google/genai'
 import { CodebaseAuditor } from './CodebaseAuditor'
 import type { CapabilityBroker } from './capabilities/CapabilityBroker'
+import {
+  classifyCdpCommand,
+  classifyCommand,
+  readCommandSafetyConfig
+} from './commandSafety'
 
 export interface ToolDef {
   name: string
@@ -152,6 +157,7 @@ export interface ToolContext {
   assistantMessageId?: string
   conversationId?: string | null
   taskId?: string
+  iteration?: number
   fullResults?: Map<string, string>
   llm?: LlmComplete
   onProgress?: (event: PipelineProgressEvent) => void
@@ -337,7 +343,12 @@ export class BrowserTools {
           return { ok: true, text: `Typed ${String(args.text).length} chars.` }
         }
         case 'cdp_command': {
-          const out = await this.tabs.cdpSend(tabId, String(args.method), args.params ?? {})
+          const method = String(args.method ?? '')
+          const verdict = classifyCdpCommand(method)
+          if (!verdict.allowed) {
+            return { ok: false, text: `cdp_command refused: ${verdict.reason}` }
+          }
+          const out = await this.tabs.cdpSend(tabId, method, args.params ?? {})
           return { ok: true, text: cap(safeJson(out)) }
         }
 
@@ -449,10 +460,12 @@ export class BrowserTools {
             };
           }
           const ai = new GoogleGenAI({ apiKey: googleKey });
-          const auditor = new CodebaseAuditor(root, ai);
-          const auditReport = await auditor.runAudit(args.focusPath);
+          const modelOverride = typeof args.model === 'string' && args.model.trim() ? args.model.trim() : undefined;
+          const auditor = new CodebaseAuditor(root, ai, modelOverride);
+          const focusPath = typeof args.focusPath === 'string' ? args.focusPath : undefined;
+          const auditReport = await auditor.runAudit(focusPath);
           return {
-            ok: true,
+            ok: !auditReport.startsWith('Error:'),
             text: auditReport
           };
         }
@@ -498,7 +511,8 @@ export class BrowserTools {
       {
         requestId: ctx.requestId ?? `repo-overview:${ctx.conversationId ?? ctx.tabId}`,
         assistantMessageId: ctx.assistantMessageId,
-        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`,
+        iteration: ctx.iteration ?? 1
       },
       {
         workspaceRoot,
@@ -527,7 +541,8 @@ export class BrowserTools {
       {
         requestId: ctx.requestId ?? `search-repo:${ctx.conversationId ?? ctx.tabId}`,
         assistantMessageId: ctx.assistantMessageId,
-        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`,
+        iteration: ctx.iteration ?? 1
       },
       {
         workspaceRoot,
@@ -561,7 +576,8 @@ export class BrowserTools {
       {
         requestId: ctx.requestId ?? `read-spans:${ctx.conversationId ?? ctx.tabId}`,
         assistantMessageId: ctx.assistantMessageId,
-        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`,
+        iteration: ctx.iteration ?? 1
       },
       {
         workspaceRoot,
@@ -590,7 +606,8 @@ export class BrowserTools {
       {
         requestId: ctx.requestId ?? `research-dossier:${ctx.conversationId ?? ctx.tabId}`,
         assistantMessageId: ctx.assistantMessageId,
-        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`,
+        iteration: ctx.iteration ?? 1
       },
       {
         workspaceRoot,
@@ -622,7 +639,8 @@ export class BrowserTools {
       {
         requestId: ctx.requestId ?? `verify-change:${ctx.conversationId ?? ctx.tabId}`,
         assistantMessageId: ctx.assistantMessageId,
-        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`,
+        iteration: ctx.iteration ?? 1
       },
       {
         workspaceRoot,
@@ -677,10 +695,19 @@ export class BrowserTools {
     if (!command) {
       return { ok: false, text: 'run_command: "command" is required.' }
     }
+    // High-signal denylist only — by design gladdis still has the same OS
+    // reach as the user. The safety module exists to catch the catastrophic
+    // mistakes (rm -rf /, dd of=/dev/sd*, fork bombs, …) and the optional
+    // gates (sudo, pipe-to-shell). All of it is bypassable by env if you
+    // really mean it.
+    const verdict = classifyCommand(command, readCommandSafetyConfig())
+    if (!verdict.allowed) {
+      const hint = verdict.hint ? `\n${verdict.hint}` : ''
+      return { ok: false, text: `run_command refused: ${verdict.reason}${hint}` }
+    }
     const timeout = parseTimeoutMs(args.timeout_ms)
     const cwd = (args.cwd ? String(args.cwd).trim() : '') || this.files.getRoot() || process.cwd()
     try {
-      // Full access by design: same OS reach as the user, no allowlist, no prompt.
       const { stdout, stderr } = await execFileAsync('bash', ['-lc', command], {
         cwd,
         timeout,

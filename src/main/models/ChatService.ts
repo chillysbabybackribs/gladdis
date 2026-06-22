@@ -105,15 +105,15 @@ export class ChatService {
         verifyChange: (input) => validation.verifyChange(input)
       },
       this.emit,
-      ({ requestId, assistantMessageId, taskId, phase, summary }) =>
+      ({ requestId, assistantMessageId, taskId, event, phase, iteration, summary }) =>
         this.emit({
           requestId,
           ...(assistantMessageId ? { assistantMessageId } : {}),
           type: 'loop_state',
           taskId,
-          event: 'phase_changed',
+          event,
           phase,
-          iteration: 1,
+          iteration,
           summary
         })
     )
@@ -676,7 +676,8 @@ export class ChatService {
       {
         requestId: req.requestId,
         assistantMessageId: req.assistantMessageId,
-        taskId: taskIdForRequest(req)
+        taskId: taskIdForRequest(req),
+        iteration: 1
       },
       {
         workspaceRoot,
@@ -695,6 +696,7 @@ export class ChatService {
       assistantMessageId: req.assistantMessageId,
       conversationId: req.conversationId ?? null,
       taskId: taskIdForRequest(req),
+      iteration: 1,
       fullResults: new Map<string, string>(),
       // Carried per-request so concurrent chats can run browser turns under
       // different models without racing a shared field (was BrowserTools.setLlm).

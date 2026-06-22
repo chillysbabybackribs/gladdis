@@ -38,10 +38,10 @@
   transition: width 0.2s ease;
 }
 .drawer.drawer-left.open {
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 .drawer.drawer-right.open {
-  border-left: 1px solid var(--border-subtle);
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
 }
 /* The chat inside should always use the live drawer width, so both side panels
    trigger the same container-query compaction as they are resized. */
@@ -76,7 +76,7 @@
   width: 3px;
   height: 40px;
   border-radius: 3px;
-  background: var(--border-strong);
+  background: rgba(255, 255, 255, 0.08);
   transition: background 0.12s ease;
 }
 .drawer-splitter:hover .drawer-splitter-grip {
@@ -91,7 +91,7 @@
   padding: 0 10px;
   gap: 12px;
   background: var(--bg-panel);
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 .footer-chat-controls {
   position: relative;
@@ -108,11 +108,11 @@
 }
 .footer-chat-controls.left.is-open {
   padding-right: 12px;
-  border-right: 1px solid var(--border-subtle);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 .footer-chat-controls.right.is-open {
   padding-left: 12px;
-  border-left: 1px solid var(--border-subtle);
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
 }
 .workspace-footer-spacer {
   flex: 1;
@@ -135,8 +135,8 @@
 .footer-action:hover,
 .footer-action.is-open {
   color: var(--text-primary);
-  background: var(--bg-elevated);
-  border-color: var(--border-subtle);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 .footer-action:disabled {
   color: var(--text-muted);
@@ -195,7 +195,7 @@
 .footer-zoom-step:hover:not(:disabled),
 .footer-zoom-value:hover {
   color: var(--text-primary);
-  background: var(--bg-elevated);
+  background: rgba(255, 255, 255, 0.04);
 }
 .footer-zoom-step:disabled {
   color: var(--text-muted);

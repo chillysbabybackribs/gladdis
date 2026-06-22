@@ -1,9 +1,37 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { GoogleGenAI } from '@google/genai';
+import { MODELS } from '../../../shared/models';
+
+/**
+ * Models to try (in order) when no explicit model is requested. Picked from
+ * {@link MODELS} (provider==='google') and re-ordered from cheapest/fastest to
+ * largest. We retry across the chain only when a request fails with what
+ * looks like an "unknown model" error (404 / model_not_found / not supported),
+ * so a real workload error doesn't get silently masked by the next candidate.
+ */
+const GOOGLE_MODEL_FALLBACK_CHAIN: string[] = (() => {
+  const ordered = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro']
+  const known = new Set(MODELS.filter((m) => m.provider === 'google').map((m) => m.id))
+  const chain = ordered.filter((id) => known.has(id))
+  // If MODELS drifts, fall back to whatever is actually listed for google.
+  return chain.length > 0 ? chain : MODELS.filter((m) => m.provider === 'google').map((m) => m.id)
+})()
+
+const MODEL_NOT_FOUND_PATTERNS = [
+  /model[_\s-]*not[_\s-]*found/i,
+  /unknown model/i,
+  /not\s+(?:found|supported|available)/i,
+  /\b404\b/,
+  /\b400\b.*model/i
+]
 
 export class CodebaseAuditor {
-  constructor(private workspaceRoot: string, private ai: GoogleGenAI) {}
+  constructor(
+    private workspaceRoot: string,
+    private ai: GoogleGenAI,
+    private modelOverride?: string
+  ) {}
 
   /**
    * Recursively scans directories to build a lightweight representation of the project tree.
@@ -225,15 +253,51 @@ Generate an extremely detailed, beautiful, highly structured Markdown report con
 
 Output ONLY the final Markdown document. Be rigorous, highly detailed, precise, and ground your report completely in the provided codebase context. Do not include vague generic templates; make it specific to the files, folders, and contents you see.`;
 
-    const response = await this.ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite',
-      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-      config: {
-        systemInstruction: systemPrompt,
-        temperature: 0.1,
+    const candidates = this.modelCandidates();
+    const errors: Array<{ model: string; message: string }> = [];
+    for (const model of candidates) {
+      try {
+        const response = await this.ai.models.generateContent({
+          model,
+          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          config: {
+            systemInstruction: systemPrompt,
+            temperature: 0.1,
+          }
+        });
+        return response.text ?? `Error: Unable to generate codebase audit (model ${model} returned empty).`;
+      } catch (err: any) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push({ model, message });
+        if (!isModelNotFoundError(message)) {
+          // A real error (network, quota, permission) — surface it instead of
+          // silently sliding to the next candidate.
+          return `Error: codebase audit failed on model ${model}: ${message}`;
+        }
       }
-    });
-
-    return response.text ?? 'Error: Unable to generate codebase audit.';
+    }
+    return `Error: codebase audit could not find a working Google model. Tried: ${errors
+      .map((e) => `${e.model} (${e.message})`)
+      .join(' | ')}`;
   }
+
+  /**
+   * Build the ordered list of model IDs to try, with the explicit override
+   * (constructor or env) taking precedence and the static fallback chain
+   * filling in the rest. De-duplicated, preserves order.
+   */
+  private modelCandidates(): string[] {
+    const candidates: string[] = []
+    const push = (id: string | undefined | null) => {
+      if (id && !candidates.includes(id)) candidates.push(id)
+    }
+    push(this.modelOverride)
+    push(process.env.GLADDIS_AUDIT_MODEL)
+    for (const id of GOOGLE_MODEL_FALLBACK_CHAIN) push(id)
+    return candidates
+  }
+}
+
+function isModelNotFoundError(message: string): boolean {
+  return MODEL_NOT_FOUND_PATTERNS.some((re) => re.test(message))
 }

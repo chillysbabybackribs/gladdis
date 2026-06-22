@@ -37,6 +37,19 @@ describe('CapabilityBroker', () => {
       'capability_cache_hit',
       'capability_completed'
     ])
+    const activityEvents = emitted.filter(
+      (event): event is Extract<ChatStreamEvent, { type: 'capability_activity' }> => event.type === 'capability_activity'
+    )
+    expect(activityEvents.slice(0, 3).map((event) => event.callId)).toEqual([
+      'repo_overview:task-1:1',
+      'repo_overview:task-1:1',
+      'repo_overview:task-1:1'
+    ])
+    expect(activityEvents.slice(3).map((event) => event.callId)).toEqual([
+      'repo_overview:task-1:2',
+      'repo_overview:task-1:2',
+      'repo_overview:task-1:2'
+    ])
   })
 
   it('emits the search_repo lifecycle without caching', async () => {
@@ -71,6 +84,11 @@ describe('CapabilityBroker', () => {
       'search_repo:capability_started',
       'search_repo:capability_completed'
     ])
+    expect(
+      emitted
+        .filter((event): event is Extract<ChatStreamEvent, { type: 'capability_activity' }> => event.type === 'capability_activity')
+        .map((event) => event.callId)
+    ).toEqual(['search_repo:task-2:1', 'search_repo:task-2:1', 'search_repo:task-2:1'])
   })
 
   it('emits the read_spans lifecycle without caching', async () => {
@@ -182,8 +200,10 @@ describe('CapabilityBroker', () => {
           ok: true,
           status: 'pass',
           summary: 'typecheck: pass\n(no output)',
+          language: 'node',
           structuredPayload: {
             workspaceRoot: '/tmp/demo',
+            language: 'node',
             checks: [{ check: 'typecheck', ok: true, output: '(no output)' }]
           }
         })
@@ -214,8 +234,8 @@ describe('CapabilityBroker', () => {
     ])
   })
 
-  it('emits loop phase changes for broker capabilities when configured', async () => {
-    const loopStates: Array<{ phase: string; summary: string }> = []
+  it('emits loop phase changes for broker capabilities with event and iteration context', async () => {
+    const loopStates: Array<{ event: string; phase: string; iteration: number; summary: string }> = []
     const broker = new CapabilityBroker(
       {
         repoOverview: async () => ({
@@ -240,21 +260,34 @@ describe('CapabilityBroker', () => {
           ok: true,
           status: 'pass',
           summary: 'typecheck: pass',
-          structuredPayload: { workspaceRoot: '/tmp/demo', checks: [] }
+          language: 'node',
+          structuredPayload: { workspaceRoot: '/tmp/demo', language: 'node', checks: [] }
         })
       },
       () => {},
-      (event) => loopStates.push({ phase: event.phase, summary: event.summary })
+      (event) =>
+        loopStates.push({
+          event: event.event,
+          phase: event.phase,
+          iteration: event.iteration,
+          summary: event.summary
+        })
     )
 
-    await broker.repoOverview({ requestId: 'req', taskId: 'task' }, { workspaceRoot: '/tmp/demo' })
-    await broker.researchDossier({ requestId: 'req', taskId: 'task' }, { workspaceRoot: '/tmp/demo', query: 'chat' })
-    await broker.verifyChange({ requestId: 'req', taskId: 'task' }, { workspaceRoot: '/tmp/demo', checks: ['typecheck'] })
+    await broker.repoOverview({ requestId: 'req', taskId: 'task', iteration: 2 }, { workspaceRoot: '/tmp/demo' })
+    await broker.researchDossier(
+      { requestId: 'req', taskId: 'task', iteration: 3 },
+      { workspaceRoot: '/tmp/demo', query: 'chat' }
+    )
+    await broker.verifyChange(
+      { requestId: 'req', taskId: 'task', iteration: 4 },
+      { workspaceRoot: '/tmp/demo', checks: ['typecheck'] }
+    )
 
     expect(loopStates).toEqual([
-      { phase: 'inspect', summary: 'Gathering repository overview.' },
-      { phase: 'recon', summary: 'Researching chat.' },
-      { phase: 'validate', summary: 'Running change verification.' }
+      { event: 'phase_changed', phase: 'inspect', iteration: 2, summary: 'Gathering repository overview.' },
+      { event: 'phase_changed', phase: 'recon', iteration: 3, summary: 'Researching chat.' },
+      { event: 'phase_changed', phase: 'validate', iteration: 4, summary: 'Running change verification.' }
     ])
   })
 })

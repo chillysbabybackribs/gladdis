@@ -2,7 +2,8 @@ import type {
   CapabilityActivityEventName,
   CapabilityName,
   ChatStreamEvent,
-  LoopPhase
+  LoopPhase,
+  LoopStateEventName
 } from '../../../../shared/types'
 import type { ReadSpansInput, RepoOverviewInput, RepoOverviewResult, SearchRepoInput, SearchRepoResult } from './RepoIntelligenceService'
 import type { ResearchDossierInput, ResearchDossierResult } from './ResearchDossierService'
@@ -12,6 +13,7 @@ export interface BrokerCallContext {
   requestId: string
   assistantMessageId?: string
   taskId: string
+  iteration?: number
 }
 
 export interface RepoOverviewArgs {
@@ -71,6 +73,7 @@ export interface CapabilityServices {
 
 export class CapabilityBroker {
   private readonly repoOverviewCache = new Map<string, RepoOverviewCacheEntry>()
+  private capabilityCallSequence = 0
 
   constructor(
     private readonly services: CapabilityServices,
@@ -79,25 +82,28 @@ export class CapabilityBroker {
       requestId: string
       assistantMessageId?: string
       taskId: string
+      event: LoopStateEventName
       phase: LoopPhase
+      iteration: number
       summary: string
     }) => void
   ) {}
 
   async repoOverview(ctx: BrokerCallContext, args: RepoOverviewArgs): Promise<CapabilityResponse> {
     const cacheKey = this.repoOverviewCacheKey(args)
+    const callId = this.nextCapabilityCallId(ctx, 'repo_overview')
     this.emitPhase(ctx, 'inspect', 'Gathering repository overview.')
-    this.emitCapability(ctx, 'repo_overview', 'capability_requested', {
+    this.emitCapability(ctx, callId, 'repo_overview', 'capability_requested', {
       summary: args.focus ? `Preparing repo overview for ${args.focus}.` : 'Preparing repo overview.'
     })
 
     const cached = this.repoOverviewCache.get(cacheKey)
     if (cached) {
-      this.emitCapability(ctx, 'repo_overview', 'capability_cache_hit', {
+      this.emitCapability(ctx, callId, 'repo_overview', 'capability_cache_hit', {
         cached: true,
         summary: 'Using cached repo overview.'
       })
-      this.emitCapability(ctx, 'repo_overview', 'capability_completed', {
+      this.emitCapability(ctx, callId, 'repo_overview', 'capability_completed', {
         cached: true,
         summary: cached.summary
       })
@@ -105,7 +111,7 @@ export class CapabilityBroker {
     }
 
     const startedAt = Date.now()
-    this.emitCapability(ctx, 'repo_overview', 'capability_started', {
+    this.emitCapability(ctx, callId, 'repo_overview', 'capability_started', {
       summary: 'Building repo overview.'
     })
     try {
@@ -119,14 +125,14 @@ export class CapabilityBroker {
         cacheStatus: 'miss'
       }
       this.repoOverviewCache.set(cacheKey, response)
-      this.emitCapability(ctx, 'repo_overview', 'capability_completed', {
+      this.emitCapability(ctx, callId, 'repo_overview', 'capability_completed', {
         summary: result.summary,
         durationMs: Date.now() - startedAt
       })
       return response
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.emitCapability(ctx, 'repo_overview', 'capability_failed', {
+      this.emitCapability(ctx, callId, 'repo_overview', 'capability_failed', {
         summary: message,
         durationMs: Date.now() - startedAt
       })
@@ -140,16 +146,17 @@ export class CapabilityBroker {
 
   async searchRepo(ctx: BrokerCallContext, args: SearchRepoArgs): Promise<CapabilityResponse> {
     const startedAt = Date.now()
+    const callId = this.nextCapabilityCallId(ctx, 'search_repo')
     this.emitPhase(ctx, 'inspect', `Searching repository for ${args.query}.`)
-    this.emitCapability(ctx, 'search_repo', 'capability_requested', {
+    this.emitCapability(ctx, callId, 'search_repo', 'capability_requested', {
       summary: `Searching repo for ${args.query}.`
     })
-    this.emitCapability(ctx, 'search_repo', 'capability_started', {
+    this.emitCapability(ctx, callId, 'search_repo', 'capability_started', {
       summary: 'Running repo search.'
     })
     try {
       const result = await this.services.searchRepo(args)
-      this.emitCapability(ctx, 'search_repo', 'capability_completed', {
+      this.emitCapability(ctx, callId, 'search_repo', 'capability_completed', {
         summary: result.summary,
         durationMs: Date.now() - startedAt
       })
@@ -161,7 +168,7 @@ export class CapabilityBroker {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.emitCapability(ctx, 'search_repo', 'capability_failed', {
+      this.emitCapability(ctx, callId, 'search_repo', 'capability_failed', {
         summary: message,
         durationMs: Date.now() - startedAt
       })
@@ -175,16 +182,17 @@ export class CapabilityBroker {
 
   async readSpans(ctx: BrokerCallContext, args: ReadSpanArgs): Promise<CapabilityResponse> {
     const startedAt = Date.now()
+    const callId = this.nextCapabilityCallId(ctx, 'read_spans')
     this.emitPhase(ctx, 'inspect', `Reading ${args.items.length} repository span(s).`)
-    this.emitCapability(ctx, 'read_spans', 'capability_requested', {
+    this.emitCapability(ctx, callId, 'read_spans', 'capability_requested', {
       summary: `Reading ${args.items.length} repo span(s).`
     })
-    this.emitCapability(ctx, 'read_spans', 'capability_started', {
+    this.emitCapability(ctx, callId, 'read_spans', 'capability_started', {
       summary: 'Reading bounded file spans.'
     })
     try {
       const result = await this.services.readSpans(args)
-      this.emitCapability(ctx, 'read_spans', 'capability_completed', {
+      this.emitCapability(ctx, callId, 'read_spans', 'capability_completed', {
         summary: result.summary,
         durationMs: Date.now() - startedAt
       })
@@ -196,7 +204,7 @@ export class CapabilityBroker {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.emitCapability(ctx, 'read_spans', 'capability_failed', {
+      this.emitCapability(ctx, callId, 'read_spans', 'capability_failed', {
         summary: message,
         durationMs: Date.now() - startedAt
       })
@@ -217,16 +225,17 @@ export class CapabilityBroker {
       }
     }
     const startedAt = Date.now()
+    const callId = this.nextCapabilityCallId(ctx, 'research_dossier')
     this.emitPhase(ctx, 'recon', `Researching ${args.query}.`)
-    this.emitCapability(ctx, 'research_dossier', 'capability_requested', {
+    this.emitCapability(ctx, callId, 'research_dossier', 'capability_requested', {
       summary: `Preparing research dossier for ${args.query}.`
     })
-    this.emitCapability(ctx, 'research_dossier', 'capability_started', {
+    this.emitCapability(ctx, callId, 'research_dossier', 'capability_started', {
       summary: 'Gathering repo evidence and synthesizing dossier.'
     })
     try {
       const result = await this.services.researchDossier(args)
-      this.emitCapability(ctx, 'research_dossier', 'capability_completed', {
+      this.emitCapability(ctx, callId, 'research_dossier', 'capability_completed', {
         summary: result.summary,
         durationMs: Date.now() - startedAt
       })
@@ -238,7 +247,7 @@ export class CapabilityBroker {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.emitCapability(ctx, 'research_dossier', 'capability_failed', {
+      this.emitCapability(ctx, callId, 'research_dossier', 'capability_failed', {
         summary: message,
         durationMs: Date.now() - startedAt
       })
@@ -259,13 +268,14 @@ export class CapabilityBroker {
       }
     }
     const startedAt = Date.now()
+    const callId = this.nextCapabilityCallId(ctx, 'verify_change')
     this.emitPhase(ctx, 'validate', 'Running change verification.')
-    this.emitCapability(ctx, 'verify_change', 'capability_requested', {
+    this.emitCapability(ctx, callId, 'verify_change', 'capability_requested', {
       summary: args.checks?.length
         ? `Preparing verification for ${args.checks.join(', ')}.`
         : 'Preparing verification plan.'
     })
-    this.emitCapability(ctx, 'verify_change', 'capability_started', {
+    this.emitCapability(ctx, callId, 'verify_change', 'capability_started', {
       summary: 'Running verification checks.'
     })
     this.emitVerification(ctx, {
@@ -289,7 +299,7 @@ export class CapabilityBroker {
           summary: check.output
         })
       }
-      this.emitCapability(ctx, 'verify_change', result.ok ? 'capability_completed' : 'capability_failed', {
+      this.emitCapability(ctx, callId, 'verify_change', result.ok ? 'capability_completed' : 'capability_failed', {
         summary: result.summary,
         durationMs: Date.now() - startedAt
       })
@@ -311,7 +321,7 @@ export class CapabilityBroker {
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      this.emitCapability(ctx, 'verify_change', 'capability_failed', {
+      this.emitCapability(ctx, callId, 'verify_change', 'capability_failed', {
         summary: message,
         durationMs: Date.now() - startedAt
       })
@@ -337,6 +347,7 @@ export class CapabilityBroker {
 
   private emitCapability(
     ctx: BrokerCallContext,
+    callId: string,
     capability: CapabilityName,
     event: CapabilityActivityEventName,
     extra: Omit<
@@ -348,11 +359,16 @@ export class CapabilityBroker {
       requestId: ctx.requestId,
       ...(ctx.assistantMessageId ? { assistantMessageId: ctx.assistantMessageId } : {}),
       type: 'capability_activity',
-      callId: `${capability}:${ctx.taskId}`,
+      callId,
       capability,
       event,
       ...extra
     })
+  }
+
+  private nextCapabilityCallId(ctx: BrokerCallContext, capability: CapabilityName): string {
+    this.capabilityCallSequence += 1
+    return `${capability}:${ctx.taskId}:${this.capabilityCallSequence}`
   }
 
   private emitVerification(
@@ -379,7 +395,9 @@ export class CapabilityBroker {
       requestId: ctx.requestId,
       assistantMessageId: ctx.assistantMessageId,
       taskId: ctx.taskId,
+      event: 'phase_changed',
       phase,
+      iteration: ctx.iteration ?? 1,
       summary
     })
   }

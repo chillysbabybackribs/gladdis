@@ -308,7 +308,7 @@ export function Composer({
                   aria-pressed={audioOn}
                 >
                   {audioOn ? (
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                       <path d="M3 6v4h2.5L9 13V3L5.5 6H3z" fill="currentColor" />
                       <path
                         d="M11 5.5a3 3 0 0 1 0 5M12.5 4a5 5 0 0 1 0 8"
@@ -318,7 +318,7 @@ export function Composer({
                       />
                     </svg>
                   ) : (
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
                       <path d="M3 6v4h2.5L9 13V3L5.5 6H3z" fill="currentColor" />
                       <path
                         d="M11 6l3 4M14 6l-3 4"
@@ -398,10 +398,7 @@ export function Composer({
                 )}
               </div>
             )}
-            <span className="composer-hint">
-              {busy ? 'working…' : <kbd>↵</kbd>}
-              {!busy && <span className="hint-sep">to send</span>}
-            </span>
+            {busy && <span className="composer-hint">working…</span>}
             {busy && onStop ? (
               <button
                 type="button"

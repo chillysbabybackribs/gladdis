@@ -6,10 +6,9 @@ import { resolveTurnTools } from '../agentTools'
 import {
   continueAfterToolCalls,
   createToolValidationState,
-  handleNoToolCallsAfterEdits,
-  noteToolOutcome,
   type SupervisorTransition,
 } from './toolValidation'
+import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number }
 type ActiveAuditCall = {
@@ -235,6 +234,7 @@ export async function runAnthropicToolLoop(args: {
   const validation = createToolValidationState()
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
     anthropicTools = buildTools() // pick up tools granted via request_tools last step
     applyRollingCache(messages)
@@ -278,7 +278,7 @@ export async function runAnthropicToolLoop(args: {
       (b: any): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
     )
     if (toolUses.length === 0) {
-      const decision = await handleNoToolCallsAfterEdits({
+      const result = await handleProviderTurnWithoutToolCalls({
         state: validation,
         toolDefs: args.toolDefs,
         turn,
@@ -286,17 +286,13 @@ export async function runAnthropicToolLoop(args: {
         runTool: (name, toolArgs) => args.tools.run(name, toolArgs, args.ctx),
         emitToolCall: args.emit,
         emitToolResult: args.emit,
-        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text)
+        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text),
+        transition: (iteration, transition) => args.supervisor?.transition(iteration, transition),
+        appendRetryPrompt: (prompt) => messages.push({ role: 'user', content: prompt }),
+        emitWarningDelta: (warningDelta) =>
+          args.emit({ requestId: args.req.requestId, type: 'delta', text: warningDelta })
       })
-      if (decision.action === 'retry') {
-        args.supervisor?.transition(turn + 1, decision.transition)
-        messages.push({ role: 'user', content: decision.prompt })
-        continue
-      }
-      if (decision.action === 'finish_with_warning') {
-        args.emit({ requestId: args.req.requestId, type: 'delta', text: decision.warningDelta })
-      }
-      args.supervisor?.transition(turn + 1, decision.transition)
+      if (result === 'continue') continue
       return
     }
 
@@ -305,22 +301,16 @@ export async function runAnthropicToolLoop(args: {
     const results: Anthropic.ToolResultBlockParam[] = []
     for (const tu of toolUses) {
       if (args.signal.aborted) return
-      args.emit({
+      const { outcome } = await executeProviderToolCall({
         requestId: args.req.requestId,
-        type: 'tool_call',
-        tool: tu.name,
-        args: tu.input,
-        callId: tu.id
-      })
-      const outcome = await args.tools.run(tu.name, (tu.input ?? {}) as Record<string, any>, args.ctx)
-      args.ctx.fullResults!.set(tu.id, outcome.text)
-      noteToolOutcome(validation, tu.name, outcome)
-      args.emit({
-        requestId: args.req.requestId,
-        type: 'tool_result',
         callId: tu.id,
-        ok: outcome.ok,
-        preview: outcome.text
+        name: tu.name,
+        toolArgs: (tu.input ?? {}) as Record<string, any>,
+        runTool: (toolName, toolArgs) => args.tools.run(toolName, toolArgs, args.ctx),
+        emitToolCall: args.emit,
+        emitToolResult: args.emit,
+        rememberFullResult: (toolCallId, text) => args.ctx.fullResults!.set(toolCallId, text),
+        validationState: validation
       })
 
       const content: Anthropic.ToolResultBlockParam['content'] = outcome.imageBase64

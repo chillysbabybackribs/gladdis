@@ -339,9 +339,6 @@
   .composer-bar-right {
     gap: 6px;
   }
-  .composer-hint .hint-sep {
-    display: none;
-  }
   .composer-menu {
     left: 9px;
     right: 9px;
@@ -389,9 +386,6 @@
   }
   .composer-bar-right {
     gap: 6px;
-  }
-  .composer-hint .hint-sep {
-    display: none;
   }
   .composer-send {
     width: 28px;

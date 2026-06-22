@@ -22,6 +22,7 @@ import { ChatSettingsModal } from './ChatSettingsModal'
 import { useTts, useTtsSettings } from '../hooks/useTts'
 import { ChatMessageBody } from './ChatMessageBody'
 import { useStreamConsumer } from '../hooks/useStreamConsumer'
+import { useAutoScroll } from '../hooks/useAutoScroll'
 import { previousTurnAttachedActivePage } from '../lib/chatTurnContext'
 import type { Message } from './chatTypes'
 import { appendText } from './chatTypes'
@@ -116,6 +117,7 @@ export function ChatPanel({
   const activeReq = useRef<string | null>(null)
   const activeAssistantMessageId = useRef<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const autoScroll = useAutoScroll(scrollRef)
   const convIdRef = useRef(convId)
   const messagesRef = useRef(messages)
   const modelIdRef = useRef(modelId)
@@ -276,11 +278,17 @@ export function ChatPanel({
           conv.continuesFromId ?? null
         )
         setMessages(conv.messages as Message[])
+        // After the restored messages paint, anchor at the latest reply
+        // instead of opening at the top of the transcript.
+        requestAnimationFrame(() => autoScroll.scrollToBottom())
       }
       } finally {
         restored.current = true
       }
     })()
+    // autoScroll is stable for the lifetime of this panel; including it would
+    // re-run this restore effect and double-load the conversation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelId])
 
   const debouncedSave = useMemo(() => {
@@ -321,9 +329,9 @@ export function ChatPanel({
     activeReq,
     activeAssistantMessageId,
     ttsRef,
-    scrollRef,
     setMessages,
-    setStreaming
+    setStreaming,
+    onCommit: autoScroll.scheduleScroll
   })
 
   const persistModel = (id: string) => {
@@ -406,6 +414,9 @@ export function ChatPanel({
     tts.stop() // silence any audio from the previous reply before this one starts
     setStreaming(true)
     setMessages((m) => [...m, userMsg, { id: assistantMessageId, role: 'assistant', text: '' }])
+    // Sending a new message is an unambiguous "I want to see the reply" signal.
+    // Re-enable follow mode regardless of where the user had scrolled before.
+    autoScroll.scrollToBottom()
     if (restored.current) {
       void persistConversation(buildConversation(convId, nextMessages), false).catch((err) => {
         console.warn('[chat] pre-send conversation save failed:', (err as Error)?.message ?? err)
@@ -476,6 +487,7 @@ export function ChatPanel({
         conv.continuesFromId ?? null
       )
       setMessages(conv.messages as Message[])
+      requestAnimationFrame(() => autoScroll.scrollToBottom())
     }
     setShowSettings(false)
   }
@@ -564,6 +576,12 @@ export function ChatPanel({
       </svg>
     </button>
   )
+  // Zoom scales the conversation typography only. The composer is application
+  // chrome, not content: its height, font sizes, and hint typography are held
+  // constant so the input box looks identical on both panels regardless of
+  // either panel's chat zoom. (Previously composer height scaled with zoom,
+  // which made the left and right input boxes drift apart in size whenever the
+  // two panels' zooms diverged.)
   const chatStyle = {
     '--chat-zoom': zoom,
     '--chat-message-size': px(15 * zoom),
@@ -574,10 +592,9 @@ export function ChatPanel({
     '--chat-pre-code-size': px(12 * zoom),
     '--chat-small-size': px(11.5 * zoom),
     '--chat-tiny-size': px(10 * zoom),
-    '--chat-message-gap': px(Math.min(26, Math.max(14, 18 * zoom))),
-    '--chat-pad-y': px(Math.min(28, Math.max(16, 20 * zoom))),
-    '--chat-pad-x': px(Math.min(24, Math.max(14, 18 * zoom))),
-    '--chat-composer-h': px(Math.min(178, Math.max(158, 132 * zoom)))
+    '--chat-message-gap': px(Math.min(20, Math.max(10, 14 * zoom))),
+    '--chat-pad-y': px(Math.min(22, Math.max(12, 16 * zoom))),
+    '--chat-pad-x': px(Math.min(20, Math.max(12, 16 * zoom)))
   } as CSSProperties
 
   return (
@@ -621,6 +638,26 @@ export function ChatPanel({
           )
         )}
       </div>
+
+      {!autoScroll.isAtBottom && messages.length > 0 && (
+        <button
+          type="button"
+          className="chat-jump-bottom"
+          aria-label="Jump to latest message"
+          title="Jump to latest"
+          onClick={() => autoScroll.scrollToBottom('smooth')}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+              d="M4 6.5 8 10.5 12 6.5"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      )}
 
       <Composer
         activeId={activeId}

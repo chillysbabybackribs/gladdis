@@ -163,8 +163,10 @@ describe('BrowserTools', () => {
             ok: true,
             status: 'pass',
             summary: 'typecheck: pass\n(no output)',
+            language: 'node',
             structuredPayload: {
               workspaceRoot: dir,
+              language: 'node',
               checks: [{ check: 'typecheck', ok: true, output: '(no output)' }]
             }
           })

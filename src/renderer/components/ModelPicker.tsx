@@ -66,6 +66,7 @@ export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }:
         <div className="model-menu" role="listbox">
           {models.map((m) => {
             const ok = usable(m)
+            const speculative = m.availability === 'speculative'
             return (
               <button
                 key={m.id}
@@ -77,8 +78,10 @@ export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }:
                   onChange(m.id)
                   setOpen(false)
                 }}
+                title={speculative ? 'Preview: this model id has not been verified with the provider; selecting it may 404.' : undefined}
               >
                 <span className="model-menu-label">{m.label}</span>
+                {speculative && <span className="model-preview">preview</span>}
                 {!ok && <span className="model-nokey">{unavailableLabel(m)}</span>}
               </button>
             )

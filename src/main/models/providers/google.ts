@@ -4,10 +4,9 @@ import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
 import {
   continueAfterToolCalls,
   createToolValidationState,
-  handleNoToolCallsAfterEdits,
-  noteToolOutcome,
   type SupervisorTransition,
 } from './toolValidation'
+import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 
 interface CacheEntry {
   name: string
@@ -290,6 +289,7 @@ export async function runGoogleToolLoop(args: {
   })
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
     functionDeclarations = buildDecls() // pick up tools granted via request_tools last step
     // The prebuilt cache only covers the starting tools; once the model has pulled
@@ -340,7 +340,7 @@ export async function runGoogleToolLoop(args: {
 
     contents.push({ role: 'model', parts })
     if (calls.length === 0) {
-      const decision = await handleNoToolCallsAfterEdits({
+      const result = await handleProviderTurnWithoutToolCalls({
         state: validation,
         toolDefs: args.toolDefs,
         turn,
@@ -348,17 +348,13 @@ export async function runGoogleToolLoop(args: {
         runTool: (name, toolArgs) => args.tools.run(name, toolArgs, args.ctx),
         emitToolCall: args.emit,
         emitToolResult: args.emit,
-        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text)
+        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text),
+        transition: (iteration, transition) => args.supervisor?.transition(iteration, transition),
+        appendRetryPrompt: (prompt) => contents.push({ role: 'user', parts: [{ text: prompt }] }),
+        emitWarningDelta: (warningDelta) =>
+          args.emit({ requestId: args.req.requestId, type: 'delta', text: warningDelta })
       })
-      if (decision.action === 'retry') {
-        args.supervisor?.transition(turn + 1, decision.transition)
-        contents.push({ role: 'user', parts: [{ text: decision.prompt }] })
-        continue
-      }
-      if (decision.action === 'finish_with_warning') {
-        args.emit({ requestId: args.req.requestId, type: 'delta', text: decision.warningDelta })
-      }
-      args.supervisor?.transition(turn + 1, decision.transition)
+      if (result === 'continue') continue
       return
     }
 
@@ -371,16 +367,16 @@ export async function runGoogleToolLoop(args: {
       if (!fc?.name) continue
       const name = fc.name
       const callId = buildGoogleToolCallId(name, turn, callIndex)
-      args.emit({ requestId: args.req.requestId, type: 'tool_call', tool: name, args: fc.args, callId })
-      const outcome = await args.tools.run(name, (fc.args ?? {}) as Record<string, any>, args.ctx)
-      args.ctx.fullResults!.set(callId, outcome.text)
-      noteToolOutcome(validation, name, outcome)
-      args.emit({
+      const { outcome } = await executeProviderToolCall({
         requestId: args.req.requestId,
-        type: 'tool_result',
         callId,
-        ok: outcome.ok,
-        preview: outcome.text
+        name,
+        toolArgs: (fc.args ?? {}) as Record<string, any>,
+        runTool: (toolName, toolArgs) => args.tools.run(toolName, toolArgs, args.ctx),
+        emitToolCall: args.emit,
+        emitToolResult: args.emit,
+        rememberFullResult: (toolCallId, text) => args.ctx.fullResults!.set(toolCallId, text),
+        validationState: validation
       })
       const response = {
         tool_call_id: callId,

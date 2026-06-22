@@ -5,10 +5,10 @@ import { resolveTurnTools } from '../agentTools'
 import {
   continueAfterToolCalls,
   createToolValidationState,
-  handleNoToolCallsAfterEdits,
   noteToolOutcome,
   type SupervisorTransition,
 } from './toolValidation'
+import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 
 // xAI exposes an OpenAI-compatible Chat Completions API. We talk to it with
 // plain fetch + SSE — no SDK — matching the repo's existing OpenAI-compatible
@@ -389,6 +389,7 @@ export async function runGrokToolLoop(args: {
   const validation = createToolValidationState()
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
     tools = buildTools() // pick up any tools granted via request_tools last step
     const call = args.audit.begin({
@@ -428,7 +429,7 @@ export async function runGrokToolLoop(args: {
     })
 
     if (assistant.toolCalls.length === 0) {
-      const decision = await handleNoToolCallsAfterEdits({
+      const result = await handleProviderTurnWithoutToolCalls({
         state: validation,
         toolDefs: args.toolDefs,
         turn,
@@ -436,17 +437,13 @@ export async function runGrokToolLoop(args: {
         runTool: (name, toolArgs) => args.tools.run(name, toolArgs, args.ctx),
         emitToolCall: args.emit,
         emitToolResult: args.emit,
-        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text)
+        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text),
+        transition: (iteration, transition) => args.supervisor?.transition(iteration, transition),
+        appendRetryPrompt: (prompt) => messages.push({ role: 'user', content: prompt }),
+        emitWarningDelta: (warningDelta) =>
+          args.emit({ requestId: args.req.requestId, type: 'delta', text: warningDelta })
       })
-      if (decision.action === 'retry') {
-        args.supervisor?.transition(turn + 1, decision.transition)
-        messages.push({ role: 'user', content: decision.prompt })
-        continue
-      }
-      if (decision.action === 'finish_with_warning') {
-        args.emit({ requestId: args.req.requestId, type: 'delta', text: decision.warningDelta })
-      }
-      args.supervisor?.transition(turn + 1, decision.transition)
+      if (result === 'continue') continue
       return
     }
 
@@ -462,15 +459,16 @@ export async function runGrokToolLoop(args: {
       } catch {
         parsedArgs = {}
       }
-      args.emit({ requestId: args.req.requestId, type: 'tool_call', tool: name, args: parsedArgs, callId })
-      const outcome = await args.tools.run(name, parsedArgs, args.ctx)
-      args.ctx.fullResults!.set(callId, outcome.text)
-      args.emit({
+      const { outcome } = await executeProviderToolCall({
         requestId: args.req.requestId,
-        type: 'tool_result',
         callId,
-        ok: outcome.ok,
-        preview: outcome.text
+        name,
+        toolArgs: parsedArgs,
+        runTool: (toolName, toolArgs) => args.tools.run(toolName, toolArgs, args.ctx),
+        emitToolCall: args.emit,
+        emitToolResult: args.emit,
+        rememberFullResult: (toolCallId, text) => args.ctx.fullResults!.set(toolCallId, text),
+        noteValidationOutcome: false
       })
 
       const toolMsg: OpenAiMessage = { role: 'tool', tool_call_id: callId, content: outcome.text }

@@ -3,6 +3,8 @@ import type { ChatStreamEvent } from '../../../shared/types'
 import type { Message, ToolActivity } from '../components/chatTypes'
 import { appendText } from '../components/chatTypes'
 
+const noop = () => {}
+
 function findAssistantIndex(messages: Message[], assistantMessageId?: string | null): number {
   if (assistantMessageId) {
     return messages.findIndex((message) => message.role === 'assistant' && message.id === assistantMessageId)
@@ -189,10 +191,15 @@ interface StreamConsumerArgs {
   activeAssistantMessageId: RefObject<string | null>
   /** Audible-replies handle; spoken per delta, flushed on done. */
   ttsRef: RefObject<TtsHandle>
-  /** Scroll container pinned to the bottom after each committed frame. */
-  scrollRef: RefObject<HTMLDivElement | null>
   setMessages: Dispatch<SetStateAction<Message[]>>
   setStreaming: Dispatch<SetStateAction<boolean>>
+  /**
+   * Called once per committed frame after the assistant message has been
+   * updated. The caller decides whether to pin the scroller, render a "new
+   * content" toast, etc. Kept as a callback so this hook stays oblivious to
+   * scroll policy.
+   */
+  onCommit?: () => void
 }
 
 /**
@@ -207,35 +214,26 @@ interface StreamConsumerArgs {
  * wasted work that causes the jank, not smoothness). Non-delta events
  * (tool_call/result/error/done) flush the pending buffer first, then apply
  * immediately, so ordering against the streamed text is preserved.
+ *
+ * Scroll behavior is delegated to the `onCommit` callback. The hook does not
+ * touch the DOM directly — that keeps streaming logic separate from the
+ * auto-scroll policy in `useAutoScroll`, which owns whether the user is still
+ * following along.
  */
 export function useStreamConsumer({
   activeReq,
   activeAssistantMessageId,
   ttsRef,
-  scrollRef,
   setMessages,
-  setStreaming
+  setStreaming,
+  onCommit
 }: StreamConsumerArgs): void {
   const pendingDelta = useRef('')
   const rafRef = useRef<number | null>(null)
-  const scrollRafRef = useRef<number | null>(null)
+  const onCommitRef = useRef<() => void>(noop)
+  onCommitRef.current = onCommit ?? noop
 
   useEffect(() => {
-    // Pin the scroll container to the bottom, but at most once per animation
-    // frame. Tool events commit synchronously and in bursts (a tool_call and its
-    // tool_result are two commits); pinning per commit forced a synchronous
-    // scrollHeight read + scrollTop write each time — a whole-container reflow
-    // that read as the chat "flashing" on every tool call. Coalescing the pin
-    // into one rAF collapses a burst into a single reflow per frame.
-    const scheduleScrollPin = () => {
-      if (scrollRafRef.current !== null) return
-      scrollRafRef.current = requestAnimationFrame(() => {
-        scrollRafRef.current = null
-        const el = scrollRef.current
-        if (el) el.scrollTop = el.scrollHeight
-      })
-    }
-
     // Drain buffered delta text into the trailing assistant message in a single
     // state update. Called on the next frame after deltas arrive.
     const flushDeltas = () => {
@@ -255,7 +253,7 @@ export function useStreamConsumer({
           activeAssistantMessageId.current
         )
       })
-      scheduleScrollPin()
+      onCommitRef.current()
     }
 
     const off = window.gladdis.chat.onStream((e) => {
@@ -282,7 +280,7 @@ export function useStreamConsumer({
       setMessages((msgs) => {
         return applyStreamEventToMessages(msgs, e, activeAssistantMessageId.current)
       })
-      scheduleScrollPin()
+      onCommitRef.current()
       if (e.type === 'done' || e.type === 'error') {
         if (e.type === 'done') void ttsRef.current.flush()
         activeReq.current = null
@@ -295,10 +293,6 @@ export function useStreamConsumer({
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
-      }
-      if (scrollRafRef.current !== null) {
-        cancelAnimationFrame(scrollRafRef.current)
-        scrollRafRef.current = null
       }
     }
     // Refs are stable; setters are stable. Wire once.

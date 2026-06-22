@@ -70,6 +70,7 @@ const BROWSER_GUIDANCE =
   '  • fetch_page → deeper read of a specific URL when search evidence is not enough.\n' +
   '  • read_page → structured digest of the current page (content, headings, and an ' +
   'actions table with (x,y) coords + selectors). Get coordinates here before click_xy.\n' +
+  '  • grep_page → fast, highly selective regex or CSS selector search on the full page. Returns matching elements, selectors, coordinates, and lines of context (grep -C). Use this instead of read_page for large pages or precise targeting.\n' +
   '  • navigate / click_xy / type_text / press_key / execute_in_browser / cdp_command → ' +
   'drive the page. These return only short acks; call read_page to see the result.\n' +
   '  • browse_task → hand off a multi-step goal (form fills, logins, multi-page flows) to ' +
@@ -124,6 +125,7 @@ const BROWSER_TOOL_NAMES = new Set([
   'fetch_page',
   'browse_task',
   'read_page',
+  'grep_page',
   'screenshot',
   'screenshot_app',
   'navigate',
@@ -204,7 +206,7 @@ export const CODEX_SYSTEM =
   'resume request.\n\n' +
   'For anything in a browser — viewing, web search, reading a page, screenshots, UI validation — ' +
   'use the visible Chromium tab the user is watching: search (unified search — hidden SERP + visible ' +
-  'tab live digests), fetch_page, browse_task, read_page, and screenshot/screenshot_app. Do not spin ' +
+  'tab live digests), fetch_page, browse_task, read_page, grep_page, and screenshot/screenshot_app. Do not spin ' +
   'up a separate browser (Playwright, Puppeteer, headless Chrome, OS URL openers, DevTools-port probing).\n\n' +
   'When debugging Gladdis itself, use the current visible Gladdis browser/tools for browser or UI ' +
   'behavior. Do not launch a second Gladdis/dev app just to view it. Launch a separate instance only ' +

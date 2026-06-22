@@ -162,9 +162,8 @@ so the model emits plans instead of directly seeing a tool menu.
 Tool families:
 
 - **Browser** — `browse_task`, `read_page`, `check_page`, `navigate`,
-  `click_xy`, `type_text`, `press_key`, `execute_in_browser`, `cdp_command`.
-  The active tab is still fully owned by CDP; this list is transitional and
-  should collapse behind one deterministic runtime.
+  `grep_page`, `grep_click`, `grep_type`, `click_xy`, `type_text`, `press_key`, `execute_in_browser`, `cdp_command`.
+  Prefer `grep_page` for discovery and `grep_click` / `grep_type` for direct action when the target is identifiable from page text or selectors. The active tab is still fully owned by CDP; this list is transitional and should collapse behind one deterministic runtime.
 - **Filesystem** (`src/main/fs/FileTools.ts`) — `read_file`, `write_file`,
   `edit_file` (exact unique string replace, or `replace_all`), `list_dir`, and
   `search_files` (recursive case-insensitive content search with an optional

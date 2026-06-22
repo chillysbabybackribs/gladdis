@@ -69,6 +69,8 @@ const BROWSER_GUIDANCE =
   'visible tab. Returns a compact query-scored evidence card (not a full page dump).\n' +
   '  • fetch_page → deeper read of a specific URL when search evidence is not enough.\n' +
   '  • grep_page → PRIMARY tool for element, text, and coordinate discovery. Performs fast, highly selective regex or CSS selector search on the full page. Returns matching elements, selectors, coordinates, and lines of context (grep -C). ALWAYS prefer grep_page over read_page for targeting or clicking elements to avoid token-bloating and truncation.\n' +
+  '  • grep_click → PRIMARY action tool for discovery + click in one step. Use when you already know the target by selector or text and want the page found and clicked without a separate lookup.\n' +
+  '  • grep_type → PRIMARY action tool for discovery + focus + typing in one step. Use for inputs, textareas, and similar fields when you know the target by selector or text.\n' +
   '  • read_page → SECONDARY fallback tool for broad page layout and high-level orientation only. Returns a structured digest of the current page and actions table. Avoid using read_page for simple coordinate/selector lookups as it is extremely heavy.\n' +
   '  • navigate / click_xy / type_text / press_key / execute_in_browser / cdp_command → ' +
   'drive the page. These return only short acks; call grep_page or read_page to see the result. Use execute_in_browser strictly for mutations/scripts, NOT for coordinate discovery.\n' +
@@ -77,8 +79,8 @@ const BROWSER_GUIDANCE =
   '  • screenshot / screenshot_app → PNG of the tab or the whole app; use strictly when visual layout verification is ' +
   'genuinely needed, NOT for finding text or coordinates.\n\n' +
 
-  'Call grep_page or read_page before acting on a page, so you act on the real current state. Prefer ' +
-  'grep_page to find precise coordinates and avoid massive token costs. Drive first, then ' +
+  'Call grep_page, grep_click, grep_type, or read_page before acting on a page, so you act on the real current state. Prefer ' +
+  'grep_page to find precise coordinates and avoid massive token costs. Prefer grep_click and grep_type over separate discover-then-act sequences when the target is already known from page text or selector. Drive first, then ' +
   'read in a separate step — do not act and read in one thought. When you already know (or can infer) ' +
   'the URL, navigate or fetch_page directly; reach for search when the URL is unknown or the user ' +
   'asked for search results. ' +

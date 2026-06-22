@@ -133,6 +133,28 @@ describe('openAiBody (reasoning_effort + tools compatibility)', () => {
     expect(body.reasoning_effort).toBeUndefined()
   })
 
+  it('omits reasoning_effort for full-size gpt-5.4 when function tools are present', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-5.4',
+      messages,
+      tools: toolDef,
+      stage: 'chat:browser:0'
+    })
+    expect(body.model).toBe('gpt-5.4')
+    expect(body.tools).toEqual(toolDef)
+    expect(body.reasoning_effort).toBeUndefined()
+  })
+
+  it('omits reasoning_effort for gpt-5.4-pro when function tools are present', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-5.4-pro',
+      messages,
+      tools: toolDef,
+      stage: 'chat:browser:0'
+    })
+    expect(body.reasoning_effort).toBeUndefined()
+  })
+
   it('keeps reasoning_effort for gpt-5.4-nano when no tools are present', () => {
     const body = openAiBody({
       modelId: 'openai-gpt-5.4-nano',
@@ -140,6 +162,15 @@ describe('openAiBody (reasoning_effort + tools compatibility)', () => {
       stage: 'chat:browser:0'
     })
     expect(body.reasoning_effort).toBe('medium')
+  })
+
+  it('keeps reasoning_effort for full-size gpt-5.4 when no tools are present', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-5.4',
+      messages,
+      stage: 'plan'
+    })
+    expect(body.reasoning_effort).toBe('high')
   })
 
   it('keeps reasoning_effort for full-size gpt-5.5 even with tools', () => {

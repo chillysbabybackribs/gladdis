@@ -1,4 +1,5 @@
 import { app, BaseWindow, WebContentsView, ipcMain, dialog } from 'electron'
+import { attachContextMenu } from './contextMenu'
 import { join } from 'path'
 import { TabManager } from './TabManager'
 import { KeyStore } from './models/KeyStore'
@@ -125,6 +126,7 @@ function createWindow(): void {
       autoplayPolicy: 'no-user-gesture-required'
     }
   })
+  attachContextMenu(uiView.webContents)
   win.contentView.addChildView(uiView)
 
   const fit = () => {

@@ -17,8 +17,15 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'browse_task',
   'read_page',
   'grep_page',
+  'grep_click',
+  'grep_type',
   'screenshot',
-  'screenshot_app'
+  'screenshot_app',
+  'click_xy',
+  'type_text',
+  'press_key',
+  'execute_in_browser',
+  'cdp_command'
 ])
 
 export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
@@ -35,7 +42,9 @@ export const CODEX_BROWSER_INSTRUCTIONS =
   'user is watching: gladdis.search (unified search — hidden SERP + visible tab live digests), ' +
   'gladdis.repo_overview, gladdis.search_repo, gladdis.read_spans, gladdis.research_dossier, and gladdis.verify_change summarize/search/read/investigate/validate the selected workspace, ' +
   'gladdis.fetch_page/gladdis.navigate (open a specific URL), gladdis.browse_task ' +
-  '(multi-step flows), gladdis.read_page, gladdis.grep_page, and gladdis.screenshot/screenshot_app. ' +
+  '(multi-step flows), gladdis.read_page, gladdis.grep_page, gladdis.grep_click, gladdis.grep_type, ' +
+  'and gladdis.screenshot/screenshot_app. Prefer gladdis.grep_click and gladdis.grep_type for discovery + action, ' +
+  'and fall back to the lower-level drive tools only when a direct grep action is not suitable. ' +
   'When debugging Gladdis itself, use the current visible app/browser first; do not launch a second ' +
   'Gladdis/dev app just to view UI or browser behavior. Only launch a separate instance for startup ' +
   'or fresh-process validation, and explain why before doing it. ' +

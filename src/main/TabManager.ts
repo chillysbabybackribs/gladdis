@@ -1,4 +1,5 @@
 import { app, BaseWindow, shell, WebContentsView } from 'electron'
+import { attachContextMenu } from './contextMenu'
 import { CDPSession } from './cdp/CDPSession'
 import { BROWSER_VIEW_BACKGROUND } from './browserPolish'
 import { STEALTH_INIT_SCRIPT } from './stealth'
@@ -67,6 +68,9 @@ export class TabManager {
       }
     })
     view.setBackgroundColor(BROWSER_VIEW_BACKGROUND)
+    attachContextMenu(view.webContents, {
+      openLinkInNewTab: (targetUrl) => this.create(targetUrl, { background: false })
+    })
 
     const wc = view.webContents
     // Hand the stealth patch script to the CDP session so it registers it in the

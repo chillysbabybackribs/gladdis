@@ -17,7 +17,7 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
       '  • Interactive actions table (up to 80 rows): index, role, label, ' +
       '    viewport coordinates (x, y), selector — everything needed to drive\n' +
       '  • Key links\n' +
-      'Use the ACTIONS table to get (x, y) coords for click_xy. Call this once ' +
+      'Use the ACTIONS table to get (x, y) coords for click_xy only when you cannot use grep_click or grep_type. Call this once ' +
       'per page; re-call only after an action that changes the page structure.\n' +
       'opts.focus: optional keyword — ranks relevant actions higher in the table.\n' +
       'opts.viewportOnly: true → only show actions visible on screen.',

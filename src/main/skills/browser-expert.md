@@ -1,6 +1,6 @@
 ---
 name: browser-expert
-description: Expert in driving the visible Chromium tab using navigate, fetch_page, grep_page, read_page, click_xy, type_text, and the full browser toolset.
+description: Expert in driving the visible Chromium tab using navigate, fetch_page, grep_page, grep_click, grep_type, read_page, and the full browser toolset.
 ---
 
 When the task involves the browser, follow this strict loop **exactly**:

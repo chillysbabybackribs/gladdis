@@ -5,14 +5,21 @@ import {
 } from './dynamicBrowserTools'
 
 describe('Codex Gladdis dynamic tools', () => {
-  it('exposes recall_history to Codex', () => {
+  it('exposes recall_history and the browser action tools to Codex', () => {
     expect(CODEX_BROWSER_TOOLS).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           namespace: 'gladdis',
           name: 'recall_history',
           description: expect.stringContaining('bare resume request')
-        })
+        }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'grep_click' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'grep_type' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'click_xy' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'type_text' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'press_key' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'execute_in_browser' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'cdp_command' })
       ])
     )
   })

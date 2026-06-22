@@ -1,9 +1,11 @@
 import type { ToolDef } from '../browserTools'
 
 /**
- * DRIVE tools — blind actions (navigate / click / type / press / cdp).
+ * DRIVE tools — low-level browser actions.
+ * Prefer grep_page / grep_click / grep_type for discovery + action.
+ * Use click_xy, type_text, press_key, execute_in_browser, and cdp_command only when a direct grep action is not suitable.
  * Return only ack strings; the LLM never sees raw page data from these.
- * Read with `read_page` afterwards.
+ * Read with `read_page` afterwards when you need page state.
  */
 export const DRIVE_TOOLS: ToolDef[] = [
   {

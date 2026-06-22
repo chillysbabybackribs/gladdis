@@ -162,14 +162,17 @@ function openAiBody(args: {
   }
 
   const isReasoning = apiModelId.startsWith('gpt-5.5') || apiModelId.startsWith('gpt-5.4')
-  // Small GPT-5.x variants (-mini / -nano) reject `reasoning_effort` on the
-  // /v1/chat/completions endpoint when function tools are also present
-  // ("Function tools with reasoning_effort are not supported … Please use
-  // /v1/responses instead."). Omit the knob in that combo; the larger
-  // reasoning models still accept it.
-  const isSmallReasoning = /^gpt-5\.[45]-(mini|nano)\b/.test(apiModelId)
+  // OpenAI's /v1/chat/completions rejects `reasoning_effort` when function
+  // tools are also present for the entire gpt-5.4 family (base, -pro, -mini,
+  // -nano) and for gpt-5.5 -mini / -nano:
+  //   "Function tools with reasoning_effort are not supported for gpt-5.4 in
+  //    /v1/chat/completions. Please use /v1/responses instead."
+  // Only the full-size gpt-5.5 still accepts the combo on this endpoint, so
+  // omit `reasoning_effort` for everything else when tools are attached.
+  const reasoningEffortIncompatibleWithTools =
+    apiModelId.startsWith('gpt-5.4') || /^gpt-5\.5-(mini|nano)\b/.test(apiModelId)
   const hasTools = !!(args.tools && args.tools.length)
-  const reasoningEffortBlocked = isSmallReasoning && hasTools
+  const reasoningEffortBlocked = reasoningEffortIncompatibleWithTools && hasTools
   const maxTokens = args.maxTokens
     ? Math.min(args.maxTokens, openAiMaxCompletionTokens(apiModelId))
     : undefined

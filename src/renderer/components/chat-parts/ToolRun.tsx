@@ -33,6 +33,8 @@ const TOOL_VERB: Record<string, [string, string]> = {
   read_page: ['Reading the page', 'Read the page'],
   navigate: ['Navigating to', 'Navigated to'],
   screenshot_confirmation: ['Confirming', 'Confirmed'],
+  grep_click: ['Clicking', 'Clicked'],
+  grep_type: ['Typing', 'Typed'],
   click_xy: ['Clicking', 'Clicked'],
   type_text: ['Typing', 'Typed'],
   press_key: ['Pressing', 'Pressed'],

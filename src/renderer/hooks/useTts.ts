@@ -4,6 +4,22 @@ import type { TtsVoice } from '../../../shared/types'
 const VOICE_KEY = 'gladdis:tts:voice'
 const SPEED_KEY = 'gladdis:tts:speed'
 
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch (e) {
+    console.warn(`Failed to set localStorage key "${key}":`, e)
+  }
+}
+
 /**
  * Global (cross-panel) TTS voice + playback speed, persisted to localStorage.
  * Both chat panels share these, so a `storage` event mirrors a change made in
@@ -12,17 +28,17 @@ const SPEED_KEY = 'gladdis:tts:speed'
  */
 export function useTtsSettings() {
   const [voice, setVoice] = useState<TtsVoice>(
-    () => (localStorage.getItem(VOICE_KEY) as TtsVoice) || 'alloy'
+    () => (safeGetItem(VOICE_KEY) as TtsVoice) || 'alloy'
   )
-  const [speed, setSpeed] = useState<number>(() => Number(localStorage.getItem(SPEED_KEY)) || 1)
+  const [speed, setSpeed] = useState<number>(() => Number(safeGetItem(SPEED_KEY)) || 1)
 
   const persistVoice = useCallback((v: TtsVoice) => {
     setVoice(v)
-    localStorage.setItem(VOICE_KEY, v)
+    safeSetItem(VOICE_KEY, v)
   }, [])
   const persistSpeed = useCallback((s: number) => {
     setSpeed(s)
-    localStorage.setItem(SPEED_KEY, String(s))
+    safeSetItem(SPEED_KEY, String(s))
   }, [])
 
   useEffect(() => {

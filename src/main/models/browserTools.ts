@@ -16,6 +16,7 @@ import { promisify } from 'util'
 import { KeyStore } from './KeyStore'
 import { GoogleGenAI } from '@google/genai'
 import { CodebaseAuditor } from './CodebaseAuditor'
+import type { CapabilityBroker } from './capabilities/CapabilityBroker'
 
 export interface ToolDef {
   name: string
@@ -147,7 +148,10 @@ const DEFAULT_PUBLISH_MESSAGE = 'Update Gladdis app'
 
 export interface ToolContext {
   tabId: string
+  requestId?: string
+  assistantMessageId?: string
   conversationId?: string | null
+  taskId?: string
   fullResults?: Map<string, string>
   llm?: LlmComplete
   onProgress?: (event: PipelineProgressEvent) => void
@@ -164,6 +168,7 @@ export class BrowserTools {
   private readonly files = new FileTools()
   private appCapture: (() => Promise<string>) | null = null
   private readonly taskDone = new Map<string, Map<string, string>>()
+  private capabilityBroker: CapabilityBroker | null = null
 
   private readonly pageCache = new Map<string, string>()
   private readonly PAGE_CACHE_LIMIT = 32
@@ -177,6 +182,10 @@ export class BrowserTools {
 
   setAppCapture(fn: () => Promise<string>): void {
     this.appCapture = fn
+  }
+
+  setCapabilityBroker(broker: CapabilityBroker): void {
+    this.capabilityBroker = broker
   }
 
   setWorkspaceRoot(root: string | null): void {
@@ -258,6 +267,21 @@ export class BrowserTools {
 
         case 'search':
           return this.search(args, ctx)
+
+        case 'repo_overview':
+          return this.repoOverview(args, ctx)
+
+        case 'search_repo':
+          return this.searchRepo(args, ctx)
+
+        case 'read_spans':
+          return this.readSpans(args, ctx)
+
+        case 'research_dossier':
+          return this.researchDossier(args, ctx)
+
+        case 'verify_change':
+          return this.verifyChange(args, ctx)
 
         case 'fetch_page':
           return this.fetchPage(args, ctx)
@@ -457,6 +481,181 @@ export class BrowserTools {
     } catch (err) {
       return { ok: false, text: `Tool ${name} failed: ${(err as Error)?.message ?? String(err)}` }
     }
+  }
+
+  private async repoOverview(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    const workspaceRoot = this.getWorkspaceRoot()
+    if (!workspaceRoot) {
+      return {
+        ok: false,
+        text: 'repo_overview: no workspace root selected. Pick a project folder first.'
+      }
+    }
+    if (!this.capabilityBroker) {
+      return { ok: false, text: 'repo_overview: capability broker not configured.' }
+    }
+    const result = await this.capabilityBroker.repoOverview(
+      {
+        requestId: ctx.requestId ?? `repo-overview:${ctx.conversationId ?? ctx.tabId}`,
+        assistantMessageId: ctx.assistantMessageId,
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+      },
+      {
+        workspaceRoot,
+        focus: typeof args.focus === 'string' ? args.focus : undefined
+      }
+    )
+    return { ok: result.ok, text: result.summary }
+  }
+
+  private async searchRepo(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    const workspaceRoot = this.getWorkspaceRoot()
+    if (!workspaceRoot) {
+      return {
+        ok: false,
+        text: 'search_repo: no workspace root selected. Pick a project folder first.'
+      }
+    }
+    if (!this.capabilityBroker) {
+      return { ok: false, text: 'search_repo: capability broker not configured.' }
+    }
+    const query = String(args.query ?? args.pattern ?? '').trim()
+    if (!query) {
+      return { ok: false, text: 'search_repo: "query" is required.' }
+    }
+    const result = await this.capabilityBroker.searchRepo(
+      {
+        requestId: ctx.requestId ?? `search-repo:${ctx.conversationId ?? ctx.tabId}`,
+        assistantMessageId: ctx.assistantMessageId,
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+      },
+      {
+        workspaceRoot,
+        query,
+        glob: typeof args.glob === 'string' ? args.glob : undefined,
+        maxResults: Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : undefined
+      }
+    )
+    return { ok: result.ok, text: result.summary }
+  }
+
+  private async readSpans(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    const workspaceRoot = this.getWorkspaceRoot()
+    if (!workspaceRoot) {
+      return {
+        ok: false,
+        text: 'read_spans: no workspace root selected. Pick a project folder first.'
+      }
+    }
+    if (!this.capabilityBroker) {
+      return { ok: false, text: 'read_spans: capability broker not configured.' }
+    }
+    const items = this.normalizeReadSpanArgs(args)
+    if (items.length === 0) {
+      return {
+        ok: false,
+        text: 'read_spans: provide "items" or at least a "path".'
+      }
+    }
+    const result = await this.capabilityBroker.readSpans(
+      {
+        requestId: ctx.requestId ?? `read-spans:${ctx.conversationId ?? ctx.tabId}`,
+        assistantMessageId: ctx.assistantMessageId,
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+      },
+      {
+        workspaceRoot,
+        items
+      }
+    )
+    return { ok: result.ok, text: result.summary }
+  }
+
+  private async researchDossier(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    const workspaceRoot = this.getWorkspaceRoot()
+    if (!workspaceRoot) {
+      return {
+        ok: false,
+        text: 'research_dossier: no workspace root selected. Pick a project folder first.'
+      }
+    }
+    if (!this.capabilityBroker) {
+      return { ok: false, text: 'research_dossier: capability broker not configured.' }
+    }
+    const query = String(args.query ?? args.focus ?? '').trim()
+    if (!query) {
+      return { ok: false, text: 'research_dossier: "query" is required.' }
+    }
+    const result = await this.capabilityBroker.researchDossier(
+      {
+        requestId: ctx.requestId ?? `research-dossier:${ctx.conversationId ?? ctx.tabId}`,
+        assistantMessageId: ctx.assistantMessageId,
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+      },
+      {
+        workspaceRoot,
+        query,
+        glob: typeof args.glob === 'string' ? args.glob : undefined,
+        maxResults: Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : undefined
+      }
+    )
+    return { ok: result.ok, text: result.summary }
+  }
+
+  private async verifyChange(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    const workspaceRoot = this.getWorkspaceRoot()
+    if (!workspaceRoot) {
+      return {
+        ok: false,
+        text: 'verify_change: no workspace root selected. Pick a project folder first.'
+      }
+    }
+    if (!this.capabilityBroker) {
+      return { ok: false, text: 'verify_change: capability broker not configured.' }
+    }
+    const rawChecks = Array.isArray(args.checks) ? args.checks : args.check ? [args.check] : []
+    const checks = rawChecks
+      .map((value) => String(value).trim())
+      .filter(Boolean) as Array<'typecheck' | 'test' | 'build' | 'check'>
+    const goal = String(args.goal ?? '').trim() || undefined
+    const result = await this.capabilityBroker.verifyChange(
+      {
+        requestId: ctx.requestId ?? `verify-change:${ctx.conversationId ?? ctx.tabId}`,
+        assistantMessageId: ctx.assistantMessageId,
+        taskId: ctx.taskId ?? ctx.conversationId ?? `task-${ctx.tabId}`
+      },
+      {
+        workspaceRoot,
+        ...(checks.length ? { checks } : {}),
+        ...(goal ? { goal } : {})
+      }
+    )
+    return { ok: result.ok, text: result.summary }
+  }
+
+  private normalizeReadSpanArgs(args: Record<string, any>): Array<{
+    path: string
+    startLine?: number
+    endLine?: number
+  }> {
+    const rawItems = Array.isArray(args.items) ? args.items : []
+    const normalized = rawItems
+      .map((item) => {
+        const record = item && typeof item === 'object' && !Array.isArray(item) ? item as Record<string, any> : {}
+        const path = String(record.path ?? '').trim()
+        if (!path) return null
+        const startLine = Number.isFinite(Number(record.start_line)) ? Number(record.start_line) : undefined
+        const endLine = Number.isFinite(Number(record.end_line)) ? Number(record.end_line) : undefined
+        return { path, ...(startLine != null ? { startLine } : {}), ...(endLine != null ? { endLine } : {}) }
+      })
+      .filter((item): item is { path: string; startLine?: number; endLine?: number } => Boolean(item))
+    if (normalized.length > 0) return normalized
+
+    const path = String(args.path ?? '').trim()
+    if (!path) return []
+    const startLine = Number.isFinite(Number(args.start_line)) ? Number(args.start_line) : undefined
+    const endLine = Number.isFinite(Number(args.end_line)) ? Number(args.end_line) : undefined
+    return [{ path, ...(startLine != null ? { startLine } : {}), ...(endLine != null ? { endLine } : {}) }]
   }
 
   private async requestTools(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
@@ -759,6 +958,7 @@ export class BrowserTools {
 
   /**
    * Deep web search and recursive crawl using background tabs and deterministic ranking.
+   * v2: Phased process (Decompose → Plan → Execute → Synthesize → Critique) with stronger research questions and source strategy.
    */
   private async deepSearch(args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
     const query = String(args.query ?? '').trim()

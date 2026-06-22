@@ -1,7 +1,15 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ContractTrace } from '../../../shared/types'
 import { renderMarkdown } from '../lib/markdown'
-import type { Message, ProgressStepPart, ToolActivity } from './chatTypes'
+import type {
+  CapabilityActivityPart,
+  LoopStatePart,
+  Message,
+  ProgressStepPart,
+  TaskMemoryPart,
+  ToolActivity,
+  VerificationStatePart
+} from './chatTypes'
 
 const STEP_STATUS_LABEL: Record<ProgressStepPart['status'], string> = {
   planned: 'Planned',
@@ -127,6 +135,47 @@ function toolSentence(tool: ToolActivity): string {
   return tool.status === 'error' ? `${sentence} — failed` : sentence
 }
 
+const LOOP_EVENT_LABEL: Record<LoopStatePart['event'], string> = {
+  task_started: 'Task started',
+  phase_changed: 'Phase changed',
+  iteration_started: 'Iteration started',
+  iteration_completed: 'Iteration completed',
+  checkpoint_created: 'Checkpoint created',
+  task_paused: 'Task paused',
+  task_blocked: 'Task blocked',
+  task_completed: 'Task completed',
+  task_aborted: 'Task aborted'
+}
+
+const CAPABILITY_EVENT_LABEL: Record<CapabilityActivityPart['event'], string> = {
+  capability_requested: 'Requested',
+  capability_started: 'Running',
+  capability_progress: 'In progress',
+  capability_completed: 'Completed',
+  capability_failed: 'Failed',
+  capability_cache_hit: 'Cache hit'
+}
+
+const VERIFICATION_EVENT_LABEL: Record<VerificationStatePart['event'], string> = {
+  verification_started: 'Verification started',
+  verification_check_started: 'Check started',
+  verification_check_finished: 'Check finished',
+  verification_passed: 'Verification passed',
+  verification_failed: 'Verification failed',
+  verification_blocked: 'Verification blocked'
+}
+
+const LOOP_PHASE_LABEL: Record<LoopStatePart['phase'], string> = {
+  inspect: 'Inspect',
+  recon: 'Recon',
+  plan: 'Plan',
+  act: 'Act',
+  validate: 'Validate',
+  decide: 'Decide',
+  handoff: 'Handoff',
+  done: 'Done'
+}
+
 export const ChatMessageBody = memo(function ChatMessageBody({ message }: { message: Message }) {
   if (message.parts && message.parts.length) {
     const blocks: ReactNode[] = []
@@ -157,6 +206,30 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       if (part.kind === 'progress_step') {
         flushTools()
         progressRun.push(part)
+        return
+      }
+      if (part.kind === 'loop_state') {
+        flushTools()
+        flushProgress()
+        blocks.push(<LoopStateCard key={`loop-${idx}`} part={part} />)
+        return
+      }
+      if (part.kind === 'capability_activity') {
+        flushTools()
+        flushProgress()
+        blocks.push(<CapabilityActivityCard key={`capability-${idx}`} part={part} />)
+        return
+      }
+      if (part.kind === 'verification_state') {
+        flushTools()
+        flushProgress()
+        blocks.push(<VerificationStateCard key={`verification-${idx}`} part={part} />)
+        return
+      }
+      if (part.kind === 'task_memory') {
+        flushTools()
+        flushProgress()
+        blocks.push(<TaskMemoryCard key={`memory-${idx}`} part={part} />)
         return
       }
       flushTools()
@@ -230,6 +303,116 @@ function PipelineProgress({ steps }: { steps: ProgressStepPart[] }) {
           </li>
         ))}
       </ol>
+    </section>
+  )
+}
+
+function LoopStateCard({ part }: { part: LoopStatePart }) {
+  return (
+    <section className="tool-run">
+      <div className="tool-run-group">
+        <div className="tool-run-group-header">
+          <span className="tool-run-group-title">
+            {LOOP_EVENT_LABEL[part.event]}: {LOOP_PHASE_LABEL[part.phase]}
+          </span>
+          <span className="tool-run-group-duration">Iteration {part.iteration}</span>
+        </div>
+        {(part.summary || part.reason) && (
+          <div className="tool-run-group-body">
+            <div className="tool-call-output">
+              <div className="tool-call-output-box">
+                <pre className="tool-call-output-pre">{part.summary ?? part.reason}</pre>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function CapabilityActivityCard({ part }: { part: CapabilityActivityPart }) {
+  const title = `${CAPABILITY_EVENT_LABEL[part.event]} ${part.capability}${part.cached ? ' (cached)' : ''}`
+  const meta = [part.service, part.artifactId ? `artifact ${part.artifactId}` : null]
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <section className="tool-run">
+      <div className={`tool-run-group ${part.event === 'capability_failed' ? 'error' : ''}`}>
+        <div className="tool-run-group-header">
+          <span className="tool-run-group-title">{title}</span>
+          {part.durationMs != null && (
+            <span className="tool-run-group-duration">{formatMs(part.durationMs)}</span>
+          )}
+        </div>
+        {(part.summary || meta) && (
+          <div className="tool-run-group-body">
+            <div className="tool-call-output">
+              <div className="tool-call-output-box">
+                <pre className="tool-call-output-pre">{[part.summary, meta].filter(Boolean).join('\n')}</pre>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function VerificationStateCard({ part }: { part: VerificationStatePart }) {
+  const title = part.check
+    ? `${VERIFICATION_EVENT_LABEL[part.event]}: ${part.check}`
+    : VERIFICATION_EVENT_LABEL[part.event]
+  const extra = [
+    part.status ? `status: ${part.status}` : null,
+    part.rawLogArtifactId ? `artifact: ${part.rawLogArtifactId}` : null
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return (
+    <section className="tool-run">
+      <div className={`tool-run-group ${part.status === 'fail' || part.status === 'blocked' ? 'error' : ''}`}>
+        <div className="tool-run-group-header">
+          <span className="tool-run-group-title">{title}</span>
+        </div>
+        {(part.summary || extra) && (
+          <div className="tool-run-group-body">
+            <div className="tool-call-output">
+              <div className="tool-call-output-box">
+                <pre className="tool-call-output-pre">{[part.summary, extra].filter(Boolean).join('\n')}</pre>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function TaskMemoryCard({ part }: { part: TaskMemoryPart }) {
+  const title = `${part.event.replaceAll('_', ' ')} (${part.scope})`
+  const extra = [
+    part.keys?.length ? `keys: ${part.keys.join(', ')}` : null,
+    part.artifactId ? `artifact: ${part.artifactId}` : null
+  ]
+    .filter(Boolean)
+    .join('\n')
+  return (
+    <section className="tool-run">
+      <div className="tool-run-group">
+        <div className="tool-run-group-header">
+          <span className="tool-run-group-title">{title}</span>
+        </div>
+        {(part.summary || extra) && (
+          <div className="tool-run-group-body">
+            <div className="tool-call-output">
+              <div className="tool-call-output-box">
+                <pre className="tool-call-output-pre">{[part.summary, extra].filter(Boolean).join('\n')}</pre>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   )
 }

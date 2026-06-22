@@ -4,11 +4,11 @@ import type { LlmComplete } from '../../pipeline/Planner'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
 import { resolveTurnTools } from '../agentTools'
 import {
+  continueAfterToolCalls,
   createToolValidationState,
-  needsValidationBeforeFinal,
+  handleNoToolCallsAfterEdits,
   noteToolOutcome,
-  validationInstruction,
-  VALIDATION_FAILED_FINAL,
+  type SupervisorTransition,
 } from './toolValidation'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number }
@@ -204,6 +204,10 @@ export async function runAnthropicToolLoop(args: {
   workspaceBlock: string | null
   maxTokens: number
   keepResults: number
+  supervisor?: {
+    iterationStarted: (iteration: number) => void
+    transition: (iteration: number, transition: SupervisorTransition) => void
+  }
 }): Promise<void> {
   const system: Anthropic.MessageCreateParams['system'] = [
     { type: 'text', text: args.agentSystem, cache_control: { type: 'ephemeral' } }
@@ -231,6 +235,7 @@ export async function runAnthropicToolLoop(args: {
   const validation = createToolValidationState()
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    args.supervisor?.iterationStarted(turn + 1)
     anthropicTools = buildTools() // pick up tools granted via request_tools last step
     applyRollingCache(messages)
     const call = args.audit.begin({
@@ -273,36 +278,25 @@ export async function runAnthropicToolLoop(args: {
       (b: any): b is Anthropic.ToolUseBlock => b.type === 'tool_use'
     )
     if (toolUses.length === 0) {
-      if (needsValidationBeforeFinal(validation, args.toolDefs) && !validation.reminderSent) {
-        validation.reminderSent = true
-        messages.push({ role: 'user', content: validationInstruction(validation) })
+      const decision = await handleNoToolCallsAfterEdits({
+        state: validation,
+        toolDefs: args.toolDefs,
+        turn,
+        requestId: args.req.requestId,
+        runTool: (name, toolArgs) => args.tools.run(name, toolArgs, args.ctx),
+        emitToolCall: args.emit,
+        emitToolResult: args.emit,
+        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text)
+      })
+      if (decision.action === 'retry') {
+        args.supervisor?.transition(turn + 1, decision.transition)
+        messages.push({ role: 'user', content: decision.prompt })
         continue
       }
-      if (needsValidationBeforeFinal(validation, args.toolDefs) && !validation.autoValidationAttempted) {
-        validation.autoValidationAttempted = true
-        const callId = `auto_validation_${turn}`
-        const toolArgs = { check: 'typecheck' }
-        args.emit({ requestId: args.req.requestId, type: 'tool_call', tool: 'run_validation', args: toolArgs, callId })
-        const outcome = await args.tools.run('run_validation', toolArgs, args.ctx)
-        args.ctx.fullResults!.set(callId, outcome.text)
-        noteToolOutcome(validation, 'run_validation', outcome)
-        args.emit({
-          requestId: args.req.requestId,
-          type: 'tool_result',
-          callId,
-          ok: outcome.ok,
-          preview: outcome.text
-        })
-        if (outcome.ok) return
-        messages.push({
-          role: 'user',
-          content: `${VALIDATION_FAILED_FINAL}\n\nAutomatic typecheck result:\n${outcome.text}`
-        })
-        continue
+      if (decision.action === 'finish_with_warning') {
+        args.emit({ requestId: args.req.requestId, type: 'delta', text: decision.warningDelta })
       }
-      if (needsValidationBeforeFinal(validation, args.toolDefs)) {
-        args.emit({ requestId: args.req.requestId, type: 'delta', text: `\n\n${VALIDATION_FAILED_FINAL}` })
-      }
+      args.supervisor?.transition(turn + 1, decision.transition)
       return
     }
 
@@ -348,6 +342,7 @@ export async function runAnthropicToolLoop(args: {
       resultBlocks.push(block)
     }
     messages.push({ role: 'user', content: results })
+    args.supervisor?.transition(turn + 1, continueAfterToolCalls(toolUses.length))
   }
 }
 

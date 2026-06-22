@@ -17,8 +17,23 @@ const ZOOM_MAX = 1.6
 const ZOOM_STEP = 0.1
 const ZOOM_DEFAULT = 1
 
+function safeGetItem(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+function safeSetItem(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch (e) {
+    console.warn(`Failed to set localStorage key "${key}":`, e)
+  }
+}
+
 function loadBool(key: string, fallback: boolean): boolean {
-  const v = localStorage.getItem(key)
+  const v = safeGetItem(key)
   return v === null ? fallback : v === '1'
 }
 function clampZoom(v: number): number {
@@ -26,11 +41,11 @@ function clampZoom(v: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(v * 100) / 100))
 }
 function loadFrac(key: string, fallback: number): number {
-  const v = parseFloat(localStorage.getItem(key) ?? '')
+  const v = parseFloat(safeGetItem(key) ?? '')
   return Number.isFinite(v) ? v : fallback
 }
 function loadZoom(key: string): number {
-  return clampZoom(parseFloat(localStorage.getItem(key) ?? String(ZOOM_DEFAULT)))
+  return clampZoom(parseFloat(safeGetItem(key) ?? String(ZOOM_DEFAULT)))
 }
 
 function ChatZoomControl({
@@ -129,34 +144,34 @@ export function Workspace() {
   const toggleLeft = () => {
     setLeftOpen((open) => {
       const next = !open
-      localStorage.setItem(LEFT_KEY, next ? '1' : '0')
+      safeSetItem(LEFT_KEY, next ? '1' : '0')
       return next
     })
   }
   const toggleRight = () => {
     setRightOpen((open) => {
       const next = !open
-      localStorage.setItem(RIGHT_KEY, next ? '1' : '0')
+      safeSetItem(RIGHT_KEY, next ? '1' : '0')
       return next
     })
   }
   const onLeftFrac = (f: number) => {
     setLeftFrac(f)
-    localStorage.setItem(LEFT_FRAC_KEY, String(f))
+    safeSetItem(LEFT_FRAC_KEY, String(f))
   }
   const onRightFrac = (f: number) => {
     setRightFrac(f)
-    localStorage.setItem(RIGHT_FRAC_KEY, String(f))
+    safeSetItem(RIGHT_FRAC_KEY, String(f))
   }
   const onLeftZoom = (zoom: number) => {
     const next = clampZoom(zoom)
     setLeftZoom(next)
-    localStorage.setItem(LEFT_ZOOM_KEY, String(next))
+    safeSetItem(LEFT_ZOOM_KEY, String(next))
   }
   const onRightZoom = (zoom: number) => {
     const next = clampZoom(zoom)
     setRightZoom(next)
-    localStorage.setItem(RIGHT_ZOOM_KEY, String(next))
+    safeSetItem(RIGHT_ZOOM_KEY, String(next))
   }
 
   return (

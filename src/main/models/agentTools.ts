@@ -261,6 +261,130 @@ const SEARCH_TOOLS: ToolDef[] = [
   }
 ]
 
+const REPO_TOOLS: ToolDef[] = [
+  {
+    name: 'repo_overview',
+    description:
+      'Build a compact overview of the selected workspace: package name, scripts, top directories, key files, and likely entrypoints. ' +
+      'Use at the start of a coding task when you need fast orientation before reading specific files.',
+    parameters: {
+      type: 'object',
+      properties: {
+        focus: {
+          type: 'string',
+          description: 'Optional focus area or task wording to bias the summary toward.'
+        }
+      }
+    }
+  },
+  {
+    name: 'search_repo',
+    description:
+      'Search the selected workspace and return compact matches for code or filenames. ' +
+      'Use this before broad file reads when locating symbols, modules, or feature areas.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'String or regex-like search query for the workspace.' },
+        glob: {
+          type: 'string',
+          description: 'Optional file glob to narrow the search, e.g. "*.ts" or "src/**/*.tsx".'
+        },
+        max_results: {
+          type: 'number',
+          description: 'Maximum hits to return. Default 8.'
+        }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'read_spans',
+    description:
+      'Read one or more bounded windows from files in the selected workspace. ' +
+      'Use after search_repo to inspect exact code regions without broad whole-file reads.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Single-file convenience form: relative path in the selected workspace.'
+        },
+        start_line: {
+          type: 'number',
+          description: 'Single-file convenience form: starting line number.'
+        },
+        end_line: {
+          type: 'number',
+          description: 'Single-file convenience form: ending line number.'
+        },
+        items: {
+          type: 'array',
+          description: 'Multi-span form for reading several precise windows at once.',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              start_line: { type: 'number' },
+              end_line: { type: 'number' }
+            },
+            required: ['path']
+          }
+        }
+      }
+    }
+  },
+  {
+    name: 'research_dossier',
+    description:
+      'Ask Gemini to synthesize a compact repo reconnaissance dossier for a coding question using bounded workspace evidence. ' +
+      'Use when you need a higher-level map of relevant modules before reading or editing specific files.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The engineering question or focus area to investigate in the selected workspace.'
+        },
+        glob: {
+          type: 'string',
+          description: 'Optional file glob to bias search and evidence gathering.'
+        },
+        max_results: {
+          type: 'number',
+          description: 'Maximum repo search hits to gather before synthesis. Default 8.'
+        }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'verify_change',
+    description:
+      'Run a deterministic validation pass for the selected workspace and emit structured verification state. ' +
+      'Use after edits to confirm the change passes the right check or to surface the real blocker.',
+    parameters: {
+      type: 'object',
+      properties: {
+        check: {
+          type: 'string',
+          enum: ['typecheck', 'test', 'build', 'check'],
+          description: 'Single validation check to run.'
+        },
+        checks: {
+          type: 'array',
+          items: { type: 'string', enum: ['typecheck', 'test', 'build', 'check'] },
+          description: 'Optional ordered list of validation checks to run.'
+        },
+        goal: {
+          type: 'string',
+          description: 'Optional natural-language goal used to choose the best validation check when none is specified.'
+        }
+      }
+    }
+  }
+]
+
 const TASK_TOOLS: ToolDef[] = [
   {
     name: 'browse_task',
@@ -608,6 +732,7 @@ const MEMORY_TOOL_NAMES = [
 
 /** The complete agent tool surface — ordered by call frequency. */
 export const AGENT_TOOLS: ToolDef[] = [
+  ...REPO_TOOLS,       // repo overview + bounded workspace search
   ...SEARCH_TOOLS,     // search, fetch_page
   ...TASK_TOOLS,       // browse_task for multi-step browser work
   ...PERCEIVE_TOOLS,   // read_page
@@ -638,6 +763,7 @@ const CONVERSATION_TOOLS: ToolDef[] = [
 ]
 
 const FILESYSTEM_TOOLS: ToolDef[] = [
+  ...REPO_TOOLS,
   ...FS_TOOLS,
   ...MEMORY_TOOLS
 ]
@@ -657,7 +783,7 @@ const RESEARCH_TOOLS: ToolDef[] = [
 
 /** Tool groups the model can pull in mid-turn via request_tools. */
 const TOOL_GROUPS: Record<string, ToolDef[]> = {
-  filesystem: FS_TOOLS,
+  filesystem: [...REPO_TOOLS, ...FS_TOOLS],
   browser: [...PERCEIVE_TOOLS, ...CAPTURE_TOOLS, ...DRIVE_TOOLS],
   research: [...SEARCH_TOOLS, ...TASK_TOOLS]
 }
@@ -667,7 +793,7 @@ const REQUEST_TOOLS_DEF: ToolDef = {
   description:
     'Pull in a group of tools you need but were not given yet, then continue the task. ' +
     'Call this the moment you realize you need to act — never say you will do something you lack the tool for; ask for the tool instead. ' +
-    'Groups: "filesystem" (read/search/edit files, run shell commands, install packages), ' +
+    'Groups: "filesystem" (repo overview/search, read/edit files, run shell commands, install packages), ' +
     '"browser" (read/navigate/click/screenshot the visible page), ' +
     '"research" (web search and page fetch). After the tools are granted, use them in your next step.',
   parameters: {

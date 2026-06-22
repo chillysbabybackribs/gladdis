@@ -15,8 +15,8 @@ export interface ModelOption {
  * CLI catalog when available.
  */
 export const MODELS: ModelOption[] = [
-  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google' },

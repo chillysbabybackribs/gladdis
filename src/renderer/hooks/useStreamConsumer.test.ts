@@ -108,4 +108,89 @@ describe('applyStreamEventToMessages', () => {
       }
     ])
   })
+
+  it('appends loop, capability, verification, and task-memory events as ordered parts', () => {
+    const messages: Message[] = [
+      { id: 'assistant-a', role: 'assistant', text: 'alpha', parts: [{ kind: 'text', text: 'alpha' }] }
+    ]
+
+    const withLoop = applyStreamEventToMessages(messages, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'loop_state',
+      taskId: 'task-1',
+      event: 'task_started',
+      phase: 'inspect',
+      iteration: 1,
+      summary: 'Starting task.'
+    })
+    const withCapability = applyStreamEventToMessages(withLoop, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'capability_activity',
+      callId: 'cap-1',
+      capability: 'repo_overview',
+      event: 'capability_cache_hit',
+      cached: true,
+      summary: 'Used cached repo card.'
+    })
+    const withVerification = applyStreamEventToMessages(withCapability, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'verification_state',
+      event: 'verification_failed',
+      check: 'typecheck',
+      status: 'fail',
+      summary: 'Type errors found.'
+    })
+    const withMemory = applyStreamEventToMessages(withVerification, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'task_memory',
+      event: 'memory_write',
+      scope: 'task',
+      keys: ['summary'],
+      summary: 'Stored current blocker.'
+    })
+
+    expect(withMemory[0].parts).toEqual([
+      { kind: 'text', text: 'alpha' },
+      {
+        kind: 'loop_state',
+        taskId: 'task-1',
+        event: 'task_started',
+        phase: 'inspect',
+        iteration: 1,
+        reason: undefined,
+        summary: 'Starting task.'
+      },
+      {
+        kind: 'capability_activity',
+        callId: 'cap-1',
+        capability: 'repo_overview',
+        event: 'capability_cache_hit',
+        service: undefined,
+        summary: 'Used cached repo card.',
+        cached: true,
+        artifactId: undefined,
+        durationMs: undefined
+      },
+      {
+        kind: 'verification_state',
+        event: 'verification_failed',
+        check: 'typecheck',
+        status: 'fail',
+        summary: 'Type errors found.',
+        rawLogArtifactId: undefined
+      },
+      {
+        kind: 'task_memory',
+        event: 'memory_write',
+        scope: 'task',
+        keys: ['summary'],
+        summary: 'Stored current blocker.',
+        artifactId: undefined
+      }
+    ])
+  })
 })

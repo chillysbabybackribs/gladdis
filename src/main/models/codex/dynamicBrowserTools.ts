@@ -6,6 +6,11 @@ import type { JsonValue, RequestId, ServerRequest } from './protocol'
 
 export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'recall_history',
+  'repo_overview',
+  'search_repo',
+  'read_spans',
+  'research_dossier',
+  'verify_change',
   'search',
   'fetch_page',
   'navigate',
@@ -25,8 +30,9 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
   })) as JsonValue[]
 
 export const CODEX_BROWSER_INSTRUCTIONS =
-  'All browser and web work goes through the gladdis.* tools, which drive the visible tab the ' +
+  'Browser, web, and repo-intelligence work can go through the gladdis.* tools. The visible-tab tools drive the browser the ' +
   'user is watching: gladdis.search (unified search — hidden SERP + visible tab live digests), ' +
+  'gladdis.repo_overview, gladdis.search_repo, gladdis.read_spans, gladdis.research_dossier, and gladdis.verify_change summarize/search/read/investigate/validate the selected workspace, ' +
   'gladdis.fetch_page/gladdis.navigate (open a specific URL), gladdis.browse_task ' +
   '(multi-step flows), gladdis.read_page, and gladdis.screenshot/screenshot_app. ' +
   'When debugging Gladdis itself, use the current visible app/browser first; do not launch a second ' +
@@ -97,8 +103,10 @@ export async function respondToCodexBrowserToolCall(args: {
   const tabId = typeof tabsApi.liveTabId === 'function' ? tabsApi.liveTabId() : tabsApi.activeTabId || tabsApi.create().id
   const ctx: ToolContext = {
     tabId,
+    requestId: args.requestId,
     conversationId: args.conversationId ?? undefined,
     llm: args.llm ?? undefined,
+    taskId: args.conversationId ?? undefined,
     fullResults: new Map(),
     onProgress: args.requestId
       ? (event) =>

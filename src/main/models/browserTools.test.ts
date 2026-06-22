@@ -15,10 +15,174 @@ vi.mock('electron', () => ({
 }))
 
 import { BrowserTools } from './browserTools'
+import { CapabilityBroker } from './capabilities/CapabilityBroker'
+import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 
 const execFileAsync = promisify(execFile)
 
 describe('BrowserTools', () => {
+  it('routes repo_overview through the capability broker for workspace summaries', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-repo-overview-'))
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'repo-tool-test', scripts: { test: 'vitest' } }))
+    await writeFile(join(dir, 'tsconfig.json'), '{}')
+    const emitted: any[] = []
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), (event) => emitted.push(event)))
+
+    const result = await tools.run(
+      'repo_overview',
+      { focus: 'chat service' },
+      { tabId: 'tab-1', requestId: 'req-1', conversationId: 'conv-1', taskId: 'task-1' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Package: repo-tool-test')
+    expect(result.text).toContain('Focus: chat service')
+    expect(emitted.map((event) => event.event)).toEqual([
+      'capability_requested',
+      'capability_started',
+      'capability_completed'
+    ])
+  })
+
+  it('routes search_repo through the capability broker and returns workspace hits', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-search-repo-tool-'))
+    await writeFile(join(dir, 'SearchThing.ts'), 'export const searchRepoNeedle = true\n')
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
+
+    const result = await tools.run(
+      'search_repo',
+      { query: 'searchRepoNeedle', glob: '*.ts', max_results: 5 },
+      { tabId: 'tab-1', requestId: 'req-2', conversationId: 'conv-2', taskId: 'task-2' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Search query: searchRepoNeedle')
+    expect(result.text).toContain('SearchThing.ts:1')
+  })
+
+  it('routes read_spans through the capability broker and returns bounded code windows', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-read-spans-tool-'))
+    await writeFile(join(dir, 'example.ts'), ['alpha', 'beta', 'gamma', 'delta'].join('\n'))
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
+
+    const result = await tools.run(
+      'read_spans',
+      { path: 'example.ts', start_line: 2, end_line: 3 },
+      { tabId: 'tab-1', requestId: 'req-3', conversationId: 'conv-3', taskId: 'task-3' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('=== example.ts (lines 2-3 of 4) ===')
+    expect(result.text).toContain('beta')
+    expect(result.text).toContain('gamma')
+  })
+
+  it('routes research_dossier through the capability broker and returns synthesized guidance', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-research-dossier-tool-'))
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    tools.setCapabilityBroker(
+      new CapabilityBroker(
+        {
+          repoOverview: async () => ({
+            summary: 'unused',
+            structuredPayload: {
+              workspaceRoot: dir,
+              packageManager: null,
+              packageName: null,
+              scripts: [],
+              keyFiles: [],
+              topDirectories: [],
+              entryPoints: []
+            }
+          }),
+          searchRepo: async () => ({
+            summary: 'unused',
+            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [] }
+          }),
+          readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
+          researchDossier: async () => ({
+            summary: '## Dossier\nInvestigate `src/main/models/ChatService.ts` first.',
+            structuredPayload: {
+              workspaceRoot: dir,
+              query: 'chat service architecture',
+              searchedFiles: ['src/main/models/ChatService.ts'],
+              suggestedSpans: []
+            }
+          })
+        },
+        () => {}
+      )
+    )
+
+    const result = await tools.run(
+      'research_dossier',
+      { query: 'chat service architecture' },
+      { tabId: 'tab-1', requestId: 'req-4', conversationId: 'conv-4', taskId: 'task-4' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('## Dossier')
+    expect(result.text).toContain('ChatService.ts')
+  })
+
+  it('routes verify_change through the capability broker and returns validation output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-verify-change-tool-'))
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    tools.setCapabilityBroker(
+      new CapabilityBroker(
+        {
+          repoOverview: async () => ({
+            summary: 'unused',
+            structuredPayload: {
+              workspaceRoot: dir,
+              packageManager: null,
+              packageName: null,
+              scripts: [],
+              keyFiles: [],
+              topDirectories: [],
+              entryPoints: []
+            }
+          }),
+          searchRepo: async () => ({
+            summary: 'unused',
+            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [] }
+          }),
+          readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
+          verifyChange: async () => ({
+            ok: true,
+            status: 'pass',
+            summary: 'typecheck: pass\n(no output)',
+            structuredPayload: {
+              workspaceRoot: dir,
+              checks: [{ check: 'typecheck', ok: true, output: '(no output)' }]
+            }
+          })
+        },
+        () => {}
+      )
+    )
+
+    const result = await tools.run(
+      'verify_change',
+      { check: 'typecheck' },
+      { tabId: 'tab-1', requestId: 'req-5', conversationId: 'conv-5', taskId: 'task-5' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('typecheck: pass')
+  })
+
   it('formats undefined execute_in_browser results without failing the tool call', async () => {
     const tools = new BrowserTools({
       executeJavaScript: vi.fn(async () => ({ success: true, result: undefined }))

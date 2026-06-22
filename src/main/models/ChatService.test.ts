@@ -30,13 +30,16 @@ import { shouldUseWorkspaceContext } from '../../../shared/types'
 import { AGENT_TOOLS, selectAgentToolProfile, resolveTurnTools } from './agentTools'
 import { BrowserTools } from './browserTools'
 import { CODEX_BROWSER_INSTRUCTIONS, CODEX_BROWSER_TOOL_NAMES } from './codex/dynamicBrowserTools'
+import { createLoopStateEmitter } from './loopStateEmitter'
 import { CODEX_SYSTEM, buildAgentSystem } from './prompts'
+import { createTurnSupervisor } from './turnSupervisor'
 import { resolveTurnContextPolicy } from './turnContextPolicy'
 
 function makeService(workspaceRoot: string | null = null) {
   const emit = vi.fn()
   const tools = {
     getWorkspaceRoot: () => workspaceRoot,
+    setCapabilityBroker: vi.fn(),
     run: vi.fn(),
     tabs: { activeTabId: 'tab-1', liveTabId: vi.fn((id?: string | null) => id ?? 'tab-1'), create: vi.fn(() => ({ id: 'tab-new' })), navigate: vi.fn(), capturePagePng: vi.fn(async () => Buffer.from('png').toString('base64')) }
   } as any
@@ -50,10 +53,19 @@ function makeService(workspaceRoot: string | null = null) {
   }
 }
 
+function makeSupervisorHarness(req: {
+  requestId: string
+  conversationId?: string | null
+}) {
+  const emit = vi.fn()
+  const supervisor = createTurnSupervisor(createLoopStateEmitter(req, emit))
+  return { emit, supervisor }
+}
+
 describe('ChatService provider hardening', () => {
   it('exposes a single unified search tool plus fetch_page', () => {
     const toolNames = AGENT_TOOLS.map((tool) => tool.name)
-    expect(toolNames).toEqual(expect.arrayContaining(['search', 'navigate', 'fetch_page']))
+    expect(toolNames).toEqual(expect.arrayContaining(['repo_overview', 'search_repo', 'read_spans', 'research_dossier', 'verify_change', 'search', 'navigate', 'fetch_page']))
     expect(toolNames).not.toContain('background_web_search')
     expect(toolNames).not.toContain('search_task')
     expect(toolNames).not.toContain('search_web')
@@ -61,6 +73,11 @@ describe('ChatService provider hardening', () => {
   })
 
   it('gives all three providers ONE browser surface (Codex sees the same tools)', () => {
+    expect(CODEX_BROWSER_TOOL_NAMES.has('repo_overview')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('search_repo')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('read_spans')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('research_dossier')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('verify_change')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('search')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('navigate')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('fetch_page')).toBe(true)
@@ -132,9 +149,19 @@ describe('ChatService provider hardening', () => {
     expect(res.ok).toBe(true)
     expect(granted.has('run_command')).toBe(true)
     expect(granted.has('read_file')).toBe(true)
+    expect(granted.has('repo_overview')).toBe(true)
+    expect(granted.has('search_repo')).toBe(true)
+    expect(granted.has('read_spans')).toBe(true)
+    expect(granted.has('research_dossier')).toBe(true)
+    expect(granted.has('verify_change')).toBe(true)
 
     // After the grant, resolveTurnTools surfaces the filesystem tools for the next step.
     const next = resolveTurnTools(lean.tools, granted).map((t) => t.name)
+    expect(next).toContain('repo_overview')
+    expect(next).toContain('search_repo')
+    expect(next).toContain('read_spans')
+    expect(next).toContain('research_dossier')
+    expect(next).toContain('verify_change')
     expect(next).toContain('run_command')
     expect(next).toContain('edit_file')
 
@@ -308,6 +335,256 @@ describe('ChatService provider hardening', () => {
     })
   })
 
+  it('forwards broker-driven loop phase changes through ChatService event emission', async () => {
+    const { tools, emit } = makeService('/tmp/selected-project')
+    const broker = tools.setCapabilityBroker.mock.calls[0][0]
+
+    await broker.repoOverview(
+      { requestId: 'req-loop', assistantMessageId: 'assistant-loop', taskId: 'task-loop' },
+      { workspaceRoot: '/tmp/selected-project', focus: 'chat service' }
+    )
+
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: 'req-loop',
+      assistantMessageId: 'assistant-loop',
+      type: 'loop_state',
+      taskId: 'task-loop',
+      event: 'phase_changed',
+      phase: 'inspect',
+      summary: 'Gathering repository overview.'
+    }))
+  })
+
+  it('emits supervisor-owned iteration lifecycle events', () => {
+    const req = {
+      requestId: 'req-supervisor',
+      assistantMessageId: 'assistant-supervisor',
+      conversationId: 'conv-supervisor',
+      modelId: 'dummy',
+      messages: [{ role: 'user', content: 'edit src/main/index.ts' }]
+    } as any
+
+    const { emit, supervisor } = makeSupervisorHarness(req)
+    supervisor.start('Starting shared supervisor.')
+    supervisor.iterationStarted(2)
+    supervisor.iterationCompleted(2, 'Executed 1 tool call.')
+    supervisor.complete('Finished shared supervisor.')
+
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({
+        requestId: 'req-supervisor',
+        type: 'loop_state',
+        taskId: 'conv-supervisor',
+        event: 'task_started',
+        phase: 'inspect',
+        summary: 'Starting shared supervisor.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-supervisor',
+        type: 'loop_state',
+        taskId: 'conv-supervisor',
+        event: 'phase_changed',
+        phase: 'act',
+        summary: 'Entering execution loop.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-supervisor',
+        type: 'loop_state',
+        taskId: 'conv-supervisor',
+        event: 'iteration_started',
+        phase: 'act',
+        iteration: 2
+      }),
+      expect.objectContaining({
+        requestId: 'req-supervisor',
+        type: 'loop_state',
+        taskId: 'conv-supervisor',
+        event: 'iteration_completed',
+        phase: 'decide',
+        iteration: 2,
+        summary: 'Executed 1 tool call.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-supervisor',
+        type: 'loop_state',
+        taskId: 'conv-supervisor',
+        event: 'task_completed',
+        phase: 'done',
+        summary: 'Finished shared supervisor.'
+      })
+    ])
+  })
+
+  it('maps supervisor retry transitions into loop phase changes', () => {
+    const req = {
+      requestId: 'req-decision',
+      assistantMessageId: 'assistant-decision',
+      conversationId: 'conv-decision',
+      modelId: 'dummy',
+      messages: [{ role: 'user', content: 'edit src/main/index.ts' }]
+    } as any
+
+    const { emit, supervisor } = makeSupervisorHarness(req)
+    supervisor.transition(1, {
+      iterationSummary: 'Validation required another pass.',
+      decision: {
+        kind: 'validation_required',
+        signal: 'retry',
+        summary: 'Validation is required before the turn can finish.'
+      }
+    })
+    supervisor.transition(2, {
+      iterationSummary: 'Validation required another pass.',
+      decision: {
+        kind: 'validation_failed',
+        signal: 'retry',
+        summary: 'Automatic validation failed; another repair pass is required.'
+      }
+    })
+
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({
+        requestId: 'req-decision',
+        type: 'loop_state',
+        taskId: 'conv-decision',
+        event: 'iteration_completed',
+        phase: 'decide',
+        iteration: 1,
+        summary: 'Validation required another pass.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-decision',
+        type: 'loop_state',
+        taskId: 'conv-decision',
+        event: 'task_paused',
+        phase: 'validate',
+        summary: 'Validation is required before the turn can finish.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-decision',
+        type: 'loop_state',
+        taskId: 'conv-decision',
+        event: 'iteration_completed',
+        phase: 'decide',
+        iteration: 2,
+        summary: 'Validation required another pass.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-decision',
+        type: 'loop_state',
+        taskId: 'conv-decision',
+        event: 'task_paused',
+        phase: 'decide',
+        summary: 'Automatic validation failed; another repair pass is required.'
+      })
+    ])
+  })
+
+  it('maps tool-result retry decisions back into the act phase', () => {
+    const req = {
+      requestId: 'req-tool-results',
+      assistantMessageId: 'assistant-tool-results',
+      conversationId: 'conv-tool-results',
+      modelId: 'dummy',
+      messages: [{ role: 'user', content: 'inspect and continue' }]
+    } as any
+
+    const { emit, supervisor } = makeSupervisorHarness(req)
+    supervisor.transition(3, {
+      iterationSummary: 'Executed 2 tool call(s).',
+      decision: {
+        kind: 'tool_results_ready',
+        signal: 'retry',
+        summary: 'Tool results are ready; continuing the agent loop.'
+      }
+    })
+
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({
+        requestId: 'req-tool-results',
+        type: 'loop_state',
+        taskId: 'conv-tool-results',
+        event: 'iteration_completed',
+        phase: 'decide',
+        iteration: 3,
+        summary: 'Executed 2 tool call(s).'
+      }),
+      expect.objectContaining({
+        requestId: 'req-tool-results',
+        type: 'loop_state',
+        taskId: 'conv-tool-results',
+        event: 'phase_changed',
+        phase: 'act',
+        summary: 'Tool results are ready; continuing the agent loop.'
+      })
+    ])
+  })
+
+  it('maps supervisor finish signals into stable loop events', () => {
+    const req = {
+      requestId: 'req-finish',
+      assistantMessageId: 'assistant-finish',
+      conversationId: 'conv-finish',
+      modelId: 'dummy',
+      messages: [{ role: 'user', content: 'finish the task' }]
+    } as any
+
+    const { emit, supervisor } = makeSupervisorHarness(req)
+    supervisor.transition(1, {
+      iterationSummary: 'Model stopped without further tool calls.',
+      decision: {
+        kind: 'validation_passed',
+        signal: 'finish',
+        summary: 'Automatic validation passed.'
+      }
+    })
+    supervisor.transition(2, {
+      iterationSummary: 'Model stopped without further tool calls.',
+      decision: {
+        kind: 'stopped_without_validation',
+        signal: 'finish_with_warning',
+        summary: 'I edited files, but validation has not passed, so I cannot honestly mark this complete yet.'
+      }
+    })
+
+    expect(emit.mock.calls.map((call) => call[0])).toEqual([
+      expect.objectContaining({
+        requestId: 'req-finish',
+        type: 'loop_state',
+        taskId: 'conv-finish',
+        event: 'iteration_completed',
+        phase: 'decide',
+        iteration: 1,
+        summary: 'Model stopped without further tool calls.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-finish',
+        type: 'loop_state',
+        taskId: 'conv-finish',
+        event: 'phase_changed',
+        phase: 'decide',
+        summary: 'Automatic validation passed.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-finish',
+        type: 'loop_state',
+        taskId: 'conv-finish',
+        event: 'iteration_completed',
+        phase: 'decide',
+        iteration: 2,
+        summary: 'Model stopped without further tool calls.'
+      }),
+      expect.objectContaining({
+        requestId: 'req-finish',
+        type: 'loop_state',
+        taskId: 'conv-finish',
+        event: 'task_blocked',
+        phase: 'decide',
+        summary: 'I edited files, but validation has not passed, so I cannot honestly mark this complete yet.'
+      })
+    ])
+  })
+
   it('explains when a selected folder is ignored for unrelated turns', () => {
     const { service, emit } = makeService('/tmp/selected-project')
     const policy = resolveTurnContextPolicy({
@@ -457,6 +734,61 @@ describe('ChatService provider hardening', () => {
     expect(codexSend.mock.calls[0]?.[3]).toBe(true)
     expect(JSON.stringify(sentReq.messages)).not.toContain('Previous chat')
     expect(JSON.stringify(sentReq.messages)).not.toContain('overview')
+  })
+
+  it('routes Codex lifecycle events through the shared supervisor surface', async () => {
+    const { service, emit } = makeService('/tmp/selected-project')
+    const codexSend = vi.fn(async (..._args: any[]) => 'done')
+    ;(service as any).codexClient = {
+      send: codexSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+    vi.spyOn(service as any, 'openCodexLocalPreviewIfRequested').mockResolvedValue(undefined)
+    vi.spyOn(service as any, 'workspaceSystemBlock').mockReturnValue('Working folder: /tmp/selected-project')
+    vi.spyOn(service as any, 'codexRepoOverviewBlock').mockResolvedValue(null)
+
+    await service.send({
+      requestId: 'req-codex-supervisor',
+      assistantMessageId: 'assistant-codex-supervisor',
+      conversationId: 'conv-codex-supervisor',
+      modelId: 'gpt-5.5',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'edit src/main/index.ts' }]
+    } as any)
+
+    expect(emit.mock.calls.map((call) => call[0])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          requestId: 'req-codex-supervisor',
+          assistantMessageId: 'assistant-codex-supervisor',
+          type: 'loop_state',
+          taskId: 'conv-codex-supervisor',
+          event: 'task_started',
+          phase: 'inspect',
+          summary: 'Starting Codex task loop.'
+        }),
+        expect.objectContaining({
+          requestId: 'req-codex-supervisor',
+          assistantMessageId: 'assistant-codex-supervisor',
+          type: 'loop_state',
+          taskId: 'conv-codex-supervisor',
+          event: 'phase_changed',
+          phase: 'act',
+          summary: 'Handing the task to Codex with harness support.'
+        }),
+        expect.objectContaining({
+          requestId: 'req-codex-supervisor',
+          assistantMessageId: 'assistant-codex-supervisor',
+          type: 'loop_state',
+          taskId: 'conv-codex-supervisor',
+          event: 'task_completed',
+          phase: 'done',
+          summary: 'Codex task loop completed.'
+        })
+      ])
+    )
   })
 
   it('tells Codex to use the current Gladdis app/browser instead of launching a second viewer', () => {

@@ -60,6 +60,66 @@ export function applyStreamEventToMessages(
     }
     return out
   }
+  if (event.type === 'loop_state') {
+    out[index] = {
+      ...message,
+      parts: [...parts, {
+        kind: 'loop_state',
+        taskId: event.taskId,
+        event: event.event,
+        phase: event.phase,
+        iteration: event.iteration,
+        reason: event.reason,
+        summary: event.summary
+      }]
+    }
+    return out
+  }
+  if (event.type === 'capability_activity') {
+    out[index] = {
+      ...message,
+      parts: [...parts, {
+        kind: 'capability_activity',
+        callId: event.callId,
+        capability: event.capability,
+        event: event.event,
+        service: event.service,
+        summary: event.summary,
+        cached: event.cached,
+        artifactId: event.artifactId,
+        durationMs: event.durationMs
+      }]
+    }
+    return out
+  }
+  if (event.type === 'verification_state') {
+    out[index] = {
+      ...message,
+      parts: [...parts, {
+        kind: 'verification_state',
+        event: event.event,
+        check: event.check,
+        status: event.status,
+        summary: event.summary,
+        rawLogArtifactId: event.rawLogArtifactId
+      }]
+    }
+    return out
+  }
+  if (event.type === 'task_memory') {
+    out[index] = {
+      ...message,
+      parts: [...parts, {
+        kind: 'task_memory',
+        event: event.event,
+        scope: event.scope,
+        keys: event.keys,
+        summary: event.summary,
+        artifactId: event.artifactId
+      }]
+    }
+    return out
+  }
   if (event.type === 'tool_call') {
     const tool: ToolActivity = {
       callId: event.callId,

@@ -192,7 +192,7 @@ describe('runGrokToolLoop', () => {
         'data: [DONE]\n',
       'data: {"choices":[{"delta":{"content":"All done."}}]}\n' +
         'data: [DONE]\n',
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_validate","type":"function","function":{"name":"run_validation","arguments":"{\\"check\\":\\"typecheck\\"}"}}]}}]}\n' +
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_validate","type":"function","function":{"name":"verify_change","arguments":"{\\"check\\":\\"typecheck\\"}"}}]}}]}\n' +
         'data: [DONE]\n',
       'data: {"choices":[{"delta":{"content":"Validated now."}}]}\n' +
         'data: [DONE]\n'
@@ -207,7 +207,7 @@ describe('runGrokToolLoop', () => {
     const run = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, text: 'edited' })
-      .mockResolvedValueOnce({ ok: true, text: 'PASS: npm run typecheck' })
+      .mockResolvedValueOnce({ ok: true, text: 'typecheck: pass\n(no output)' })
     const req: ChatRequest = {
       requestId: 'r1',
       modelId: 'grok-4.3',
@@ -220,7 +220,7 @@ describe('runGrokToolLoop', () => {
         parameters: { type: 'object', properties: {}, required: [] }
       },
       {
-        name: 'run_validation',
+        name: 'verify_change',
         description: 'validate',
         parameters: { type: 'object', properties: {}, required: [] }
       }
@@ -242,15 +242,15 @@ describe('runGrokToolLoop', () => {
       keepResults: 5
     })
 
-    expect(run.mock.calls.map((call) => call[0])).toEqual(['edit_file', 'run_validation'])
+    expect(run.mock.calls.map((call) => call[0])).toEqual(['edit_file', 'verify_change'])
     expect(fetchSpy).toHaveBeenCalledTimes(4)
     expect(events.filter((e) => e.type === 'tool_call').map((e) => (e as any).tool)).toEqual([
       'edit_file',
-      'run_validation'
+      'verify_change'
     ])
     const thirdInit = fetchSpy.mock.calls[2][1] as RequestInit
     const thirdBody = JSON.parse(String(thirdInit.body))
-    expect(JSON.stringify(thirdBody.messages)).toContain('You must call run_validation')
+    expect(JSON.stringify(thirdBody.messages)).toContain('You must call verify_change')
   })
 
   it('auto-runs typecheck if the model ignores the validation reminder', async () => {
@@ -275,7 +275,7 @@ describe('runGrokToolLoop', () => {
     const run = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, text: 'edited' })
-      .mockResolvedValueOnce({ ok: true, text: 'PASS: npm run typecheck' })
+      .mockResolvedValueOnce({ ok: true, text: 'typecheck: pass\n(no output)' })
     const req: ChatRequest = {
       requestId: 'r1',
       modelId: 'grok-4.3',
@@ -283,7 +283,7 @@ describe('runGrokToolLoop', () => {
     }
     const toolDefs: ToolDef[] = [
       { name: 'edit_file', description: 'edit', parameters: { type: 'object', properties: {} } },
-      { name: 'run_validation', description: 'validate', parameters: { type: 'object', properties: {} } }
+      { name: 'verify_change', description: 'validate', parameters: { type: 'object', properties: {} } }
     ]
 
     await runGrokToolLoop({
@@ -304,11 +304,11 @@ describe('runGrokToolLoop', () => {
 
     expect(run.mock.calls).toEqual([
       ['edit_file', { path: 'src/a.ts', old_string: 'x', new_string: 'y' }, expect.any(Object)],
-      ['run_validation', { check: 'typecheck' }, expect.any(Object)]
+      ['verify_change', { check: 'typecheck' }, expect.any(Object)]
     ])
     expect(events.filter((e) => e.type === 'tool_call').map((e) => (e as any).tool)).toEqual([
       'edit_file',
-      'run_validation'
+      'verify_change'
     ])
   })
 
@@ -318,13 +318,13 @@ describe('runGrokToolLoop', () => {
     const responses = [
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_edit","type":"function","function":{"name":"edit_file","arguments":' + JSON.stringify(editArgs) + '}}]}}]}\n' +
         'data: [DONE]\n',
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_validate_fail","type":"function","function":{"name":"run_validation","arguments":"{\\"check\\":\\"typecheck\\"}"}}]}}]}\n' +
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_validate_fail","type":"function","function":{"name":"verify_change","arguments":"{\\"check\\":\\"typecheck\\"}"}}]}}]}\n' +
         'data: [DONE]\n',
       'data: {"choices":[{"delta":{"content":"Done anyway."}}]}\n' +
         'data: [DONE]\n',
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_fix","type":"function","function":{"name":"edit_file","arguments":' + JSON.stringify(fixArgs) + '}}]}}]}\n' +
         'data: [DONE]\n',
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_validate_pass","type":"function","function":{"name":"run_validation","arguments":"{\\"check\\":\\"typecheck\\"}"}}]}}]}\n' +
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_validate_pass","type":"function","function":{"name":"verify_change","arguments":"{\\"check\\":\\"typecheck\\"}"}}]}}]}\n' +
         'data: [DONE]\n',
       'data: {"choices":[{"delta":{"content":"Validated after repair."}}]}\n' +
         'data: [DONE]\n'
@@ -339,9 +339,9 @@ describe('runGrokToolLoop', () => {
     const run = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, text: 'edited' })
-      .mockResolvedValueOnce({ ok: false, text: 'FAIL: src/a.ts(1,1): Type error' })
+      .mockResolvedValueOnce({ ok: false, text: 'typecheck: fail\nsrc/a.ts(1,1): Type error' })
       .mockResolvedValueOnce({ ok: true, text: 'fixed' })
-      .mockResolvedValueOnce({ ok: true, text: 'PASS: npm run typecheck' })
+      .mockResolvedValueOnce({ ok: true, text: 'typecheck: pass\n(no output)' })
     const req: ChatRequest = {
       requestId: 'r1',
       modelId: 'grok-4.3',
@@ -349,7 +349,7 @@ describe('runGrokToolLoop', () => {
     }
     const toolDefs: ToolDef[] = [
       { name: 'edit_file', description: 'edit', parameters: { type: 'object', properties: {} } },
-      { name: 'run_validation', description: 'validate', parameters: { type: 'object', properties: {} } }
+      { name: 'verify_change', description: 'validate', parameters: { type: 'object', properties: {} } }
     ]
 
     await runGrokToolLoop({
@@ -370,9 +370,9 @@ describe('runGrokToolLoop', () => {
 
     expect(run.mock.calls.map((call) => call[0])).toEqual([
       'edit_file',
-      'run_validation',
+      'verify_change',
       'edit_file',
-      'run_validation'
+      'verify_change'
     ])
     const fourthInit = fetchSpy.mock.calls[3][1] as RequestInit
     const fourthBody = JSON.parse(String(fourthInit.body))

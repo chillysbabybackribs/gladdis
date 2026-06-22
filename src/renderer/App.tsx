@@ -1,9 +1,12 @@
 import { Workspace } from './components/Workspace'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 export function App() {
   return (
-    <div className="app">
-      <Workspace />
-    </div>
+    <ErrorBoundary>
+      <div className="app">
+        <Workspace />
+      </div>
+    </ErrorBoundary>
   )
 }

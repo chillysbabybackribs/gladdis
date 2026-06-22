@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, useMemo, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import type {
   ChatMessage,
@@ -70,8 +70,12 @@ export function ChatPanel({
   const [tabs, setTabs] = useState<TabInfo[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [modelId, setModelId] = useState<string>(() => {
-    const saved = localStorage.getItem(modelKey(panelId))
-    return saved && MODELS.some((m) => m.id === saved) ? saved : MODELS[0].id
+    try {
+      const saved = localStorage.getItem(modelKey(panelId))
+      return saved && MODELS.some((m) => m.id === saved) ? saved : MODELS[0].id
+    } catch {
+      return MODELS[0].id
+    }
   })
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({
     anthropic: false,
@@ -84,9 +88,13 @@ export function ChatPanel({
   const [models, setModels] = useState<ModelOption[]>(MODELS)
   const [workspace, setWorkspace] = useState<Workspace>({ folder: null })
   const [streaming, setStreaming] = useState(false)
-  const [audioOn, setAudioOn] = useState(
-    () => localStorage.getItem(audioKey(panelId)) === '1'
-  )
+  const [audioOn, setAudioOn] = useState(() => {
+    try {
+      return localStorage.getItem(audioKey(panelId)) === '1'
+    } catch {
+      return false
+    }
+  })
   const { voice, speed, setVoice: persistVoice, setSpeed: persistSpeed } = useTtsSettings()
   const notifyTtsError = (message: string) => {
     setMessages((msgs) => {
@@ -224,9 +232,25 @@ export function ChatPanel({
     void window.gladdis.audit.list().then(setAuditRecords)
     const off = window.gladdis.audit.onEvent((event) => {
       setAuditRecords((records) => {
-        const byId = new Map(records.map((r) => [r.id, r]))
-        byId.set(event.record.id, event.record)
-        return [...byId.values()].sort((a, b) => b.startedAt - a.startedAt)
+        const index = records.findIndex((r) => r.id === event.record.id)
+        if (index !== -1) {
+          const updated = [...records]
+          updated[index] = event.record
+          if (records[index].startedAt === event.record.startedAt) {
+            return updated
+          }
+          return updated.sort((a, b) => b.startedAt - a.startedAt)
+        } else {
+          const insertIdx = records.findIndex((r) => r.startedAt < event.record.startedAt)
+          if (insertIdx === -1) {
+            return [...records, event.record]
+          }
+          return [
+            ...records.slice(0, insertIdx),
+            event.record,
+            ...records.slice(insertIdx)
+          ]
+        }
       })
     })
     return off
@@ -257,20 +281,33 @@ export function ChatPanel({
         restored.current = true
       }
     })()
+  }, [panelId])
+
+  const debouncedSave = useMemo(() => {
+    return () => {
+      if (!restored.current) return
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => {
+        saveTimer.current = null
+        const conv = buildConversation(convIdRef.current, messagesRef.current, convCreatedAt.current)
+        void persistConversation(conv)
+      }, 400)
+    }
   }, [])
 
   useEffect(() => {
-    if (!restored.current) return
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      saveTimer.current = null
-      const conv = buildConversation(convId, messages, convCreatedAt.current)
-      void persistConversation(conv)
-    }, 400)
+    if (streaming) return
+    debouncedSave()
+  }, [messages, convId, debouncedSave, streaming])
+
+  useEffect(() => {
     return () => {
-      if (saveTimer.current) clearTimeout(saveTimer.current)
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current)
+        saveTimer.current = null
+      }
     }
-  }, [messages, convId])
+  }, [])
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -291,13 +328,21 @@ export function ChatPanel({
 
   const persistModel = (id: string) => {
     setModelId(id)
-    localStorage.setItem(modelKey(panelId), id)
+    try {
+      localStorage.setItem(modelKey(panelId), id)
+    } catch (e) {
+      console.warn('Failed to save model to localStorage:', e)
+    }
   }
 
   const toggleAudio = () => {
     setAudioOn((on) => {
       const next = !on
-      localStorage.setItem(audioKey(panelId), next ? '1' : '0')
+      try {
+        localStorage.setItem(audioKey(panelId), next ? '1' : '0')
+      } catch (e) {
+        console.warn('Failed to save audio state to localStorage:', e)
+      }
       // Turning on without a key is a no-op that silently fails; nudge the user
       // to set the OpenAI key so they know why nothing is spoken.
       if (next && !keyStatus.openai) {

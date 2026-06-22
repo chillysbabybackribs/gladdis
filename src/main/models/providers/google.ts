@@ -2,11 +2,11 @@ import crypto from 'crypto'
 import { GoogleGenAI, Type } from '@google/genai'
 import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
 import {
+  continueAfterToolCalls,
   createToolValidationState,
-  needsValidationBeforeFinal,
+  handleNoToolCallsAfterEdits,
   noteToolOutcome,
-  validationInstruction,
-  VALIDATION_FAILED_FINAL,
+  type SupervisorTransition,
 } from './toolValidation'
 
 interface CacheEntry {
@@ -259,6 +259,10 @@ export async function runGoogleToolLoop(args: {
   workspaceBlock: string | null
   maxOutputTokens: number
   keepResults: number
+  supervisor?: {
+    iterationStarted: (iteration: number) => void
+    transition: (iteration: number, transition: SupervisorTransition) => void
+  }
 }): Promise<void> {
   const systemInstruction = args.workspaceBlock
     ? `${args.agentSystem}\n\n${args.workspaceBlock}`
@@ -286,6 +290,7 @@ export async function runGoogleToolLoop(args: {
   })
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    args.supervisor?.iterationStarted(turn + 1)
     functionDeclarations = buildDecls() // pick up tools granted via request_tools last step
     // The prebuilt cache only covers the starting tools; once the model has pulled
     // in extra groups, send the full tool list inline instead of relying on it.
@@ -335,36 +340,25 @@ export async function runGoogleToolLoop(args: {
 
     contents.push({ role: 'model', parts })
     if (calls.length === 0) {
-      if (needsValidationBeforeFinal(validation, args.toolDefs) && !validation.reminderSent) {
-        validation.reminderSent = true
-        contents.push({ role: 'user', parts: [{ text: validationInstruction(validation) }] })
+      const decision = await handleNoToolCallsAfterEdits({
+        state: validation,
+        toolDefs: args.toolDefs,
+        turn,
+        requestId: args.req.requestId,
+        runTool: (name, toolArgs) => args.tools.run(name, toolArgs, args.ctx),
+        emitToolCall: args.emit,
+        emitToolResult: args.emit,
+        rememberFullResult: (callId, text) => args.ctx.fullResults!.set(callId, text)
+      })
+      if (decision.action === 'retry') {
+        args.supervisor?.transition(turn + 1, decision.transition)
+        contents.push({ role: 'user', parts: [{ text: decision.prompt }] })
         continue
       }
-      if (needsValidationBeforeFinal(validation, args.toolDefs) && !validation.autoValidationAttempted) {
-        validation.autoValidationAttempted = true
-        const callId = `auto_validation_${turn}`
-        const toolArgs = { check: 'typecheck' }
-        args.emit({ requestId: args.req.requestId, type: 'tool_call', tool: 'run_validation', args: toolArgs, callId })
-        const outcome = await args.tools.run('run_validation', toolArgs, args.ctx)
-        args.ctx.fullResults!.set(callId, outcome.text)
-        noteToolOutcome(validation, 'run_validation', outcome)
-        args.emit({
-          requestId: args.req.requestId,
-          type: 'tool_result',
-          callId,
-          ok: outcome.ok,
-          preview: outcome.text
-        })
-        if (outcome.ok) return
-        contents.push({
-          role: 'user',
-          parts: [{ text: `${VALIDATION_FAILED_FINAL}\n\nAutomatic typecheck result:\n${outcome.text}` }]
-        })
-        continue
+      if (decision.action === 'finish_with_warning') {
+        args.emit({ requestId: args.req.requestId, type: 'delta', text: decision.warningDelta })
       }
-      if (needsValidationBeforeFinal(validation, args.toolDefs)) {
-        args.emit({ requestId: args.req.requestId, type: 'delta', text: `\n\n${VALIDATION_FAILED_FINAL}` })
-      }
+      args.supervisor?.transition(turn + 1, decision.transition)
       return
     }
 
@@ -402,6 +396,7 @@ export async function runGoogleToolLoop(args: {
       }
     }
     contents.push({ role: 'user', parts: responseParts })
+    args.supervisor?.transition(turn + 1, continueAfterToolCalls(calls.length))
   }
 }
 

@@ -231,10 +231,119 @@ export interface StoredProgressStepPart extends PipelineProgressStep {
   kind: 'progress_step'
 }
 
+export type LoopPhase =
+  | 'inspect'
+  | 'recon'
+  | 'plan'
+  | 'act'
+  | 'validate'
+  | 'decide'
+  | 'handoff'
+  | 'done'
+
+export type LoopStateEventName =
+  | 'task_started'
+  | 'phase_changed'
+  | 'iteration_started'
+  | 'iteration_completed'
+  | 'checkpoint_created'
+  | 'task_paused'
+  | 'task_blocked'
+  | 'task_completed'
+  | 'task_aborted'
+
+export interface LoopStateTrace {
+  taskId: string
+  event: LoopStateEventName
+  phase: LoopPhase
+  iteration: number
+  reason?: string
+  summary?: string
+}
+
+export interface StoredLoopStatePart extends LoopStateTrace {
+  kind: 'loop_state'
+}
+
+export type CapabilityName =
+  | 'repo_overview'
+  | 'search_repo'
+  | 'read_spans'
+  | 'research_dossier'
+  | 'verify_change'
+  | 'recall_task'
+
+export type CapabilityActivityEventName =
+  | 'capability_requested'
+  | 'capability_started'
+  | 'capability_progress'
+  | 'capability_completed'
+  | 'capability_failed'
+  | 'capability_cache_hit'
+
+export interface CapabilityActivityTrace {
+  callId: string
+  capability: CapabilityName
+  event: CapabilityActivityEventName
+  service?: string
+  summary?: string
+  cached?: boolean
+  artifactId?: string
+  durationMs?: number
+}
+
+export interface StoredCapabilityActivityPart extends CapabilityActivityTrace {
+  kind: 'capability_activity'
+}
+
+export type VerificationStatus = 'pass' | 'fail' | 'partial' | 'blocked'
+export type VerificationEventName =
+  | 'verification_started'
+  | 'verification_check_started'
+  | 'verification_check_finished'
+  | 'verification_passed'
+  | 'verification_failed'
+  | 'verification_blocked'
+
+export interface VerificationStateTrace {
+  event: VerificationEventName
+  check?: string
+  status?: VerificationStatus
+  summary?: string
+  rawLogArtifactId?: string
+}
+
+export interface StoredVerificationStatePart extends VerificationStateTrace {
+  kind: 'verification_state'
+}
+
+export type TaskMemoryScope = 'task' | 'conversation' | 'workspace'
+export type TaskMemoryEventName =
+  | 'memory_read'
+  | 'memory_write'
+  | 'memory_compacted'
+  | 'memory_linked_artifact'
+
+export interface TaskMemoryTrace {
+  event: TaskMemoryEventName
+  scope: TaskMemoryScope
+  keys?: string[]
+  summary?: string
+  artifactId?: string
+}
+
+export interface StoredTaskMemoryPart extends TaskMemoryTrace {
+  kind: 'task_memory'
+}
+
 export type StoredMessagePart =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; tool: StoredToolActivity }
   | { kind: 'contract'; trace: ContractTrace }
+  | StoredLoopStatePart
+  | StoredCapabilityActivityPart
+  | StoredVerificationStatePart
+  | StoredTaskMemoryPart
   | StoredProgressStepPart
 
 /** A persisted chat message: the full renderer-visible shape. */
@@ -377,6 +486,50 @@ export type ChatStreamEvent =
   | { requestId: string; assistantMessageId?: string; type: 'delta'; text: string }
   | { requestId: string; assistantMessageId?: string; type: 'done' }
   | { requestId: string; assistantMessageId?: string; type: 'error'; message: string }
+  | {
+      requestId: string
+      assistantMessageId?: string
+      type: 'loop_state'
+      taskId: string
+      event: LoopStateEventName
+      phase: LoopPhase
+      iteration: number
+      reason?: string
+      summary?: string
+    }
+  | {
+      requestId: string
+      assistantMessageId?: string
+      type: 'capability_activity'
+      callId: string
+      capability: CapabilityName
+      event: CapabilityActivityEventName
+      service?: string
+      summary?: string
+      cached?: boolean
+      artifactId?: string
+      durationMs?: number
+    }
+  | {
+      requestId: string
+      assistantMessageId?: string
+      type: 'verification_state'
+      event: VerificationEventName
+      check?: string
+      status?: VerificationStatus
+      summary?: string
+      rawLogArtifactId?: string
+    }
+  | {
+      requestId: string
+      assistantMessageId?: string
+      type: 'task_memory'
+      event: TaskMemoryEventName
+      scope: TaskMemoryScope
+      keys?: string[]
+      summary?: string
+      artifactId?: string
+    }
   /** A compact execution contract for this assistant turn. */
   | {
       requestId: string

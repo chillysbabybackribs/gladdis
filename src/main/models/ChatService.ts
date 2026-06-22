@@ -14,6 +14,10 @@ import { BrowserTools, type ToolContext } from './browserTools'
 import { selectAgentToolProfile } from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
+import { CapabilityBroker } from './capabilities/CapabilityBroker'
+import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
+import { ResearchDossierService } from './capabilities/ResearchDossierService'
+import { ValidationService } from './capabilities/ValidationService'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
 import type { ModelCallLedger } from './ModelCallLedger'
 import { ASK_SYSTEM, CODEX_SYSTEM, buildAgentSystem } from './prompts'
@@ -28,6 +32,8 @@ import {
   stripStaleActivePageContext,
   type TurnContextPolicy
 } from './turnContextPolicy'
+import { createLoopStateEmitter, taskIdForRequest } from './loopStateEmitter'
+import { createTurnSupervisor } from './turnSupervisor'
 import {
   completeAnthropic,
   runAnthropicToolLoop,
@@ -48,7 +54,6 @@ import {
   streamGrokPlain,
   titleGrok
 } from './providers/grok'
-
 export {
   extractLocalPreviewUrl,
   hasActivePagePreamble,
@@ -79,6 +84,7 @@ export class ChatService {
   private codexClient: CodexClient | null = null
   private dynamicModels = new Map<string, ModelOption>()
   private readonly toolStarts = new Map<string, number>()
+  private readonly capabilityBroker: CapabilityBroker
 
   constructor(
     private readonly keys: KeyStore,
@@ -86,7 +92,33 @@ export class ChatService {
     public readonly tools: BrowserTools,
     private readonly audit: ModelCallLedger,
     private readonly chats: ChatStore
-  ) {}
+  ) {
+    const repoIntelligence = new RepoIntelligenceService()
+    const researchDossier = new ResearchDossierService(() => this.google(), repoIntelligence)
+    const validation = new ValidationService()
+    this.capabilityBroker = new CapabilityBroker(
+      {
+        repoOverview: (input) => repoIntelligence.repoOverview(input),
+        searchRepo: (input) => repoIntelligence.searchRepo(input),
+        readSpans: (input) => repoIntelligence.readSpans(input),
+        researchDossier: (input) => researchDossier.researchDossier(input),
+        verifyChange: (input) => validation.verifyChange(input)
+      },
+      this.emit,
+      ({ requestId, assistantMessageId, taskId, phase, summary }) =>
+        this.emit({
+          requestId,
+          ...(assistantMessageId ? { assistantMessageId } : {}),
+          type: 'loop_state',
+          taskId,
+          event: 'phase_changed',
+          phase,
+          iteration: 1,
+          summary
+        })
+    )
+    this.tools.setCapabilityBroker(this.capabilityBroker)
+  }
 
   private emit = (event: ChatStreamEvent): void => {
     if (event.type === 'tool_call') {
@@ -110,6 +142,28 @@ export class ChatService {
     const assistantMessageId =
       event.assistantMessageId ?? this.assistantMessageIds.get(event.requestId)
     this.sendStreamEvent(assistantMessageId ? { ...event, assistantMessageId } : event)
+  }
+
+  private emitLoopState(
+    req: Pick<ChatRequest, 'requestId' | 'conversationId'>,
+    event: {
+      event:
+        | 'task_started'
+        | 'phase_changed'
+        | 'iteration_started'
+        | 'iteration_completed'
+        | 'checkpoint_created'
+        | 'task_paused'
+        | 'task_blocked'
+        | 'task_completed'
+        | 'task_aborted'
+      phase: 'inspect' | 'recon' | 'plan' | 'act' | 'validate' | 'decide' | 'handoff' | 'done'
+      iteration?: number
+      reason?: string
+      summary?: string
+    }
+  ): void {
+    createLoopStateEmitter(req, this.emit)(event)
   }
 
   private model(modelId: string): ModelOption | undefined {
@@ -336,6 +390,8 @@ export class ChatService {
         // SAME Gladdis browser tools as every other provider, exposed to Codex as
         // gladdis.* dynamic tools that drive the visible tab. The model decides
         // when to use them — no keyword pre-router. The workspace sets cwd only.
+        const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
+        supervisor.start('Starting Codex task loop.', 'Handing the task to Codex with harness support.')
         const call = this.audit.begin({
           requestId: req.requestId,
           conversationId: req.conversationId,
@@ -346,7 +402,8 @@ export class ChatService {
         })
         try {
           const wsBlock = this.workspaceSystemBlock(initialProfile)
-          const codexSystem = wsBlock ? `${CODEX_SYSTEM}\n\n${wsBlock}` : CODEX_SYSTEM
+          const repoBlock = await this.codexRepoOverviewBlock(req, actionableText)
+          const codexSystem = [CODEX_SYSTEM, wsBlock, repoBlock].filter(Boolean).join('\n\n')
           this.logSystemPrompt('codex', 'codex', codexSystem)
           const output = await this.codex().send(
             req,
@@ -355,8 +412,11 @@ export class ChatService {
             true
           )
           await this.openCodexLocalPreviewIfRequested(req, actionableText, output)
+          supervisor.complete('Codex task loop completed.')
           call.finish({ output })
         } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          supervisor.blocked(message, controller.signal.aborted)
           call.finish({ status: 'error', error: err })
           throw err
         }
@@ -542,23 +602,35 @@ export class ChatService {
     const profile = this.agentToolProfile(req)
     const agentSystem = await buildAgentSystem(profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
+    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
+    supervisor.start()
     this.logSystemPrompt('anthropic', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
-    return runAnthropicToolLoop({
-      client: this.anthropic(),
-      audit: this.audit,
-      emit: this.emit,
-      req,
-      modelId,
-      signal,
-      browserLlm,
-      tools: this.tools,
-      ctx: this.toolContext(req, browserLlm),
-      toolDefs: profile.tools,
-      agentSystem,
-      workspaceBlock,
-      maxTokens: ANTHROPIC_MAX_TOKENS,
-      keepResults: VERBATIM_TOOL_RESULTS
-    })
+    try {
+      await runAnthropicToolLoop({
+        client: this.anthropic(),
+        audit: this.audit,
+        emit: this.emit,
+        req,
+        modelId,
+        signal,
+        browserLlm,
+        tools: this.tools,
+        ctx: this.toolContext(req, browserLlm),
+        toolDefs: profile.tools,
+        agentSystem,
+        workspaceBlock,
+        maxTokens: ANTHROPIC_MAX_TOKENS,
+        keepResults: VERBATIM_TOOL_RESULTS,
+        supervisor: {
+          iterationStarted: supervisor.iterationStarted,
+          transition: supervisor.transition
+        }
+      })
+      supervisor.complete()
+    } catch (err) {
+      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
+      throw err
+    }
   }
 
   /**
@@ -597,11 +669,32 @@ export class ChatService {
     )
   }
 
+  private async codexRepoOverviewBlock(req: ChatRequest, userText: string): Promise<string | null> {
+    const workspaceRoot = this.tools.getWorkspaceRoot()
+    if (!workspaceRoot) return null
+    const result = await this.capabilityBroker.repoOverview(
+      {
+        requestId: req.requestId,
+        assistantMessageId: req.assistantMessageId,
+        taskId: taskIdForRequest(req)
+      },
+      {
+        workspaceRoot,
+        focus: userText.trim() || undefined
+      }
+    )
+    if (!result.ok) return null
+    return `Workspace intelligence:\n${result.summary}`
+  }
+
   /** Build the per-request tool context (conversation id + full-result cache). */
   private toolContext(req: ChatRequest, llm?: LlmComplete): ToolContext {
     return {
       tabId: this.tools.tabs.liveTabId(req.tabId),
+      requestId: req.requestId,
+      assistantMessageId: req.assistantMessageId,
       conversationId: req.conversationId ?? null,
+      taskId: taskIdForRequest(req),
       fullResults: new Map<string, string>(),
       // Carried per-request so concurrent chats can run browser turns under
       // different models without racing a shared field (was BrowserTools.setLlm).
@@ -663,23 +756,35 @@ export class ChatService {
     const profile = this.agentToolProfile(req)
     const agentSystem = await buildAgentSystem(profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
+    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
+    supervisor.start()
     this.logSystemPrompt('google', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
-    return runGoogleToolLoop({
-      ai: this.google(),
-      audit: this.audit,
-      emit: this.emit,
-      req,
-      modelId,
-      signal,
-      browserLlm,
-      tools: this.tools,
-      ctx: this.toolContext(req, browserLlm),
-      toolDefs: profile.tools,
-      agentSystem,
-      workspaceBlock,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-      keepResults: VERBATIM_TOOL_RESULTS
-    })
+    try {
+      await runGoogleToolLoop({
+        ai: this.google(),
+        audit: this.audit,
+        emit: this.emit,
+        req,
+        modelId,
+        signal,
+        browserLlm,
+        tools: this.tools,
+        ctx: this.toolContext(req, browserLlm),
+        toolDefs: profile.tools,
+        agentSystem,
+        workspaceBlock,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        keepResults: VERBATIM_TOOL_RESULTS,
+        supervisor: {
+          iterationStarted: supervisor.iterationStarted,
+          transition: supervisor.transition
+        }
+      })
+      supervisor.complete()
+    } catch (err) {
+      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
+      throw err
+    }
   }
 
   /* ============================ AGENT MODE (Grok) ============================ */
@@ -693,23 +798,35 @@ export class ChatService {
     const profile = this.agentToolProfile(req)
     const agentSystem = await buildAgentSystem(profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
+    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
+    supervisor.start()
     this.logSystemPrompt('grok', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
-    return runGrokToolLoop({
-      apiKey: this.grokKey(),
-      audit: this.audit,
-      emit: this.emit,
-      req,
-      modelId,
-      signal,
-      browserLlm,
-      tools: this.tools,
-      ctx: this.toolContext(req, browserLlm),
-      toolDefs: profile.tools,
-      agentSystem,
-      workspaceBlock,
-      maxTokens: MAX_OUTPUT_TOKENS,
-      keepResults: VERBATIM_TOOL_RESULTS
-    })
+    try {
+      await runGrokToolLoop({
+        apiKey: this.grokKey(),
+        audit: this.audit,
+        emit: this.emit,
+        req,
+        modelId,
+        signal,
+        browserLlm,
+        tools: this.tools,
+        ctx: this.toolContext(req, browserLlm),
+        toolDefs: profile.tools,
+        agentSystem,
+        workspaceBlock,
+        maxTokens: MAX_OUTPUT_TOKENS,
+        keepResults: VERBATIM_TOOL_RESULTS,
+        supervisor: {
+          iterationStarted: supervisor.iterationStarted,
+          transition: supervisor.transition
+        }
+      })
+      supervisor.complete()
+    } catch (err) {
+      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
+      throw err
+    }
   }
 
   /* ---------------- clients ---------------- */

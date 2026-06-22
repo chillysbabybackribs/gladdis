@@ -17,18 +17,40 @@ const execFileAsync = promisify(execFile)
 /** Where to find the codex binary; override with GLADDIS_CODEX_BIN. */
 const CODEX_BIN = process.env.GLADDIS_CODEX_BIN || 'codex'
 
+let activeProbe: Promise<{ installed: boolean; version: string | null }> | null = null
+let cachedProbe: { installed: boolean; version: string | null } | null = null
+let lastProbeTime = 0
+const PROBE_CACHE_TTL_MS = 5000
+
 /**
  * One-shot probe of the local codex CLI: is the binary present and what version.
  * Cheap enough to call on demand; does not start the app-server.
+ * Deduplicated and cached for 5 seconds to prevent redundant child processes.
  */
-export async function probeCodexBinary(): Promise<{ installed: boolean; version: string | null }> {
-  try {
-    const { stdout } = await execFileAsync(CODEX_BIN, ['--version'], { timeout: 8000 })
-    const version = stdout.trim().split(/\s+/).pop() || stdout.trim() || null
-    return { installed: true, version }
-  } catch {
-    return { installed: false, version: null }
+export function probeCodexBinary(): Promise<{ installed: boolean; version: string | null }> {
+  const now = Date.now()
+  if (cachedProbe && (now - lastProbeTime < PROBE_CACHE_TTL_MS)) {
+    return Promise.resolve(cachedProbe)
   }
+  if (activeProbe) return activeProbe
+  activeProbe = (async () => {
+    try {
+      const { stdout } = await execFileAsync(CODEX_BIN, ['--version'], { timeout: 8000 })
+      const version = stdout.trim().split(/\s+/).pop() || stdout.trim() || null
+      const result = { installed: true, version }
+      cachedProbe = result
+      lastProbeTime = Date.now()
+      return result
+    } catch {
+      const result = { installed: false, version: null }
+      cachedProbe = result
+      lastProbeTime = Date.now()
+      return result
+    } finally {
+      activeProbe = null
+    }
+  })()
+  return activeProbe
 }
 
 type Pending = {

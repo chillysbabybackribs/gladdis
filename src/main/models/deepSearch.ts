@@ -19,6 +19,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export interface DeepSearchOptions {
   query: string
+  directives?: string
   depth?: number
   maxPages?: number
   apiKey?: string
@@ -33,9 +34,72 @@ export interface DeepSearchOutcome {
 }
 
 interface SearchPlan {
+  researchQuestions: string[]
   queries: string[]
   concepts: string[]
-  questions: string[]
+  priorityAngles: string[]
+  sourceStrategy: string
+}
+
+interface StrategyAndExpansion {
+  directives: string[];
+  queries: string[];
+}
+
+async function strategizeAndExpandQuery(
+  query: string,
+  apiKey: string
+): Promise<StrategyAndExpansion> {
+  const fallback: StrategyAndExpansion = {
+    directives: [
+      'Focus on primary sources and official documentation.',
+      'Verify information from multiple independent sources.',
+      'Prioritize recent, up-to-date information.'
+    ],
+    queries: [query, `perspectives on ${query}`, `${query} history`, `how does ${query} work`]
+  };
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = `You are a query expansion and strategy model for a research agent.
+
+User Research Query: "${query}"
+
+Your task is to:
+1.  Generate 3-5 diverse, high-quality search queries to explore the topic from multiple angles (e.g., technical, historical, practical). Include the original query.
+2.  Generate 3-4 high-level strategic directives for how the research agent should approach this topic.
+
+Output ONLY a valid JSON object with a 'queries' array and a 'directives' array.
+Example:
+{
+  "queries": ["what is X", "history of X", "X applications"],
+  "directives": ["focus on academic papers", "avoid marketing material"]
+}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json'
+      }
+    });
+
+    const text = response.text ? response.text.trim() : '';
+    if (text) {
+      const parsed = JSON.parse(text) as Partial<StrategyAndExpansion>;
+      if (parsed.queries && parsed.queries.length > 0 && parsed.directives && parsed.directives.length > 0) {
+        return {
+          queries: parsed.queries,
+          directives: parsed.directives
+        };
+      }
+    }
+    console.warn('Failed to parse strategist model output, using fallback.');
+    return fallback;
+  } catch (error) {
+    console.error('Error in strategizeAndExpandQuery:', error);
+    return fallback;
+  }
 }
 
 /**
@@ -52,28 +116,77 @@ export async function runDeepSearch(
 
   onProgress(`Initializing Deep Search for: "${query}"`)
 
-  // 1. Generate Search Strategy Plan (Gemini 2.5 Flash-lite or Fallback)
-  let plan: SearchPlan = {
+  // 1. Strategize and Expand Query using Gemini 3.5 Flash
+  let strategy: StrategyAndExpansion = {
     queries: [query],
-    concepts: query.toLowerCase().split(/\W+/).filter(w => w.length > 3),
-    questions: [`What are the key facts about: ${query}?`]
+    directives: options.directives ? [options.directives] : []
+  }
+
+  if (options.apiKey) {
+    onProgress('Phase 1: Expanding query and forming high-level strategy...')
+    strategy = await strategizeAndExpandQuery(query, options.apiKey)
+    onProgress(`Strategist phase complete. Generated ${strategy.queries.length} query variations.`)
+  }
+
+  // 2. Generate Detailed Execution Plan (Gemini 2.5 Flash-lite or Fallback)
+  let plan: SearchPlan = {
+    researchQuestions: [`What are the key facts, timeline, and current state of: ${query}?`],
+    queries: strategy.queries, // Use queries from strategist
+    concepts: query
+      .toLowerCase()
+      .split(/\W+/)
+      .filter((w) => w.length > 3),
+    priorityAngles: ['core facts', 'recent developments', 'authoritative sources'],
+    sourceStrategy:
+      'Prioritize primary sources, official reports, and high-credibility domains first.'
   }
 
   if (options.apiKey) {
     try {
-      onProgress('Formulating strategic research plan using Gemini 2.5 Flash-lite...')
+      onProgress('Phase 2: Formulating detailed research plan...')
       const ai = new GoogleGenAI({ apiKey: options.apiKey })
-      const prompt = `You are the Strategic Planner for a Deep Search Agent.
-Your goal is to analyze the user's research query and generate a comprehensive search plan to be executed by a deterministic parallel web crawler.
 
-User Research Query: "${query}"
+      // Combine directives from user options and the strategist model
+      const allDirectives = [
+        ...(options.directives ? [`User Directive: ${options.directives}`] : []),
+        ...strategy.directives
+      ].join('\n- ')
 
-Generate a JSON object containing:
-1. "queries": A list of 2 to 3 distinct, highly effective search queries to run on a search engine (DuckDuckGo). They should target different aspects, angles, or sub-topics of the query.
-2. "concepts": A list of 4 to 8 focus keywords/concepts (e.g., ["revenue", "acquisition", "Q4 2024"]) to guide relevance scoring and anchor link matching.
-3. "questions": A list of 2 to 4 key factual questions this search is trying to resolve.
+      const directivesBlock = allDirectives
+        ? `
+Strategic Directives to Follow:
+- ${allDirectives}
+`
+        : ''
 
-Respond ONLY with a valid JSON object matching this schema, without markdown blocks or wrappers.`
+      const queriesBlock = JSON.stringify(strategy.queries, null, 2)
+
+      const prompt = `You are an elite Strategic Research Planner for a deterministic Deep Search Agent.
+
+Your first planning phase has already generated a set of diverse search queries and high-level directives. Your job is to refine this into a detailed, actionable plan.
+
+Initial User Query: "${query}"
+
+Search Queries to Use (Do NOT change these):
+${queriesBlock}
+${directivesBlock}
+Follow this exact reasoning process to complete the plan:
+
+1.  Decompose the initial query into 2-4 sharp, answerable RESEARCH QUESTIONS.
+2.  Choose 4-8 high-precision CONCEPT KEYWORDS from the query list for relevance scoring.
+3.  Define 3-5 PRIORITY ANGLES (e.g., "official reports", "recent 2025 developments").
+4.  Write a one-sentence SOURCE STRATEGY (how to favor credible vs. secondary sources).
+
+Output ONLY a valid JSON object with exactly these keys. Crucially, the "queries" array in your output MUST be identical to the one provided above.
+{
+  "researchQuestions": string[],
+  "queries": ${queriesBlock},
+  "concepts": string[],
+  "priorityAngles": string[],
+  "sourceStrategy": string
+}
+
+No markdown, no extra text, no explanations outside the JSON.`
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-lite',
@@ -86,16 +199,22 @@ Respond ONLY with a valid JSON object matching this schema, without markdown blo
       const text = response.text ? response.text.trim() : ''
       if (text) {
         const parsed = JSON.parse(text) as Partial<SearchPlan>
+        if (parsed.researchQuestions && Array.isArray(parsed.researchQuestions) && parsed.researchQuestions.length > 0) {
+          plan.researchQuestions = parsed.researchQuestions
+        }
         if (parsed.queries && Array.isArray(parsed.queries) && parsed.queries.length > 0) {
           plan.queries = parsed.queries
         }
         if (parsed.concepts && Array.isArray(parsed.concepts) && parsed.concepts.length > 0) {
           plan.concepts = parsed.concepts.map(c => c.toLowerCase())
         }
-        if (parsed.questions && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-          plan.questions = parsed.questions
+        if (parsed.priorityAngles && Array.isArray(parsed.priorityAngles) && parsed.priorityAngles.length > 0) {
+          plan.priorityAngles = parsed.priorityAngles
         }
-        onProgress(`Plan formulated successfully. Concept keywords: ${plan.concepts.join(', ')}`)
+        if (parsed.sourceStrategy && typeof parsed.sourceStrategy === 'string') {
+          plan.sourceStrategy = parsed.sourceStrategy
+        }
+        onProgress(`Plan formulated successfully. Research questions: ${plan.researchQuestions.length}, Concepts: ${plan.concepts.join(', ')}`)
       }
     } catch (err: any) {
       onProgress(`Warning: Gemini plan formulation failed (${err.message}). Using robust deterministic fallback.`)
@@ -240,14 +359,16 @@ Respond ONLY with a valid JSON object matching this schema, without markdown blo
     }
   }
 
-  // 4. Compile High-Density Markdown Dossier
+  // 4. SYNTHESIZE: Compile High-Density Markdown Dossier (Evidence mapped to research questions)
   onProgress('Synthesizing research evidence and compiling final dossier...')
   let mdReport = `# DEEP SEARCH DOSSIER: ${query.toUpperCase()}\n\n`
 
   mdReport += `## 🎯 RESEARCH GOAL & STRATEGY\n`
   mdReport += `* **Target Goal**: ${query}\n`
-  mdReport += `* **Formulated Questions**:\n${plan.questions.map(q => `  - ${q}`).join('\n')}\n`
-  mdReport += `* **Target Concept Filters**: ${plan.concepts.map(c => `\`${c}\``).join(', ')}\n\n`
+  mdReport += `* **Research Questions (North Star)**:\n${plan.researchQuestions.map(q => `  - ${q}`).join('\n')}\n`
+  mdReport += `* **Priority Angles**: ${plan.priorityAngles.map(a => `\`${a}\``).join(', ')}\n`
+  mdReport += `* **Source Strategy**: ${plan.sourceStrategy}\n`
+  mdReport += `* **Concept Filters**: ${plan.concepts.map(c => `\`${c}\``).join(', ')}\n\n`
 
   mdReport += `## 🔎 QUERIES EXECUTED\n`
   plan.queries.forEach(q => {
@@ -284,7 +405,14 @@ Respond ONLY with a valid JSON object matching this schema, without markdown blo
     mdReport += `\n`
   }
 
-  mdReport += `*Dossier generated deterministically using Gladdis Deep Search Agent.*`
+  // 5. CRITIQUE Phase: Lightweight self-assessment of coverage and gaps
+  mdReport += `## 🧠 RESEARCH CRITIQUE & GAPS\n`
+  mdReport += `* **Evidence Coverage**: ${completedProbes.length} high-relevance pages probed across ${depth + 1} depth layers.\n`
+  mdReport += `* **Strategy Adherence**: ${plan.sourceStrategy}\n`
+  mdReport += `* **Potential Gaps**: Some authoritative or paywalled sources may be under-represented. Unvisited high-score links above are recommended for follow-up.\n`
+  mdReport += `* **Next Recommended Action**: Run a focused deepSearch on any remaining high-value links or refine the original query with newly discovered angles.\n\n`
+
+  mdReport += `*Dossier generated deterministically using Gladdis Deep Search Agent (v2 — phased process: Decompose → Plan → Execute → Synthesize → Critique).*`
 
   onProgress(`Deep Search Complete! Visited ${completedProbes.length} pages. Generated high-density dossier.`)
 

@@ -14,7 +14,9 @@ import {
   runExecuteInBrowser,
   runNavigate,
   runPressKey,
-  runTypeText
+  runTypeText,
+  runGrepClick,
+  runGrepType
 } from './tools/driveTools'
 import { runReadClipboard, runWriteClipboard } from './tools/clipboardTools'
 import {
@@ -265,6 +267,10 @@ export class BrowserTools {
           return runTypeText(this.driveDeps(), args, { tabId: ctx.tabId })
         case 'cdp_command':
           return runCdpCommand(this.driveDeps(), args, { tabId: ctx.tabId })
+        case 'grep_click':
+          return runGrepClick(this.driveDeps(), args, { tabId: ctx.tabId })
+        case 'grep_type':
+          return runGrepType(this.driveDeps(), args, { tabId: ctx.tabId })
 
         // ── Filesystem ──────────────────────────────────────────────────────
         case 'read_file':

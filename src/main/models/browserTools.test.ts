@@ -705,4 +705,71 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('Upgrade Now')
     expect(result.text).toContain('Save 50% on annual billing.')
   })
+
+  it('routes grep_click through the capability broker and triggers click events on coordinates of the best match', async () => {
+    const executeJavaScript = vi.fn(async () => ({
+      success: true,
+      result: [
+        {
+          type: 'selector_match',
+          tagName: 'button',
+          selector: 'div#root > button.btn-pricing',
+          visible: true,
+          coordinates: { x: 150, y: 350, width: 100, height: 40 },
+          outerHTML: '<button class="btn-pricing">Upgrade Now</button>',
+          innerText: 'Upgrade Now'
+        }
+      ]
+    }))
+    const cdpSend = vi.fn(async () => ({}))
+    const tools = new BrowserTools({ executeJavaScript, cdpSend } as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'grep_click',
+      { query: 'Upgrade' },
+      { tabId: 'tab-1' }
+    )
+
+    expect(executeJavaScript).toHaveBeenCalled()
+    expect(cdpSend).toHaveBeenCalledTimes(3) // mouseMoved, mousePressed, mouseReleased
+    expect(cdpSend).toHaveBeenNthCalledWith(1, 'tab-1', 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: 150, y: 350 })
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('grep_click successful. Found and clicked element.')
+    expect(result.text).toContain('div#root > button.btn-pricing')
+    expect(result.text).toContain('(150, 350)')
+  })
+
+  it('routes grep_type through the capability broker, focuses element, and types text via CDP', async () => {
+    const executeJavaScript = vi.fn(async () => ({
+      success: true,
+      result: [
+        {
+          type: 'selector_match',
+          tagName: 'input',
+          selector: 'input#username',
+          visible: true,
+          coordinates: { x: 200, y: 400, width: 150, height: 30 },
+          outerHTML: '<input id="username" />',
+          innerText: ''
+        }
+      ]
+    }))
+    const cdpSend = vi.fn(async () => ({}))
+    const tools = new BrowserTools({ executeJavaScript, cdpSend } as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'grep_type',
+      { query: 'username', text: 'myusername' },
+      { tabId: 'tab-1' }
+    )
+
+    expect(executeJavaScript).toHaveBeenCalled()
+    // 3 calls for click (move, press, release), 1 call for insertText
+    expect(cdpSend).toHaveBeenCalledTimes(4)
+    expect(cdpSend).toHaveBeenNthCalledWith(4, 'tab-1', 'Input.insertText', { text: 'myusername' })
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('grep_type successful. Focused element and typed text.')
+    expect(result.text).toContain('input#username')
+    expect(result.text).toContain('(200, 400)')
+  })
 })

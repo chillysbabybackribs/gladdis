@@ -62,20 +62,28 @@ export async function runScreenshotApp(deps: PerceiveToolsDeps): Promise<ToolOut
   return { ok: true, text: 'Screenshot of the entire Gladdis app window captured.', imageBase64 }
 }
 
-export async function runGrepPage(
-  deps: PerceiveToolsDeps,
-  args: Record<string, any>,
-  tabId: string
-): Promise<ToolOutcome> {
-  const query = args.query
-  if (typeof query !== 'string' || !query.trim()) {
-    return { ok: false, text: 'grep_page: query must be a non-empty string.' }
-  }
+export interface GrepMatch {
+  type: 'text_match' | 'selector_match' | 'error'
+  message?: string
+  matchedLine?: string
+  lineIndex?: number
+  context?: string
+  selector?: string | null
+  coordinates?: { x: number; y: number; width: number; height: number; top: number; left: number } | null
+  visible?: boolean
+  tagName?: string | null
+  outerHTML?: string
+  innerText?: string
+}
 
-  const type = args.type || 'auto'
-  const contextLines = typeof args.contextLines === 'number' ? args.contextLines : 2
-  const caseSensitive = !!args.caseSensitive
-
+export async function executeGrepInTab(
+  tabs: TabManager,
+  tabId: string,
+  query: string,
+  type: 'auto' | 'text' | 'regex' | 'selector' = 'auto',
+  caseSensitive: boolean = false,
+  contextLines: number = 2
+): Promise<{ success: boolean; result?: any[]; error?: string }> {
   const jsPayload = `
     const query = ${JSON.stringify(query)};
     const type = ${JSON.stringify(type)};
@@ -132,7 +140,7 @@ export async function runGrepPage(
 
     function findBestElementForText(textStr) {
       if (!textStr || textStr.length < 2) return null;
-      const elements = document.querySelectorAll('p, span, a, button, h1, h2, h3, h4, h5, h6, li, td, th, label, div, input');
+      const elements = document.querySelectorAll('p, span, a, button, h1, h2, h3, h4, h5, h6, li, td, th, label, div, input, textarea');
       let bestEl = null;
       let bestDepth = -1;
 
@@ -265,8 +273,29 @@ export async function runGrepPage(
     return allResults;
   `;
 
+  const runResult = await tabs.executeJavaScript(tabId, jsPayload)
+  if (!runResult.success) {
+    return { success: false, error: runResult.error }
+  }
+  return { success: true, result: runResult.result as any[] }
+}
+
+export async function runGrepPage(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string
+): Promise<ToolOutcome> {
+  const query = args.query
+  if (typeof query !== 'string' || !query.trim()) {
+    return { ok: false, text: 'grep_page: query must be a non-empty string.' }
+  }
+
+  const type = args.type || 'auto'
+  const contextLines = typeof args.contextLines === 'number' ? args.contextLines : 2
+  const caseSensitive = !!args.caseSensitive
+
   try {
-    const runResult = await deps.tabs.executeJavaScript(tabId, jsPayload)
+    const runResult = await executeGrepInTab(deps.tabs, tabId, query, type, caseSensitive, contextLines)
     if (!runResult.success) {
       return { ok: false, text: `grep_page: failed to execute hybrid search in page: ${runResult.error}` }
     }

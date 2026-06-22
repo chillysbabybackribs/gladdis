@@ -76,5 +76,61 @@ export const DRIVE_TOOLS: ToolDef[] = [
       },
       required: ['method']
     }
+  },
+  {
+    name: 'grep_click',
+    description:
+      'Search the page for a CSS selector, XPath, or text string, and click the first/best match. ' +
+      'Combines discovery and click in a single step to save time and tokens. ' +
+      'Returns details of the element that was clicked, or an error if no match was found.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'A CSS selector (e.g., "button.primary", "#login-btn"), XPath, or a unique text substring to search for.'
+        },
+        type: {
+          type: 'string',
+          enum: ['auto', 'text', 'regex', 'selector'],
+          description: 'Search mode. "auto" detects if query looks like a CSS selector/XPath, else searches by text.'
+        },
+        caseSensitive: {
+          type: 'boolean',
+          description: 'Case sensitivity for text/regex searches. Defaults to false.'
+        }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'grep_type',
+    description:
+      'Search the page for an input/textarea element by selector or text, click it to focus, and type the specified text into it. ' +
+      'Combines discovery, clicking/focusing, and typing in a single action to save time and tokens. ' +
+      'Returns details of the matched element, or an error if no match was found.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'A CSS selector, XPath, or adjacent/placeholder text substring to search for the input element.'
+        },
+        text: {
+          type: 'string',
+          description: 'The text to type into the matching input element.'
+        },
+        type: {
+          type: 'string',
+          enum: ['auto', 'text', 'regex', 'selector'],
+          description: 'Search mode. "auto" detects if query looks like a CSS selector/XPath, else searches by text.'
+        },
+        caseSensitive: {
+          type: 'boolean',
+          description: 'Case sensitivity for text/regex searches. Defaults to false.'
+        }
+      },
+      required: ['query', 'text']
+    }
   }
 ]

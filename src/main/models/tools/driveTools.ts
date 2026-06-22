@@ -1,6 +1,7 @@
 import type { TabManager } from '../../TabManager'
 import type { ToolOutcome } from '../browserTools'
 import { cap, safeJson } from './toolUtils'
+import { executeGrepInTab } from './perceiveTools'
 
 export interface DriveToolsDeps {
   tabs: TabManager
@@ -100,6 +101,98 @@ export async function runCdpCommand(
   const method = String(args.method ?? '')
   const out = await deps.tabs.cdpSend(ctx.tabId, method, args.params ?? {})
   return { ok: true, text: cap(safeJson(out)) }
+}
+
+export async function runGrepClick(
+  deps: DriveToolsDeps,
+  args: Record<string, any>,
+  ctx: DriveToolsContext
+): Promise<ToolOutcome> {
+  const query = args.query
+  if (typeof query !== 'string' || !query.trim()) {
+    return { ok: false, text: 'grep_click: query must be a non-empty string.' }
+  }
+
+  const type = args.type || 'auto'
+  const caseSensitive = !!args.caseSensitive
+
+  try {
+    const runResult = await executeGrepInTab(deps.tabs, ctx.tabId, query, type, caseSensitive, 2)
+    if (!runResult.success) {
+      return { ok: false, text: `grep_click: search execution failed: ${runResult.error}` }
+    }
+
+    const matches = (runResult.result as any[]) || []
+    const validMatches = matches.filter(m => m.type !== 'error' && m.coordinates && m.visible)
+
+    if (validMatches.length === 0) {
+      return { ok: false, text: `grep_click: no visible, clickable elements matched the query "${query}".` }
+    }
+
+    const bestMatch = validMatches[0]
+    const { x, y } = bestMatch.coordinates
+    await dispatchClick(deps.tabs, ctx.tabId, x, y)
+
+    let matchDesc = `Matched element: <${bestMatch.tagName || 'unknown'}>`
+    if (bestMatch.selector) matchDesc += ` (${bestMatch.selector})`
+    if (bestMatch.matchedLine) matchDesc += ` with text "${bestMatch.matchedLine}"`
+
+    return {
+      ok: true,
+      text: `grep_click successful. Found and clicked element. ${matchDesc} at coordinate (${x}, ${y}).`
+    }
+  } catch (err: any) {
+    return { ok: false, text: `grep_click error: ${err.message}` }
+  }
+}
+
+export async function runGrepType(
+  deps: DriveToolsDeps,
+  args: Record<string, any>,
+  ctx: DriveToolsContext
+): Promise<ToolOutcome> {
+  const query = args.query
+  if (typeof query !== 'string' || !query.trim()) {
+    return { ok: false, text: 'grep_type: query must be a non-empty string.' }
+  }
+  const text = String(args.text ?? '')
+
+  const type = args.type || 'auto'
+  const caseSensitive = !!args.caseSensitive
+
+  try {
+    const runResult = await executeGrepInTab(deps.tabs, ctx.tabId, query, type, caseSensitive, 2)
+    if (!runResult.success) {
+      return { ok: false, text: `grep_type: search execution failed: ${runResult.error}` }
+    }
+
+    const matches = (runResult.result as any[]) || []
+    const validMatches = matches.filter(m => m.type !== 'error' && m.coordinates && m.visible)
+
+    if (validMatches.length === 0) {
+      return { ok: false, text: `grep_type: no visible, targetable input elements matched the query "${query}".` }
+    }
+
+    const bestMatch = validMatches[0]
+    const { x, y } = bestMatch.coordinates
+    
+    // First click to focus the element
+    await dispatchClick(deps.tabs, ctx.tabId, x, y)
+    
+    // Then type the text
+    await deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
+
+    let matchDesc = `Matched element: <${bestMatch.tagName || 'unknown'}>`
+    if (bestMatch.selector) matchDesc += ` (${bestMatch.selector})`
+    if (bestMatch.matchedLine) matchDesc += ` with text "${bestMatch.matchedLine}"`
+
+    return {
+      ok: true,
+      text: `grep_type successful. Focused element and typed text. ${matchDesc} at coordinate (${x}, ${y}).`
+    }
+  } catch (err: any) {
+    return { ok: false, text: `grep_type error: ${err.message}` }
+  }
 }
 
 /** Trusted mouse click via CDP (move + press + release). */

@@ -11,9 +11,17 @@ interface Props {
   codexStatus: CodexStatus | null
 }
 
-/** Small dropdown to pick the active model, grouped by provider. */
+const PROVIDERS = [
+  { id: 'codex', label: 'Codex' },
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'google', label: 'Gemini' },
+  { id: 'openai', label: 'OpenAI' }
+] as const
+
+/** Small dropdown to pick the active model, grouped by provider with a secondary pop out menu. */
 export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }: Props) {
   const [open, setOpen] = useState(false)
+  const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const current = models.find((m) => m.id === value) ?? models[0]
 
@@ -25,6 +33,17 @@ export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }:
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
   }, [open])
+
+  useEffect(() => {
+    if (open) {
+      const prov = current?.provider
+      if (prov && ['codex', 'anthropic', 'google', 'openai'].includes(prov)) {
+        setActiveProvider(prov)
+      } else {
+        setActiveProvider('openai')
+      }
+    }
+  }, [open, current])
 
   // Codex is gated on CLI install + login (no key); others on their API key.
   // Switch explicitly on provider so a new key-based provider can't silently
@@ -65,29 +84,54 @@ export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }:
         {current.label}
       </button>
       {open && (
-        <div className="model-menu" role="listbox">
-          {models.map((m) => {
-            const ok = usable(m)
-            const speculative = m.availability === 'speculative'
-            return (
-              <button
-                key={m.id}
-                role="option"
-                aria-selected={m.id === value}
-                className={`model-menu-item ${m.id === value ? 'sel' : ''} ${ok ? '' : 'nokey'}`}
-                onClick={() => {
-                  if (!ok) return
-                  onChange(m.id)
-                  setOpen(false)
-                }}
-                title={speculative ? 'Preview: this model id has not been verified with the provider; selecting it may 404.' : undefined}
-              >
-                <span className="model-menu-label">{m.label}</span>
-                {speculative && <span className="model-preview">preview</span>}
-                {!ok && <span className="model-nokey">{unavailableLabel(m)}</span>}
-              </button>
-            )
-          })}
+        <div className="model-menu" role="menu">
+          <div className="model-menu-providers">
+            {PROVIDERS.map((prov) => {
+              const isActive = activeProvider === prov.id
+              const isSelectedProv = current?.provider === prov.id
+              return (
+                <button
+                  key={prov.id}
+                  role="menuitem"
+                  className={`model-menu-item provider-item ${isActive ? 'active' : ''} ${isSelectedProv ? 'current-prov' : ''}`}
+                  onMouseEnter={() => setActiveProvider(prov.id)}
+                  onClick={() => setActiveProvider(prov.id)}
+                >
+                  <span className="model-menu-label">{prov.label}</span>
+                  <span className="model-menu-chevron">›</span>
+                </button>
+              )
+            })}
+          </div>
+
+          {activeProvider && (
+            <div className="model-submenu" role="menu">
+              {models
+                .filter((m) => m.provider === activeProvider)
+                .map((m) => {
+                  const ok = usable(m)
+                  const speculative = m.availability === 'speculative'
+                  return (
+                    <button
+                      key={m.id}
+                      role="menuitemcheckbox"
+                      aria-checked={m.id === value}
+                      className={`model-menu-item ${m.id === value ? 'sel' : ''} ${ok ? '' : 'nokey'}`}
+                      onClick={() => {
+                        if (!ok) return
+                        onChange(m.id)
+                        setOpen(false)
+                      }}
+                      title={speculative ? 'Preview: this model id has not been verified with the provider; selecting it may 404.' : undefined}
+                    >
+                      <span className="model-menu-label">{m.label}</span>
+                      {speculative && <span className="model-preview">preview</span>}
+                      {!ok && <span className="model-nokey">{unavailableLabel(m)}</span>}
+                    </button>
+                  )
+                })}
+            </div>
+          )}
         </div>
       )}
     </div>

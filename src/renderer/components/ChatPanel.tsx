@@ -1,31 +1,24 @@
-import { useEffect, useRef, useState, useMemo, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import type {
-  ChatMessage,
-  Conversation,
-  KeyStatus,
-  CodexStatus,
-  ModelCallRecord,
-  ModelOption,
-  TabInfo,
-  Workspace
-} from '../../../shared/types'
+import type { ChatMessage, TabInfo } from '../../../shared/types'
 import {
   MODELS,
   shouldAttachActivePageContext,
   shouldContinueActivePageContext
 } from '../../../shared/types'
 import { Composer, type ComposerSubmit } from './Composer'
-import { ModelPicker } from './ModelPicker'
-import { CopyButton } from './CopyButton'
 import { ChatSettingsModal } from './ChatSettingsModal'
 import { useTts, useTtsSettings } from '../hooks/useTts'
-import { ChatMessageBody } from './ChatMessageBody'
 import { useStreamConsumer } from '../hooks/useStreamConsumer'
 import { useAutoScroll } from '../hooks/useAutoScroll'
+import { useAuditRecords } from '../hooks/useAuditRecords'
+import { useEnvironmentStatus } from '../hooks/useEnvironmentStatus'
+import { useConversationPersistence } from '../hooks/useConversationPersistence'
 import { previousTurnAttachedActivePage } from '../lib/chatTurnContext'
 import type { Message } from './chatTypes'
 import { appendText } from './chatTypes'
+import { ChatMessageList } from './chat-parts/ChatMessageList'
+import { ChatSettingsButton, TurnControls } from './chat-parts/TurnControls'
 
 let reqCounter = 0
 const newRequestId = () => `req-${Date.now()}-${reqCounter++}`
@@ -60,14 +53,9 @@ export function ChatPanel({
   const [convId, setConvId] = useState<string>(() => newConversationId())
   const [showSettings, setShowSettings] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'history' | 'keys' | 'calls'>('history')
-  const [auditRecords, setAuditRecords] = useState<ModelCallRecord[]>([])
   const [historyRev, setHistoryRev] = useState(0)
   const convCreatedAt = useRef<number>(Date.now())
   const continuesFromId = useRef<string | null>(null)
-  const restored = useRef(false)
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const lastSavedSignature = useRef<string | null>(null)
-  const titledIds = useRef<Set<string>>(new Set())
   const [tabs, setTabs] = useState<TabInfo[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [modelId, setModelId] = useState<string>(() => {
@@ -78,16 +66,9 @@ export function ChatPanel({
       return MODELS[0].id
     }
   })
-  const [keyStatus, setKeyStatus] = useState<KeyStatus>({
-    anthropic: false,
-    google: false,
-    codex: false,
-    openai: false,
-    grok: false
-  })
-  const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null)
-  const [models, setModels] = useState<ModelOption[]>(MODELS)
-  const [workspace, setWorkspace] = useState<Workspace>({ folder: null })
+  const auditRecords = useAuditRecords()
+  const { keyStatus, setKeyStatus, codexStatus, models, workspace, pickWorkspace } =
+    useEnvironmentStatus()
   const [streaming, setStreaming] = useState(false)
   const [audioOn, setAudioOn] = useState(() => {
     try {
@@ -126,81 +107,26 @@ export function ChatPanel({
   messagesRef.current = messages
   modelIdRef.current = modelId
 
-  const postPersist = (conversationId: string, nextMessages: Message[]) => {
-    const firstUser = nextMessages.find((m) => m.role === 'user' && m.text.trim())
-    const firstReply = nextMessages.find((m) => m.role === 'assistant' && m.text.trim())
-    if (firstUser && firstReply && !titledIds.current.has(conversationId)) {
-      titledIds.current.add(conversationId)
-      void window.gladdis.chats.autoTitle(conversationId, modelIdRef.current).then((title) => {
-        if (title) setHistoryRev((r) => r + 1)
-      })
-    }
-  }
-
-  const conversationSignature = (
-    conversationId: string,
-    createdAt: number,
-    nextMessages: Message[],
-    parentId = continuesFromId.current
-  ) => JSON.stringify({ id: conversationId, createdAt, continuesFromId: parentId, messages: nextMessages })
-
-  const buildConversation = (
-    conversationId = convIdRef.current,
-    nextMessages = messagesRef.current,
-    createdAt = convCreatedAt.current,
-    parentId = continuesFromId.current
-  ): Conversation => ({
-    id: conversationId,
-    title: '', // derived in the main process from the first user message
-    continuesFromId: parentId,
-    createdAt,
-    updatedAt: Date.now(),
-    messages: nextMessages
+  const persistence = useConversationPersistence({
+    enabled: panelId === 'left',
+    convIdRef,
+    messagesRef,
+    modelIdRef,
+    createdAtRef: convCreatedAt,
+    continuesFromIdRef: continuesFromId,
+    streaming,
+    messages,
+    convId,
+    bumpHistoryRev: () => setHistoryRev((r) => r + 1)
   })
-
-  const persistConversation = async (conversation: Conversation, postSave = true) => {
-    if (conversation.messages.length === 0) return conversation
-    const signature = conversationSignature(
-      conversation.id,
-      conversation.createdAt,
-      conversation.messages as Message[]
-    )
-    if (lastSavedSignature.current === signature) return conversation
-    const saved = await window.gladdis.chats.save(conversation)
-    lastSavedSignature.current = signature
-    if (postSave) postPersist(saved.id, saved.messages as Message[])
-    return saved
-  }
-
-  const flushPersist = async (postSave = true): Promise<Conversation | null> => {
-    if (!restored.current) return null
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
-    const conv = buildConversation()
-    if (conv.messages.length === 0) return null
-    return persistConversation(conv, postSave)
-  }
-
-  const flushPersistSync = (postSave = true): void => {
-    if (!restored.current) return
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current)
-      saveTimer.current = null
-    }
-    const conv = buildConversation()
-    if (conv.messages.length === 0) return
-    const signature = conversationSignature(
-      conv.id,
-      conv.createdAt,
-      conv.messages as Message[]
-    )
-    if (lastSavedSignature.current === signature) return
-    const saved = window.gladdis.chats.saveSync(conv)
-    lastSavedSignature.current = signature
-    if (postSave) postPersist(saved.id, saved.messages as Message[])
-  }
+  const {
+    restoredRef,
+    conversationSignature,
+    lastSavedSignatureRef,
+    buildConversation,
+    persistConversation,
+    flushPersist
+  } = persistence
 
   useEffect(() => {
     const off = window.gladdis.tabs.onUpdated(({ tabs: next, activeTabId }) => {
@@ -214,116 +140,41 @@ export function ChatPanel({
     return off
   }, [])
 
-  useEffect(() => {
-    void window.gladdis.keys.status().then(setKeyStatus)
-    void window.gladdis.workspace.get().then(setWorkspace)
-    void window.gladdis.codex.status().then(setCodexStatus).catch(() => setCodexStatus(null))
-    void window.gladdis.codex
-      .models()
-      .then((codexModels) => {
-        if (!codexModels.length) return
-        const nonCodex = MODELS.filter((m) => m.provider !== 'codex')
-        setModels([...nonCodex, ...codexModels])
-      })
-      .catch(() => {
-        /* keep static fallback */
-      })
-  }, [])
-
-  useEffect(() => {
-    void window.gladdis.audit.list().then(setAuditRecords)
-    const off = window.gladdis.audit.onEvent((event) => {
-      setAuditRecords((records) => {
-        const index = records.findIndex((r) => r.id === event.record.id)
-        if (index !== -1) {
-          const updated = [...records]
-          updated[index] = event.record
-          if (records[index].startedAt === event.record.startedAt) {
-            return updated
-          }
-          return updated.sort((a, b) => b.startedAt - a.startedAt)
-        } else {
-          const insertIdx = records.findIndex((r) => r.startedAt < event.record.startedAt)
-          if (insertIdx === -1) {
-            return [...records, event.record]
-          }
-          return [
-            ...records.slice(0, insertIdx),
-            event.record,
-            ...records.slice(insertIdx)
-          ]
-        }
-      })
-    })
-    return off
-  }, [])
-
+  // Restore the last-active conversation on mount (left panel only — the
+  // right panel is intentionally ephemeral so the user always has a clean
+  // sandbox).
   useEffect(() => {
     if (panelId !== 'left') {
-      restored.current = true
+      restoredRef.current = true
       return
     }
     void (async () => {
       try {
         const id = await window.gladdis.chats.lastActive()
         const conv = id ? await window.gladdis.chats.get(id) : null
-      if (conv && conv.messages.length) {
-        setConvId(conv.id)
-        convCreatedAt.current = conv.createdAt
-        continuesFromId.current = conv.continuesFromId ?? null
-        lastSavedSignature.current = conversationSignature(
-          conv.id,
-          conv.createdAt,
-          conv.messages as Message[],
-          conv.continuesFromId ?? null
-        )
-        setMessages(conv.messages as Message[])
-        // After the restored messages paint, anchor at the latest reply
-        // instead of opening at the top of the transcript.
-        requestAnimationFrame(() => autoScroll.scrollToBottom())
-      }
+        if (conv && conv.messages.length) {
+          setConvId(conv.id)
+          convCreatedAt.current = conv.createdAt
+          continuesFromId.current = conv.continuesFromId ?? null
+          lastSavedSignatureRef.current = conversationSignature(
+            conv.id,
+            conv.createdAt,
+            conv.messages as Message[],
+            conv.continuesFromId ?? null
+          )
+          setMessages(conv.messages as Message[])
+          // After the restored messages paint, anchor at the latest reply
+          // instead of opening at the top of the transcript.
+          requestAnimationFrame(() => autoScroll.scrollToBottom())
+        }
       } finally {
-        restored.current = true
+        restoredRef.current = true
       }
     })()
     // autoScroll is stable for the lifetime of this panel; including it would
     // re-run this restore effect and double-load the conversation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panelId])
-
-  const debouncedSave = useMemo(() => {
-    return () => {
-      if (!restored.current) return
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      saveTimer.current = setTimeout(() => {
-        saveTimer.current = null
-        const conv = buildConversation(convIdRef.current, messagesRef.current, convCreatedAt.current)
-        void persistConversation(conv)
-      }, 400)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (streaming) return
-    debouncedSave()
-  }, [messages, convId, debouncedSave, streaming])
-
-  useEffect(() => {
-    return () => {
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current)
-        saveTimer.current = null
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    const onBeforeUnload = () => {
-      flushPersistSync(false)
-    }
-    window.addEventListener('beforeunload', onBeforeUnload)
-    return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [])
 
   useStreamConsumer({
     activeReq,
@@ -351,8 +202,8 @@ export function ChatPanel({
       } catch (e) {
         console.warn('Failed to save audio state to localStorage:', e)
       }
-      // Turning on without a key is a no-op that silently fails; nudge the user
-      // to set the OpenAI key so they know why nothing is spoken.
+      // Turning on without a key is a no-op that silently fails; nudge the
+      // user to set the OpenAI key so they know why nothing is spoken.
       if (next && !keyStatus.openai) {
         setSettingsTab('keys')
         setShowSettings(true)
@@ -383,10 +234,7 @@ export function ChatPanel({
     }
 
     const activeTab = tabs.find((t) => t.id === activeId) ?? null
-    const userMsg: Message = {
-      role: 'user',
-      text
-    }
+    const userMsg: Message = { role: 'user', text }
     const nextMessages: Message[] = [...messagesRef.current, userMsg]
     const prior: ChatMessage[] = messagesRef.current
       .slice(-RECENT_TURNS)
@@ -419,7 +267,7 @@ export function ChatPanel({
     // Sending a new message is an unambiguous "I want to see the reply" signal.
     // Re-enable follow mode regardless of where the user had scrolled before.
     autoScroll.scrollToBottom()
-    if (restored.current) {
+    if (restoredRef.current) {
       void persistConversation(buildConversation(convId, nextMessages), false).catch((err) => {
         console.warn('[chat] pre-send conversation save failed:', (err as Error)?.message ?? err)
       })
@@ -460,7 +308,7 @@ export function ChatPanel({
     continuesFromId.current = null
     convCreatedAt.current = Date.now()
     setConvId(newConversationId())
-    lastSavedSignature.current = null
+    lastSavedSignatureRef.current = null
     setHistoryRev((r) => r + 1)
   }
 
@@ -482,7 +330,7 @@ export function ChatPanel({
       setConvId(conv.id)
       convCreatedAt.current = conv.createdAt
       continuesFromId.current = conv.continuesFromId ?? null
-      lastSavedSignature.current = conversationSignature(
+      lastSavedSignatureRef.current = conversationSignature(
         conv.id,
         conv.createdAt,
         conv.messages as Message[],
@@ -507,83 +355,15 @@ export function ChatPanel({
     continuesFromId.current = id
     convCreatedAt.current = Date.now()
     setConvId(newConversationId())
-    lastSavedSignature.current = null
+    lastSavedSignatureRef.current = null
     setHistoryRev((r) => r + 1)
     setShowSettings(false)
   }
 
-  const pickWorkspace = async () => {
-    const ws = await window.gladdis.workspace.pickFolder()
-    setWorkspace(ws)
-  }
-
-  // Short, tail-end label for the chosen folder (e.g. ".../Desktop/gladdis").
-  const folderLabel = workspace.folder
-    ? workspace.folder.split('/').filter(Boolean).slice(-2).join('/')
-    : null
-  const turnControls = (
-    <div className="composer-turn-controls">
-      <ModelPicker
-        value={modelId}
-        onChange={persistModel}
-        models={models}
-        keyStatus={keyStatus}
-        codexStatus={codexStatus}
-      />
-      <button
-        className={`workspace-btn ${workspace.folder ? 'set' : ''}`}
-        title={
-          workspace.folder
-            ? `Working folder: ${workspace.folder}\nClick to change`
-            : 'Choose a folder to work from'
-        }
-        aria-label="Choose working folder"
-        onClick={pickWorkspace}
-      >
-        <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
-          <path
-            d="M2.25 5.25A1.5 1.5 0 0 1 3.75 3.75h3l1.5 1.5h6a1.5 1.5 0 0 1 1.5 1.5v6.75a1.5 1.5 0 0 1-1.5 1.5H3.75a1.5 1.5 0 0 1-1.5-1.5V5.25Z"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinejoin="round"
-          />
-        </svg>
-        {folderLabel && <span className="workspace-label">{folderLabel}</span>}
-      </button>
-    </div>
-  )
-  const footerActions = (
-    <button
-      className={`footer-action ${showSettings ? 'is-open' : ''}`}
-      title={`${panelId === 'left' ? 'Left' : 'Right'} chat settings`}
-      aria-label={`${panelId === 'left' ? 'Left' : 'Right'} chat settings`}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={() => {
-        setSettingsTab('history')
-        setShowSettings(true)
-      }}
-    >
-      <svg width="16" height="16" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-        <path
-          d="M9 6.25a2.75 2.75 0 1 1 0 5.5 2.75 2.75 0 0 1 0-5.5Z"
-          stroke="currentColor"
-          strokeWidth="1.35"
-        />
-        <path
-          d="M9 2.8v1.55M9 13.65v1.55M3.62 5.9l1.35.78M13.03 11.32l1.35.78M3.62 12.1l1.35-.78M13.03 6.68l1.35-.78"
-          stroke="currentColor"
-          strokeWidth="1.35"
-          strokeLinecap="round"
-        />
-      </svg>
-    </button>
-  )
   // Zoom scales the conversation typography only. The composer is application
   // chrome, not content: its height, font sizes, and hint typography are held
   // constant so the input box looks identical on both panels regardless of
-  // either panel's chat zoom. (Previously composer height scaled with zoom,
-  // which made the left and right input boxes drift apart in size whenever the
-  // two panels' zooms diverged.)
+  // either panel's chat zoom.
   const chatStyle = {
     '--chat-zoom': zoom,
     '--chat-message-size': px(15 * zoom),
@@ -599,100 +379,87 @@ export function ChatPanel({
     '--chat-pad-x': px(Math.min(20, Math.max(12, 16 * zoom)))
   } as CSSProperties
 
+  const turnControls = (
+    <TurnControls
+      modelId={modelId}
+      models={models}
+      onModelChange={persistModel}
+      keyStatus={keyStatus}
+      codexStatus={codexStatus}
+      workspace={workspace}
+      onPickWorkspace={pickWorkspace}
+    />
+  )
+  const footerActions = (
+    <ChatSettingsButton
+      panelLabel={panelId === 'left' ? 'Left' : 'Right'}
+      open={showSettings}
+      onOpen={() => {
+        setSettingsTab('history')
+        setShowSettings(true)
+      }}
+    />
+  )
+
   return (
     <>
-    <div className="chat" style={chatStyle}>
-      <div className="chat-messages" ref={scrollRef}>
-        {messages.length === 0 ? (
-          <div className="chat-empty">
-            Ask anything.
-            <br />
-            The browser on the right is fully owned via CDP.
-          </div>
-        ) : (
-          messages.map((m, i) =>
-            m.role === 'assistant' ? (
-              <div key={i} className="chat-msg assistant">
-                <ChatMessageBody message={m} />
-                {/* Show copy once the stream for this turn has finished. */}
-                {m.text && !(streaming && i === messages.length - 1) && (
-                  <CopyButton text={m.text} />
-                )}
-              </div>
-            ) : (
-              <div key={i} className="chat-msg user">
-                {m.text}
-                {m.images && m.images.length > 0 && (
-                  <div className="chat-msg-images">
-                    {m.images.map((img, idx) => (
-                      <img
-                        key={idx}
-                        src={img}
-                        alt="attachment"
-                        className="chat-msg-thumb"
-                        onClick={() => window.open(img, '_blank')}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )
-          )
+      <div className="chat" style={chatStyle}>
+        <div className="chat-messages" ref={scrollRef}>
+          <ChatMessageList messages={messages} streaming={streaming} />
+        </div>
+
+        {!autoScroll.isAtBottom && messages.length > 0 && (
+          <button
+            type="button"
+            className="chat-jump-bottom"
+            aria-label="Jump to latest message"
+            title="Jump to latest"
+            onClick={() => autoScroll.scrollToBottom('smooth')}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path
+                d="M4 6.5 8 10.5 12 6.5"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
+
+        <Composer
+          activeId={activeId}
+          busy={streaming}
+          onSubmit={onSubmit}
+          onStop={stop}
+          audioOn={audioOn}
+          onToggleAudio={toggleAudio}
+          voice={voice}
+          onVoiceChange={persistVoice}
+          speed={speed}
+          onSpeedChange={persistSpeed}
+          turnControls={turnControls}
+          onNewChat={newChat}
+          newDisabled={messages.length === 0 && !streaming}
+        />
+
+        {showSettings && (
+          <ChatSettingsModal
+            auditRecords={auditRecords}
+            codexStatus={codexStatus}
+            currentId={convId}
+            initialTab={settingsTab}
+            keyStatus={keyStatus}
+            refreshKey={historyRev}
+            onClose={() => setShowSettings(false)}
+            onKeysSaved={setKeyStatus}
+            onPickHistory={loadConversation}
+            onContinueHistory={continueFromConversation}
+          />
         )}
       </div>
-
-      {!autoScroll.isAtBottom && messages.length > 0 && (
-        <button
-          type="button"
-          className="chat-jump-bottom"
-          aria-label="Jump to latest message"
-          title="Jump to latest"
-          onClick={() => autoScroll.scrollToBottom('smooth')}
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path
-              d="M4 6.5 8 10.5 12 6.5"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-      )}
-
-      <Composer
-        activeId={activeId}
-        busy={streaming}
-        onSubmit={onSubmit}
-        onStop={stop}
-        audioOn={audioOn}
-        onToggleAudio={toggleAudio}
-        voice={voice}
-        onVoiceChange={persistVoice}
-        speed={speed}
-        onSpeedChange={persistSpeed}
-        turnControls={turnControls}
-        onNewChat={newChat}
-        newDisabled={messages.length === 0 && !streaming}
-      />
-
-      {showSettings && (
-        <ChatSettingsModal
-          auditRecords={auditRecords}
-          codexStatus={codexStatus}
-          currentId={convId}
-          initialTab={settingsTab}
-          keyStatus={keyStatus}
-          refreshKey={historyRev}
-          onClose={() => setShowSettings(false)}
-          onKeysSaved={setKeyStatus}
-          onPickHistory={loadConversation}
-          onContinueHistory={continueFromConversation}
-        />
-      )}
-    </div>
-    {footerSlot && createPortal(footerActions, footerSlot)}
+      {footerSlot && createPortal(footerActions, footerSlot)}
     </>
   )
 }

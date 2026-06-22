@@ -1,49 +1,38 @@
+import { mkdir, readFile, readdir, stat, writeFile } from 'fs/promises'
+import { basename, dirname, isAbsolute, join, resolve } from 'path'
+import { countOccurrences, diffSummary, type DiffSummary } from './fileDiff'
 import {
-  readFile,
-  writeFile,
-  mkdir,
-  readdir,
-  stat
-} from 'fs/promises'
-import { execFile } from 'child_process'
-import { createReadStream } from 'fs'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
-import { createInterface } from 'readline'
-import { promisify } from 'util'
+  DEFAULT_READ_LINES,
+  SMALL_FILE_FULL_LINES,
+  readFileBounded,
+  readLineRange,
+  type ReadResult
+} from './fileRead'
+import {
+  DEFAULT_SEARCH_CONTEXT_LINES,
+  MAX_SEARCH_CONTEXT_LINES,
+  MAX_SEARCH_RESULTS,
+  searchWithRipgrep,
+  type SearchHit,
+  type SearchResult
+} from './fileSearch'
 
 /**
  * Raw filesystem operations the agent can drive. Whole-filesystem scope —
  * any path the OS user can reach — so every method resolves the path to an
- * absolute one and operates directly. Writes are auto-applied (create/
- * overwrite/edit happen immediately); the caller surfaces what changed.
+ * absolute one and operates directly. Writes are auto-applied (create /
+ * overwrite / edit happen immediately); the caller surfaces what changed.
+ *
+ * Helpers split into siblings:
+ *   • `fileRead.ts`   — bounded byte/line reads
+ *   • `fileDiff.ts`   — cheap line-level diff + occurrence counting
+ *   • `fileSearch.ts` — ripgrep wrapper with content + path lanes and ranking
  *
  * All methods throw on failure with a human-readable message; the tool
  * dispatch layer turns that into a structured tool_result.
  */
 
-/** Hard cap on bytes returned from a read, so huge files can't blow up the model context. */
-const MAX_READ_BYTES = 256 * 1024
-/** Default first-pass file window. The model can request an explicit range or full read. */
-const DEFAULT_READ_LINES = 120
-/** Files at or below this size are cheaper to read once than to force another range call. */
-const SMALL_FILE_FULL_LINES = 220
-/** Cap on entries returned from a single list / search, to stay bounded. */
-const MAX_ENTRIES = 1000
-const MAX_SEARCH_FILE_BYTES = 2 * 1024 * 1024
-const DEFAULT_SEARCH_CONTEXT_LINES = 2
-const MAX_SEARCH_CONTEXT_LINES = 8
-const SEARCH_LANE_MULTIPLIER = 3
-const MIN_SEARCH_LANE_LIMIT = 50
-const execFileAsync = promisify(execFile)
-
-interface DiffSummary {
-  /** Lines that exist after but not before (added). */
-  added: number
-  /** Lines that existed before but not after (removed). */
-  removed: number
-  /** A compact unified-ish preview, capped. */
-  preview: string
-}
+const MAX_DIR_ENTRIES = 1000
 
 interface WriteResult {
   path: string
@@ -62,27 +51,6 @@ interface DirEntry {
   name: string
   type: 'file' | 'dir' | 'other'
   size: number
-}
-
-interface SearchHit {
-  path: string
-  kind: 'content' | 'path'
-  line: number
-  text: string
-  startLine: number
-  endLine: number
-  snippet: string
-  score: number
-}
-
-interface ReadResult {
-  path: string
-  content: string
-  truncated: boolean
-  totalLines: number
-  startLine: number
-  endLine: number
-  defaultWindow: boolean
 }
 
 export class FileTools {
@@ -118,6 +86,10 @@ export class FileTools {
     if (startLine != null || endLine != null) return readLineRange(abs, startLine, endLine)
     if (!full) {
       const preview = await readLineRange(abs, 1, SMALL_FILE_FULL_LINES, true)
+      // Small files come back whole — no point making a second tool call
+      // when we already paid for the I/O. Larger files truncate to
+      // DEFAULT_READ_LINES and signal `defaultWindow: true` so the agent
+      // knows to ask for more.
       if (preview.totalLines <= SMALL_FILE_FULL_LINES) {
         return { ...preview, endLine: preview.totalLines, defaultWindow: false }
       }
@@ -129,26 +101,7 @@ export class FileTools {
         defaultWindow: true
       }
     }
-    const buf = await readFile(abs)
-    let truncated = false
-    let text: string
-    if (buf.byteLength > MAX_READ_BYTES) {
-      text = buf.subarray(0, MAX_READ_BYTES).toString('utf8')
-      truncated = true
-    } else {
-      text = buf.toString('utf8')
-    }
-    const lines = text.split('\n')
-    const totalLines = lines.length
-    return {
-      path: abs,
-      content: text,
-      truncated,
-      totalLines,
-      startLine: 1,
-      endLine: totalLines,
-      defaultWindow: false
-    }
+    return readFileBounded(abs)
   }
 
   /** Create or overwrite a file (parent dirs created as needed). */
@@ -205,7 +158,7 @@ export class FileTools {
   async list(path: string): Promise<{ path: string; entries: DirEntry[]; truncated: boolean }> {
     const abs = this.resolve(path)
     const names = await readdir(abs)
-    const namesToStat = names.slice(0, MAX_ENTRIES)
+    const namesToStat = names.slice(0, MAX_DIR_ENTRIES)
     const statJobs: Promise<DirEntry>[] = namesToStat.map(async (name): Promise<DirEntry> => {
       const fullPath = join(abs, name)
       try {
@@ -223,7 +176,7 @@ export class FileTools {
     entries.sort((a, b) =>
       a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1
     )
-    return { path: abs, entries, truncated: names.length > MAX_ENTRIES }
+    return { path: abs, entries, truncated: names.length > MAX_DIR_ENTRIES }
   }
 
   /**
@@ -231,37 +184,29 @@ export class FileTools {
    * path/name in parallel. Lowercase queries stay broad; queries containing
    * uppercase letters become case-sensitive for better symbol precision.
    * `glob` restricts which file names are scanned (a simple * / ? glob, no
-   * path separators). Bounded by MAX_ENTRIES hits and a directory-skip list
-   * for the usual heavy dirs.
+   * path separators). Bounded by MAX_SEARCH_RESULTS hits and a directory-
+   * skip list for the usual heavy dirs.
    */
   async search(
     query: string,
     path = '.',
     glob?: string,
     contextLines = DEFAULT_SEARCH_CONTEXT_LINES,
-    maxResults = MAX_ENTRIES,
+    maxResults = MAX_SEARCH_RESULTS,
     regex = false
-  ): Promise<{ root: string; hits: SearchHit[]; truncated: boolean }> {
+  ): Promise<SearchResult> {
     const root = this.resolve(path)
     if (!query.trim()) return { root, hits: [], truncated: false }
-    const limit = Math.max(1, Math.min(MAX_ENTRIES, Math.floor(maxResults) || MAX_ENTRIES))
+    const limit = Math.max(1, Math.min(MAX_SEARCH_RESULTS, Math.floor(maxResults) || MAX_SEARCH_RESULTS))
     const context = Math.max(0, Math.min(MAX_SEARCH_CONTEXT_LINES, Math.floor(contextLines) || 0))
     return searchWithRipgrep(root, query, glob, context, limit, regex)
   }
 
-  private async tryReadString(abs: string): Promise<string | null> {
-    try {
-      return await readFile(abs, 'utf8')
-    } catch {
-      return null
-    }
-  }
-
   /**
-   * For a path that doesn't exist, list same-directory entries whose name is a
-   * near miss (shared stem or basename substring) — so a wrong-filename guess
-   * (vite.config.ts → electron.vite.config.ts) becomes self-correcting in one
-   * step instead of needing a separate list_dir.
+   * For a path that doesn't exist, list same-directory entries whose name is
+   * a near miss (shared stem or basename substring) — so a wrong-filename
+   * guess (vite.config.ts → electron.vite.config.ts) becomes self-correcting
+   * in one step instead of needing a separate list_dir.
    */
   async nearbyMatches(path: string, max = 6): Promise<string[]> {
     const abs = this.resolve(path)
@@ -282,392 +227,14 @@ export class FileTools {
       })
       .slice(0, max)
   }
-}
 
-/**
- * Run rg twice in parallel — once for content matches, once (for fixed-string
- * queries) for file-name/path matches — then merge and rank through the shared
- * finalizeSearch. rg already parallelizes across files internally, so no worker
- * pool is needed; the two lanes just overlap their process time.
- */
-async function searchWithRipgrep(
-  root: string,
-  query: string,
-  glob: string | undefined,
-  context: number,
-  limit: number,
-  regex: boolean
-): Promise<{ root: string; hits: SearchHit[]; truncated: boolean }> {
-  const laneLimit = searchLaneLimit(limit)
-  const [content, paths] = await Promise.all([
-    searchContentWithRipgrep(root, query, glob, context, laneLimit, regex),
-    regex
-      ? Promise.resolve({ hits: [] as SearchHit[], truncated: false })
-      : searchPathsWithRipgrep(root, query, glob, laneLimit)
-  ])
-  return finalizeSearch(root, query, limit, regex, content, paths)
-}
-
-async function searchContentWithRipgrep(
-  root: string,
-  query: string,
-  glob: string | undefined,
-  context: number,
-  laneLimit: number,
-  regex: boolean
-): Promise<{ hits: SearchHit[]; truncated: boolean }> {
-  const args = [
-    '--json',
-    '--color', 'never',
-    '--line-number',
-    '--no-heading',
-    '--with-filename',
-    '--context', String(context),
-    '--max-count', String(laneLimit),
-    '--max-filesize', String(MAX_SEARCH_FILE_BYTES),
-    '--glob', '!node_modules/**',
-    '--glob', '!.git/**',
-    '--glob', '!.cache/**',
-    '--glob', '!dist/**',
-    '--glob', '!out/**',
-    '--glob', '!.next/**',
-    '--glob', '!build/**'
-  ]
-  if (!regex) args.push('--fixed-strings')
-  args.push('--smart-case')
-  if (glob) args.push('--glob', glob)
-  args.push(query, root)
-
-  let stdout = ''
-  try {
-    stdout = (await execFileAsync('rg', args, {
-      maxBuffer: 8 * 1024 * 1024,
-      windowsHide: true
-    })).stdout
-  } catch (err) {
-    const maybe = err as { code?: unknown; stdout?: unknown }
-    if (maybe.code === 1) {
-      stdout = typeof maybe.stdout === 'string' ? maybe.stdout : ''
-    } else {
-      throw err
-    }
-  }
-
-  const hits: SearchHit[] = []
-  const emittedLines = new Map<string, Map<number, string>>()
-  let truncated = false
-  for (const line of stdout.split('\n')) {
-    if (!line.trim()) continue
-    let event: any
+  private async tryReadString(abs: string): Promise<string | null> {
     try {
-      event = JSON.parse(line)
+      return await readFile(abs, 'utf8')
     } catch {
-      continue
-    }
-    if (event?.type !== 'match' && event?.type !== 'context') continue
-    const path = String(event.data?.path?.text ?? '')
-    const lineNo = Number(event.data?.line_number ?? 0)
-    const text = String(event.data?.lines?.text ?? '').replace(/\r?\n$/, '')
-    if (!path || !lineNo) continue
-    let fileLines = emittedLines.get(path)
-    if (!fileLines) {
-      fileLines = new Map<number, string>()
-      emittedLines.set(path, fileLines)
-    }
-    fileLines.set(lineNo, text)
-    if (event.type !== 'match') continue
-    if (hits.length >= laneLimit) {
-      truncated = true
-      break
-    }
-    hits.push({
-      path,
-      kind: 'content',
-      line: lineNo,
-      text: text.slice(0, 240),
-      startLine: Math.max(1, lineNo - context),
-      endLine: lineNo + context,
-      snippet: '',
-      score: 0
-    })
-  }
-
-  hydrateSearchSnippetsFromRipgrep(hits, emittedLines)
-  return { hits, truncated }
-}
-
-async function searchPathsWithRipgrep(
-  root: string,
-  query: string,
-  glob: string | undefined,
-  laneLimit: number
-): Promise<{ hits: SearchHit[]; truncated: boolean }> {
-  const args = [
-    '--files',
-    root,
-    '--glob', '!node_modules/**',
-    '--glob', '!.git/**',
-    '--glob', '!.cache/**',
-    '--glob', '!dist/**',
-    '--glob', '!out/**',
-    '--glob', '!.next/**',
-    '--glob', '!build/**'
-  ]
-  if (glob) args.push('--glob', glob)
-
-  const stdout = (await execFileAsync('rg', args, {
-    maxBuffer: 8 * 1024 * 1024,
-    windowsHide: true
-  })).stdout
-
-  const hits: SearchHit[] = []
-  let truncated = false
-  for (const line of stdout.split('\n')) {
-    const rawPath = line.trim()
-    if (!rawPath) continue
-    const fullPath = resolve(root, rawPath)
-    const hit = buildPathHit(root, fullPath, query)
-    if (!hit) continue
-    hits.push(hit)
-    if (hits.length >= laneLimit) {
-      truncated = true
-      break
+      return null
     }
   }
-  return { hits, truncated }
 }
 
-function hydrateSearchSnippetsFromRipgrep(
-  hits: SearchHit[],
-  emittedLines: Map<string, Map<number, string>>
-): void {
-  for (const hit of hits) {
-    const fileLines = emittedLines.get(hit.path)
-    if (!fileLines) continue
-    const snippetLines = Array.from(fileLines.entries())
-      .filter(([lineNo]) => lineNo >= hit.startLine && lineNo <= hit.endLine)
-      .sort((a, b) => a[0] - b[0])
-    if (snippetLines.length === 0) continue
-    hit.startLine = snippetLines[0][0]
-    hit.endLine = snippetLines[snippetLines.length - 1][0]
-    hit.snippet = snippetLines
-      .map(([lineNo, text]) => `${lineNo}: ${text}`.slice(0, 320))
-      .join('\n')
-  }
-}
-
-async function readLineRange(
-  abs: string,
-  startLine?: number,
-  endLine?: number,
-  defaultWindow = false
-): Promise<ReadResult> {
-  const s = Math.max(1, startLine ?? 1)
-  const e = Math.max(s, endLine ?? Number.MAX_SAFE_INTEGER)
-  const lines: string[] = []
-  let bytes = 0
-  let totalLines = 0
-  let truncated = false
-  const rl = createInterface({
-    input: createReadStream(abs, { encoding: 'utf8' }),
-    crlfDelay: Infinity
-  })
-  for await (const line of rl) {
-    totalLines += 1
-    if (totalLines < s || totalLines > e) continue
-    const nextBytes = Buffer.byteLength(line, 'utf8') + 1
-    if (bytes + nextBytes > MAX_READ_BYTES) {
-      truncated = true
-      break
-    }
-    bytes += nextBytes
-    lines.push(line)
-  }
-  return {
-    path: abs,
-    content: lines.join('\n'),
-    truncated,
-    totalLines,
-    startLine: s,
-    endLine: Math.min(e, Math.max(s, totalLines)),
-    defaultWindow
-  }
-}
-
-function countOccurrences(haystack: string, needle: string): number {
-  if (!needle) return 0
-  let count = 0
-  let i = haystack.indexOf(needle)
-  while (i !== -1) {
-    count++
-    i = haystack.indexOf(needle, i + needle.length)
-  }
-  return count
-}
-
-function shouldIgnoreCase(query: string): boolean {
-  return !/[A-Z]/.test(query)
-}
-
-function searchLaneLimit(limit: number): number {
-  return Math.min(MAX_ENTRIES, Math.max(limit * SEARCH_LANE_MULTIPLIER, MIN_SEARCH_LANE_LIMIT))
-}
-
-function finalizeSearch(
-  root: string,
-  query: string,
-  limit: number,
-  regex: boolean,
-  ...lanes: Array<{ hits: SearchHit[]; truncated: boolean }>
-): { root: string; hits: SearchHit[]; truncated: boolean } {
-  const matchedPaths = new Set(
-    lanes
-      .flatMap((lane) => lane.hits)
-      .filter((hit) => hit.kind === 'path')
-      .map((hit) => hit.path)
-  )
-  const deduped = new Map<string, SearchHit>()
-  for (const hit of lanes.flatMap((lane) => lane.hits)) {
-    const score =
-      hit.kind === 'path'
-        ? scorePathHit(root, hit.path, query)
-        : scoreContentHit(root, hit, query, regex, matchedPaths.has(hit.path))
-    const next = { ...hit, score }
-    const key = `${next.kind}:${next.path}:${next.line}:${next.text}`
-    const prior = deduped.get(key)
-    if (!prior || next.score > prior.score) deduped.set(key, next)
-  }
-  const hits = Array.from(deduped.values())
-    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line)
-    .slice(0, limit)
-  const truncated = lanes.some((lane) => lane.truncated) || deduped.size > limit
-  return { root, hits, truncated }
-}
-
-function buildPathHit(root: string, fullPath: string, query: string): SearchHit | null {
-  const score = scorePathHit(root, fullPath, query)
-  if (score <= 0) return null
-  const rel = displaySearchPath(root, fullPath)
-  return {
-    path: fullPath,
-    kind: 'path',
-    line: 0,
-    text: rel,
-    startLine: 1,
-    endLine: 1,
-    snippet: `path match: ${rel}`,
-    score
-  }
-}
-
-function scoreContentHit(
-  root: string,
-  hit: SearchHit,
-  query: string,
-  regex: boolean,
-  pathMatched: boolean
-): number {
-  const text = hit.text
-  const ignoreCase = shouldIgnoreCase(query)
-  let score = scorePathHit(root, hit.path, query) / 2
-  if (regex) {
-    score += 140
-  } else if (contains(text, query, false)) {
-    score += 220
-  } else if (contains(text, query, true)) {
-    score += 150
-  }
-  if (pathMatched) score += 80
-  score += Math.max(0, 36 - Math.floor(hit.line / 20))
-  score += Math.max(0, 24 - Math.floor(text.length / 12))
-  if (!regex && !ignoreCase && contains(text, query, false)) score += 20
-  return score
-}
-
-function scorePathHit(root: string, fullPath: string, query: string): number {
-  const ignoreCase = shouldIgnoreCase(query)
-  const rel = displaySearchPath(root, fullPath)
-  const file = basename(fullPath)
-  const stem = file.replace(/\.[^.]+$/, '')
-  let score = 0
-
-  score += scoreCandidate(file, query, ignoreCase, 320, 240, 180)
-  score += scoreCandidate(stem, query, ignoreCase, 280, 210, 150)
-  score += scoreCandidate(rel, query, ignoreCase, 240, 180, 120)
-
-  const tokens = query
-    .split(/[^A-Za-z0-9]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 2)
-  for (const token of tokens) {
-    if (contains(file, token, ignoreCase)) score += 18
-    if (contains(rel, token, ignoreCase)) score += 10
-  }
-
-  if (score > 0) score += Math.max(0, 24 - Math.floor(rel.length / 8))
-  return score
-}
-
-function scoreCandidate(
-  candidate: string,
-  query: string,
-  ignoreCase: boolean,
-  exact: number,
-  prefix: number,
-  containsScore: number
-): number {
-  if (equals(candidate, query, ignoreCase)) return exact
-  if (startsWith(candidate, query, ignoreCase)) return prefix
-  if (contains(candidate, query, ignoreCase)) return containsScore
-  return 0
-}
-
-function displaySearchPath(root: string, fullPath: string): string {
-  const rel = relative(root, fullPath).replace(/\\/g, '/')
-  return rel || basename(fullPath)
-}
-
-function equals(value: string, query: string, ignoreCase: boolean): boolean {
-  return normalizeForMatch(value, ignoreCase) === normalizeForMatch(query, ignoreCase)
-}
-
-function startsWith(value: string, query: string, ignoreCase: boolean): boolean {
-  return normalizeForMatch(value, ignoreCase).startsWith(normalizeForMatch(query, ignoreCase))
-}
-
-function contains(value: string, query: string, ignoreCase: boolean): boolean {
-  return normalizeForMatch(value, ignoreCase).includes(normalizeForMatch(query, ignoreCase))
-}
-
-function normalizeForMatch(value: string, ignoreCase: boolean): string {
-  return ignoreCase ? value.toLowerCase() : value
-}
-
-/** Cheap line-level diff: count adds/removes and render a capped preview. */
-function diffSummary(before: string, after: string): DiffSummary {
-  if (before === after) return { added: 0, removed: 0, preview: '(no change)' }
-  const a = before.length ? before.split('\n') : []
-  const b = after.length ? after.split('\n') : []
-  const beforeSet = new Map<string, number>()
-  for (const l of a) beforeSet.set(l, (beforeSet.get(l) ?? 0) + 1)
-  const afterSet = new Map<string, number>()
-  for (const l of b) afterSet.set(l, (afterSet.get(l) ?? 0) + 1)
-
-  let added = 0
-  let removed = 0
-  for (const [l, n] of afterSet) added += Math.max(0, n - (beforeSet.get(l) ?? 0))
-  for (const [l, n] of beforeSet) removed += Math.max(0, n - (afterSet.get(l) ?? 0))
-
-  // Preview: show up to a handful of added lines, then a tail marker.
-  const addedLines: string[] = []
-  for (const l of b) {
-    if ((beforeSet.get(l) ?? 0) <= 0) {
-      addedLines.push(`+ ${l}`)
-      if (addedLines.length >= 12) break
-    } else {
-      beforeSet.set(l, (beforeSet.get(l) ?? 0) - 1)
-    }
-  }
-  const preview = addedLines.length ? addedLines.join('\n') : `(${added} added, ${removed} removed)`
-  return { added, removed, preview }
-}
+export type { SearchHit, SearchResult, ReadResult, DirEntry, WriteResult, EditResult, DiffSummary }

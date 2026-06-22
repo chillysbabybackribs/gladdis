@@ -15,7 +15,8 @@ const PROVIDERS = [
   { id: 'codex', label: 'Codex' },
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'google', label: 'Gemini' },
-  { id: 'openai', label: 'OpenAI' }
+  { id: 'openai', label: 'OpenAI' },
+  { id: 'grok', label: 'Grok (xAI)' }
 ] as const
 
 /** Small dropdown to pick the active model, grouped by provider with a secondary pop out menu. */

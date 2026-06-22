@@ -4,7 +4,8 @@ import {
   completeOpenAi,
   streamOpenAiPlain,
   runOpenAiToolLoop,
-  titleOpenAi
+  titleOpenAi,
+  toOpenAiMessages
 } from './openai'
 import type { ChatRequest } from '../../../../shared/types'
 
@@ -206,5 +207,43 @@ describe('openAiBody (reasoning_effort + tools compatibility)', () => {
     })
     expect(body.model).toBe('gpt-4o-mini')
     expect(body.max_tokens).toBe(16_384)
+  })
+})
+
+describe('toOpenAiMessages with history compaction', () => {
+  it('does not touch messages when total count is within maxMessages', () => {
+    const messages = Array.from({ length: 10 }, (_, i) => ({
+      role: 'user' as const,
+      content: `msg ${i}`
+    }))
+    const req: ChatRequest = { messages }
+    const result = toOpenAiMessages(req)
+
+    expect(result.length).toBe(10)
+    expect(result[0].content).toBe('msg 0')
+    expect(result[9].content).toBe('msg 9')
+  })
+
+  it('compacts messages when total count exceeds maxMessages', () => {
+    vi.stubEnv('GLADDIS_OPENAI_MAX_MESSAGES', '10')
+    vi.stubEnv('GLADDIS_OPENAI_KEEP_TAIL', '4')
+
+    const messages = Array.from({ length: 15 }, (_, i) => ({
+      role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      content: `msg ${i}`
+    }))
+    const req: ChatRequest = { messages }
+    const result = toOpenAiMessages(req)
+
+    // Expected: 1 notice + 4 tail messages = 5 messages
+    expect(result.length).toBe(5)
+    expect(result[0].role).toBe('user')
+    expect(result[0].content).toContain('[System Notice: To optimize performance and token usage, 11 earlier messages of this conversation have been trimmed. The most recent 4 messages are preserved verbatim below.]')
+
+    // Verbatim tail messages preserved: msg 11, msg 12, msg 13, msg 14
+    expect(result[1].content).toBe('msg 11')
+    expect(result[2].content).toBe('msg 12')
+    expect(result[3].content).toBe('msg 13')
+    expect(result[4].content).toBe('msg 14')
   })
 })

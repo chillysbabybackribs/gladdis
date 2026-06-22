@@ -1,4 +1,4 @@
-import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
+import type { ChatMessage, ChatRequest, ChatStreamEvent } from '../../../../shared/types'
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
 import { resolveTurnTools } from '../agentTools'
@@ -139,7 +139,32 @@ export function usageFromOpenAi(usage: any): FinishUsage | undefined {
 }
 
 export function toOpenAiMessages(req: ChatRequest): OpenAiMessage[] {
-  return req.messages.map((m) => {
+  // Chat history compounding optimization for OpenAI models.
+  // When messages exceed maxMessages, we prune down to keepTailMessages.
+  // We keep a chunk-based truncation approach rather than dropping message-by-message,
+  // because that keeps the prefix identical for multiple turns, maximizing prompt caching.
+  const maxMessagesStr = process.env.GLADDIS_OPENAI_MAX_MESSAGES
+  const keepTailStr = process.env.GLADDIS_OPENAI_KEEP_TAIL
+
+  const maxMessages = maxMessagesStr ? parseInt(maxMessagesStr, 10) : 30
+  const keepTail = keepTailStr ? parseInt(keepTailStr, 10) : 12
+
+  let messagesToMap = req.messages
+
+  if (messagesToMap.length > maxMessages) {
+    const actualKeepTail = Math.min(keepTail, messagesToMap.length)
+    const tailMessages = messagesToMap.slice(messagesToMap.length - actualKeepTail)
+    const trimmedCount = messagesToMap.length - actualKeepTail
+
+    const systemNotice: ChatMessage = {
+      role: 'user',
+      content: `[System Notice: To optimize performance and token usage, ${trimmedCount} earlier messages of this conversation have been trimmed. The most recent ${actualKeepTail} messages are preserved verbatim below.]`
+    }
+
+    messagesToMap = [systemNotice, ...tailMessages]
+  }
+
+  return messagesToMap.map((m) => {
     return { role: m.role, content: m.content }
   })
 }

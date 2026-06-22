@@ -36,7 +36,7 @@ export const MODELS: ModelOption[] = [
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', availability: 'verified' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', availability: 'verified' },
   { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google', availability: 'verified' },
-  { id: 'grok-4.3', label: 'Grok 4.3', provider: 'grok', availability: 'speculative' },
+  { id: 'grok-4.3', label: 'Grok 4.3', provider: 'grok', availability: 'verified' },
   { id: 'grok-build-0.1', label: 'Grok Build 0.1', provider: 'grok', availability: 'speculative' },
   { id: 'openai-gpt-5.5', label: 'GPT 5.5', provider: 'openai', availability: 'verified' },
   { id: 'openai-gpt-5.4', label: 'GPT 5.4', provider: 'openai', availability: 'verified' },

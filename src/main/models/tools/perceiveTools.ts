@@ -61,3 +61,255 @@ export async function runScreenshotApp(deps: PerceiveToolsDeps): Promise<ToolOut
   }
   return { ok: true, text: 'Screenshot of the entire Gladdis app window captured.', imageBase64 }
 }
+
+export async function runGrepPage(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string
+): Promise<ToolOutcome> {
+  const query = args.query
+  if (typeof query !== 'string' || !query.trim()) {
+    return { ok: false, text: 'grep_page: query must be a non-empty string.' }
+  }
+
+  const type = args.type || 'auto'
+  const contextLines = typeof args.contextLines === 'number' ? args.contextLines : 2
+  const caseSensitive = !!args.caseSensitive
+
+  const jsPayload = `
+    const query = ${JSON.stringify(query)};
+    const type = ${JSON.stringify(type)};
+    const contextLines = ${contextLines};
+    const caseSensitive = ${caseSensitive};
+
+    function isElementVisible(el) {
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+        return false;
+      }
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+
+    function getElementCoords(el) {
+      const rect = el.getBoundingClientRect();
+      return {
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        top: Math.round(rect.top),
+        left: Math.round(rect.left)
+      };
+    }
+
+    function getCssSelector(el) {
+      if (!(el instanceof Element)) return '';
+      const path = [];
+      let current = el;
+      while (current && current.nodeType === Node.ELEMENT_NODE) {
+        let selector = current.nodeName.toLowerCase();
+        if (current.id) {
+          selector += '#' + current.id;
+          path.unshift(selector);
+          break;
+        } else {
+          let sib = current;
+          let sibIndex = 1;
+          while (sib = sib.previousElementSibling) {
+            if (sib.nodeName.toLowerCase() === current.nodeName.toLowerCase()) {
+              sibIndex++;
+            }
+          }
+          selector += ':nth-of-type(' + sibIndex + ')';
+        }
+        path.unshift(selector);
+        current = current.parentNode;
+      }
+      return path.join(' > ');
+    }
+
+    function findBestElementForText(textStr) {
+      if (!textStr || textStr.length < 2) return null;
+      const elements = document.querySelectorAll('p, span, a, button, h1, h2, h3, h4, h5, h6, li, td, th, label, div, input');
+      let bestEl = null;
+      let bestDepth = -1;
+
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements[i];
+        if (el.innerText && el.innerText.includes(textStr) && isElementVisible(el)) {
+          let depth = 0;
+          let parent = el.parentNode;
+          while (parent) {
+            depth++;
+            parent = parent.parentNode;
+          }
+          if (depth > bestDepth) {
+            bestDepth = depth;
+            bestEl = el;
+          }
+        }
+      }
+      return bestEl;
+    }
+
+    function findTextMatches(pattern, isRegex, caseSensitive, contextLines) {
+      const results = [];
+      const text = document.body ? (document.body.innerText || "") : "";
+      const lines = text.split('\\n');
+      const matchedIndices = [];
+
+      let regex;
+      if (isRegex) {
+        try {
+          regex = new RegExp(pattern, caseSensitive ? 'g' : 'gi');
+        } catch (e) {
+          const escaped = pattern.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
+          regex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
+        }
+      } else {
+        const escaped = pattern.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
+        regex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
+      }
+
+      lines.forEach((line, index) => {
+        regex.lastIndex = 0;
+        if (regex.test(line)) {
+          matchedIndices.push(index);
+        }
+      });
+
+      matchedIndices.forEach(index => {
+        const line = lines[index];
+        const startLine = Math.max(0, index - contextLines);
+        const endLine = Math.min(lines.length - 1, index + contextLines);
+        const context = lines.slice(startLine, endLine + 1).join('\\n');
+
+        const element = findBestElementForText(line.trim());
+        const coords = element ? getElementCoords(element) : null;
+        const selector = element ? getCssSelector(element) : null;
+        const isVisible = element ? isElementVisible(element) : false;
+
+        results.push({
+          type: 'text_match',
+          matchedLine: line.trim(),
+          lineIndex: index + 1,
+          context,
+          selector,
+          coordinates: coords,
+          visible: isVisible,
+          tagName: element ? element.tagName.toLowerCase() : null
+        });
+      });
+
+      return results;
+    }
+
+    function findSelectorMatches(sel) {
+      const results = [];
+      try {
+        let elements = [];
+        if (sel.startsWith('/') || sel.startsWith('(') || sel.startsWith('./')) {
+          const xpathResult = document.evaluate(sel, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          for (let i = 0; i < xpathResult.snapshotLength; i++) {
+            elements.push(xpathResult.snapshotItem(i));
+          }
+        } else {
+          elements = Array.from(document.querySelectorAll(sel));
+        }
+
+        elements.forEach(el => {
+          if (el && el.nodeType === Node.ELEMENT_NODE) {
+            const coords = getElementCoords(el);
+            results.push({
+              type: 'selector_match',
+              tagName: el.tagName.toLowerCase(),
+              outerHTML: el.outerHTML.slice(0, 300),
+              innerText: (el.innerText || "").slice(0, 300),
+              selector: getCssSelector(el),
+              coordinates: coords,
+              visible: isElementVisible(el)
+            });
+          }
+        });
+      } catch (err) {
+        results.push({
+          type: 'error',
+          message: 'Invalid CSS or XPath selector: ' + err.message
+        });
+      }
+      return results;
+    }
+
+    if (!document || !document.body) {
+      return [];
+    }
+
+    let textResults = [];
+    let selectorResults = [];
+
+    const isXPath = query.startsWith('/') || query.startsWith('(') || query.startsWith('./');
+    const looksLikeSelector = isXPath || query.startsWith('.') || query.startsWith('#') || query.includes('[') || query.includes('>') || query.includes(' ');
+
+    if (type === 'selector' || (type === 'auto' && looksLikeSelector)) {
+      selectorResults = findSelectorMatches(query);
+    }
+
+    if (type === 'text' || type === 'regex' || (type === 'auto' && selectorResults.length === 0)) {
+      const isRegex = (type === 'regex');
+      textResults = findTextMatches(query, isRegex, caseSensitive, contextLines);
+    }
+
+    const allResults = [...selectorResults, ...textResults].slice(0, 50);
+    return allResults;
+  `;
+
+  try {
+    const runResult = await deps.tabs.executeJavaScript(tabId, jsPayload)
+    if (!runResult.success) {
+      return { ok: false, text: `grep_page: failed to execute hybrid search in page: ${runResult.error}` }
+    }
+
+    const matches = runResult.result as any[]
+    if (!Array.isArray(matches) || matches.length === 0) {
+      return { ok: true, text: `No matches found for query "${query}" on the page.` }
+    }
+
+    let output = `Hybrid Grep/CDP search completed on page. Found ${matches.length} match(es):\n\n`
+    matches.forEach((m, idx) => {
+      output += `--- Match #${idx + 1} (${m.type}) ---\n`
+      if (m.type === 'error') {
+        output += `Error: ${m.message}\n`
+      } else if (m.type === 'selector_match') {
+        output += `Tag: <${m.tagName}>\n`
+        output += `CSS Selector: ${m.selector}\n`
+        output += `Visible: ${m.visible}\n`
+        if (m.coordinates) {
+          output += `Coordinates (center x,y): (${m.coordinates.x}, ${m.coordinates.y}) (width: ${m.coordinates.width}, height: ${m.coordinates.height})\n`
+        }
+        if (m.innerText.trim()) {
+          output += `Text Content: "${m.innerText.trim()}"\n`
+        }
+        output += `HTML snippet: ${m.outerHTML}\n`
+      } else if (m.type === 'text_match') {
+        output += `Matched Line (Line ${m.lineIndex}): "${m.matchedLine}"\n`
+        if (m.tagName) {
+          output += `Associated Tag: <${m.tagName}>\n`
+        }
+        if (m.selector) {
+          output += `Associated CSS Selector: ${m.selector}\n`
+        }
+        if (m.coordinates) {
+          output += `Coordinates (center x,y): (${m.coordinates.x}, ${m.coordinates.y})\n`
+        }
+        output += `Context (grep -C ${contextLines}):\n\`\`\`\n${m.context}\n\`\`\`\n`
+      }
+      output += `\n`
+    })
+
+    return { ok: true, text: output.trim() }
+  } catch (err: any) {
+    return { ok: false, text: `grep_page error: ${err.message}` }
+  }
+}

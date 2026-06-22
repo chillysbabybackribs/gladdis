@@ -24,7 +24,7 @@ import {
   runSearchFiles,
   runWriteFile
 } from './tools/fsTools'
-import { runReadPage, runScreenshot, runScreenshotApp } from './tools/perceiveTools'
+import { runGrepPage, runReadPage, runScreenshot, runScreenshotApp } from './tools/perceiveTools'
 import {
   runReadSpans,
   runRepoOverview,
@@ -219,6 +219,8 @@ export class BrowserTools {
         // ── Perceive ────────────────────────────────────────────────────────
         case 'read_page':
           return runReadPage(this.perceiveDeps(), args, ctx.tabId)
+        case 'grep_page':
+          return runGrepPage(this.perceiveDeps(), args, ctx.tabId)
         case 'screenshot':
           return runScreenshot(this.perceiveDeps(), args, ctx.tabId)
         case 'screenshot_app':

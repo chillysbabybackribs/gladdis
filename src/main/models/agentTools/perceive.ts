@@ -34,6 +34,41 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
         }
       }
     }
+  },
+  {
+    name: 'grep_page',
+    description:
+      'Perform a hybrid grep and element search on the full page currently open in the browser tab. ' +
+      'This is extremely powerful for finding specific text, keywords, selectors, CSS patterns, or interactive ' +
+      'elements (e.g., APIs, prices, keys, links, buttons, input fields) across the entire document without hitting ' +
+      'token truncation limits.\n' +
+      'It searches the live DOM, returns matching text lines with preceding/succeeding context lines (like grep -C), ' +
+      'CSS paths, and pixel coordinates of matched elements so you can instantly interact with them (e.g., click_xy, fill_field, type_text).\n' +
+      'Supports auto-detection: if query looks like a CSS selector (e.g., starts with "." or "#", or has "[") or XPath, ' +
+      'it queries by selector, otherwise it performs a powerful full-text regex grep search.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'The text query or regular expression or CSS selector/XPath pattern to search/grep for.'
+        },
+        type: {
+          type: 'string',
+          enum: ['text', 'regex', 'selector', 'auto'],
+          description: "The type of search: 'text' for literal string, 'regex' for regular expression, 'selector' for CSS/XPath. 'auto' (default) automatically detects and combines results."
+        },
+        contextLines: {
+          type: 'number',
+          description: 'Number of context lines to return around any text matches (like grep -C). Defaults to 2.'
+        },
+        caseSensitive: {
+          type: 'boolean',
+          description: 'Whether text/regex match should be case-sensitive. Defaults to false.'
+        }
+      },
+      required: ['query']
+    }
   }
 ]
 

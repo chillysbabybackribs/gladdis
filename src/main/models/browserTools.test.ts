@@ -664,4 +664,45 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('#1 user:')
     expect(result.text).toContain('second exact turn')
   })
+
+  it('routes grep_page through the capability broker and returns hybrid results', async () => {
+    const executeJavaScript = vi.fn(async () => ({
+      success: true,
+      result: [
+        {
+          type: 'selector_match',
+          tagName: 'button',
+          selector: 'div#root > button.btn-pricing',
+          visible: true,
+          coordinates: { x: 150, y: 350, width: 100, height: 40 },
+          outerHTML: '<button class="btn-pricing">Upgrade Now</button>',
+          innerText: 'Upgrade Now'
+        },
+        {
+          type: 'text_match',
+          matchedLine: 'Save 50% on annual billing.',
+          lineIndex: 42,
+          context: 'Special winter promo!\nSave 50% on annual billing.\nOffer ends soon.',
+          selector: 'div#root > p.promo-text',
+          coordinates: { x: 150, y: 400 },
+          visible: true,
+          tagName: 'p'
+        }
+      ]
+    }))
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'grep_page',
+      { query: 'Upgrade', type: 'auto' },
+      { tabId: 'tab-1' }
+    )
+
+    expect(executeJavaScript).toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Hybrid Grep/CDP search completed on page')
+    expect(result.text).toContain('div#root > button.btn-pricing')
+    expect(result.text).toContain('Upgrade Now')
+    expect(result.text).toContain('Save 50% on annual billing.')
+  })
 })

@@ -214,10 +214,10 @@ export class TabManager {
     this.onChange()
   }
 
-  navigate(id: string, url: string): void {
+  navigate(id: string, url: string, opts?: { wait?: boolean }): void {
     const tab = this.tabs.get(id)
     if (!tab) return
-    navigateTo(tab.view.webContents, url)
+    navigateTo(tab.view.webContents, url, opts)
   }
 
   waitForNavigationSettled(id: string, timeoutMs = 10_000): Promise<void> {

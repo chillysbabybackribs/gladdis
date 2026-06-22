@@ -68,17 +68,17 @@ const BROWSER_GUIDANCE =
   '  • search → unified web search: hidden SERP index, then the best hit opens in the ' +
   'visible tab. Returns a compact query-scored evidence card (not a full page dump).\n' +
   '  • fetch_page → deeper read of a specific URL when search evidence is not enough.\n' +
-  '  • read_page → structured digest of the current page (content, headings, and an ' +
-  'actions table with (x,y) coords + selectors). Get coordinates here before click_xy.\n' +
-  '  • grep_page → fast, highly selective regex or CSS selector search on the full page. Returns matching elements, selectors, coordinates, and lines of context (grep -C). Use this instead of read_page for large pages or precise targeting.\n' +
+  '  • grep_page → PRIMARY tool for element, text, and coordinate discovery. Performs fast, highly selective regex or CSS selector search on the full page. Returns matching elements, selectors, coordinates, and lines of context (grep -C). ALWAYS prefer grep_page over read_page for targeting or clicking elements to avoid token-bloating and truncation.\n' +
+  '  • read_page → SECONDARY fallback tool for broad page layout and high-level orientation only. Returns a structured digest of the current page and actions table. Avoid using read_page for simple coordinate/selector lookups as it is extremely heavy.\n' +
   '  • navigate / click_xy / type_text / press_key / execute_in_browser / cdp_command → ' +
-  'drive the page. These return only short acks; call read_page to see the result.\n' +
+  'drive the page. These return only short acks; call grep_page or read_page to see the result. Use execute_in_browser strictly for mutations/scripts, NOT for coordinate discovery.\n' +
   '  • browse_task → hand off a multi-step goal (form fills, logins, multi-page flows) to ' +
   'the deterministic pipeline, which drives and verifies it and returns a synthesised answer.\n' +
-  '  • screenshot / screenshot_app → PNG of the tab or the whole app; use when a visual is ' +
-  'genuinely needed (verify a render, inspect layout).\n\n' +
+  '  • screenshot / screenshot_app → PNG of the tab or the whole app; use strictly when visual layout verification is ' +
+  'genuinely needed, NOT for finding text or coordinates.\n\n' +
 
-  'Call read_page before acting on a page, so you act on the real current state. Drive first, then ' +
+  'Call grep_page or read_page before acting on a page, so you act on the real current state. Prefer ' +
+  'grep_page to find precise coordinates and avoid massive token costs. Drive first, then ' +
   'read in a separate step — do not act and read in one thought. When you already know (or can infer) ' +
   'the URL, navigate or fetch_page directly; reach for search when the URL is unknown or the user ' +
   'asked for search results. ' +

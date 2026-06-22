@@ -25,6 +25,7 @@ vi.mock('./hiddenSearch', async (importOriginal) => {
 })
 
 import { ChatService, extractLocalPreviewUrl, hasActivePagePreamble, isUserFacingLocalPreviewRequest, stripActivePagePreamble, stubOldGoogleResults, stubOldResults } from './ChatService'
+import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
 import { shouldAttachActivePageContext, shouldContinueActivePageContext, shouldUseBrowserTools } from '../../../shared/types'
 import { shouldUseWorkspaceContext } from '../../../shared/types'
 import { AGENT_TOOLS, selectAgentToolProfile, resolveTurnTools } from './agentTools'
@@ -746,7 +747,7 @@ describe('ChatService provider hardening', () => {
       status: vi.fn(),
       listModels: vi.fn()
     }
-    vi.spyOn(service as any, 'openCodexLocalPreviewIfRequested').mockResolvedValue(undefined)
+    // localPreviewBridge runs via the browser pipeline; tests don't exercise it here.
     vi.spyOn(service as any, 'workspaceSystemBlock').mockReturnValue('Working folder: /tmp/selected-project')
     vi.spyOn(service as any, 'codexRepoOverviewBlock').mockResolvedValue(null)
 
@@ -805,7 +806,7 @@ describe('ChatService provider hardening', () => {
   it('does not attach or read the active page for ordinary chat', async () => {
     const { service, tools } = makeService()
     const agent = vi.spyOn(service as any, 'agentAnthropic').mockResolvedValue(undefined)
-    const stream = vi.spyOn(service as any, 'streamAnthropic').mockResolvedValue(undefined)
+    const stream = vi.spyOn(service as any, 'streamPlain').mockResolvedValue(undefined)
 
     await service.send({
       requestId: 'req-joke',
@@ -818,7 +819,7 @@ describe('ChatService provider hardening', () => {
 
     expect(agent).not.toHaveBeenCalled()
     expect(stream).toHaveBeenCalledOnce()
-    const streamedReq = stream.mock.calls[0][0] as any
+    const streamedReq = stream.mock.calls[0][1] as any
     expect(streamedReq.messages.at(-1)?.content).toBe('tell me a joke')
     expect(tools.run).not.toHaveBeenCalled()
   })
@@ -826,7 +827,7 @@ describe('ChatService provider hardening', () => {
   it('keeps browser context only when the user explicitly refers to the page', async () => {
     const { service } = makeService()
     const agent = vi.spyOn(service as any, 'agentAnthropic').mockResolvedValue(undefined)
-    const stream = vi.spyOn(service as any, 'streamAnthropic').mockResolvedValue(undefined)
+    const stream = vi.spyOn(service as any, 'streamPlain').mockResolvedValue(undefined)
 
     await service.send({
       requestId: 'req-page',
@@ -933,18 +934,21 @@ describe('ChatService provider hardening', () => {
 
   it('opens Codex-created local previews in the active browser tab and captures a confirmation screenshot', async () => {
     vi.useFakeTimers()
-    const { service, emit, tools } = makeService()
+    const { emit, tools } = makeService()
 
-    const run = (service as any).openCodexLocalPreviewIfRequested(
-      {
+    const run = openCodexLocalPreviewIfRequested({
+      req: {
         requestId: 'req-preview',
         modelId: 'gpt-5.5',
         tabId: 'tab-1',
         messages: []
-      },
-      'create a test app and launch it in a dev server so we can look at it in the browser',
-      'Done. Open http://127.0.0.1:5174/ in the browser.'
-    )
+      } as any,
+      userText:
+        'create a test app and launch it in a dev server so we can look at it in the browser',
+      output: 'Done. Open http://127.0.0.1:5174/ in the browser.',
+      tools: tools as any,
+      emit
+    })
     await vi.advanceTimersByTimeAsync(800)
     await run
     vi.useRealTimers()
@@ -1114,7 +1118,8 @@ describe('ChatService provider hardening', () => {
       }
     })
 
-    await (service as any).streamGoogle(
+    await (service as any).streamPlain(
+      'google',
       {
         requestId: 'req-2',
         modelId: 'gemini-2.5-pro',

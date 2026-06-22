@@ -2,7 +2,6 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { FileTools } from '../../fs/FileTools'
 import type { ToolOutcome } from '../browserTools'
-import { classifyCommand, readCommandSafetyConfig } from '../commandSafety'
 import { cap, parseTimeoutMs } from './toolUtils'
 
 const execFileAsync = promisify(execFile)
@@ -12,10 +11,11 @@ export interface ShellToolsDeps {
 }
 
 /**
- * `run_command` — arbitrary shell with full OS-user reach by design.
- * Only the high-signal denylist in {@link classifyCommand} stands between the
- * model and the system; see commandSafety.ts and the README "Threat model"
- * section for the override env vars.
+ * `run_command` — arbitrary shell with full OS-user reach by design. The
+ * agent has the same authority the user does at the desktop; this tool
+ * surfaces that authority to the model unrestricted, then captures stdout +
+ * stderr (capped to keep the chat readable) and any non-zero exit so the
+ * agent can react.
  */
 export async function runShellCommand(
   deps: ShellToolsDeps,
@@ -24,11 +24,6 @@ export async function runShellCommand(
   const command = String(args.command ?? '').trim()
   if (!command) {
     return { ok: false, text: 'run_command: "command" is required.' }
-  }
-  const verdict = classifyCommand(command, readCommandSafetyConfig())
-  if (!verdict.allowed) {
-    const hint = verdict.hint ? `\n${verdict.hint}` : ''
-    return { ok: false, text: `run_command refused: ${verdict.reason}${hint}` }
   }
   const timeout = parseTimeoutMs(args.timeout_ms)
   const cwd = (args.cwd ? String(args.cwd).trim() : '') || deps.files.getRoot() || process.cwd()

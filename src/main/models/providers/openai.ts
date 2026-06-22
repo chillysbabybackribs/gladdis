@@ -71,6 +71,27 @@ type OpenAiReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh'
 
 const CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions'
 
+/** Internal gladdis ids may use hyphens where OpenAI model names use dots. */
+const OPENAI_MODEL_ALIASES: Record<string, string> = {
+  'gpt-4-1-mini': 'gpt-4.1-mini'
+}
+
+function openAiApiModelId(modelId: string): string {
+  const cleanId = modelId.replace(/^openai-/, '')
+  return OPENAI_MODEL_ALIASES[cleanId] ?? cleanId
+}
+
+/** Max completion tokens accepted by /v1/chat/completions for each model family. */
+function openAiMaxCompletionTokens(apiModelId: string): number {
+  if (apiModelId.startsWith('gpt-5.5') || apiModelId.startsWith('gpt-5.4')) {
+    return 32_000
+  }
+  if (apiModelId.startsWith('gpt-4.1')) {
+    return 32_768
+  }
+  return 16_384
+}
+
 function openAiHeaders(apiKey: string, _conversationId?: string | null): HeadersInit {
   return {
     'Content-Type': 'application/json',
@@ -79,8 +100,8 @@ function openAiHeaders(apiKey: string, _conversationId?: string | null): Headers
 }
 
 function openAiReasoningEffort(modelId: string, stage: string): OpenAiReasoningEffort | undefined {
-  const cleanId = modelId.replace('openai-', '')
-  if (!cleanId.startsWith('gpt-5.5') && !cleanId.startsWith('gpt-5.4')) {
+  const apiModelId = openAiApiModelId(modelId)
+  if (!apiModelId.startsWith('gpt-5.5') && !apiModelId.startsWith('gpt-5.4')) {
     return undefined
   }
   if (/\b(plan|planner|replan|debug|review|refactor|code|coding)\b/i.test(stage)) {
@@ -134,24 +155,40 @@ function openAiBody(args: {
   tools?: any[]
   stage: string
 }): Record<string, any> {
-  const cleanId = args.modelId.replace('openai-', '')
+  const apiModelId = openAiApiModelId(args.modelId)
   const body: Record<string, any> = {
-    model: cleanId,
+    model: apiModelId,
     messages: args.messages
   }
 
-  const isReasoning = cleanId.startsWith('gpt-5.5') || cleanId.startsWith('gpt-5.4')
+  const isReasoning = apiModelId.startsWith('gpt-5.5') || apiModelId.startsWith('gpt-5.4')
+  // Small GPT-5.x variants (-mini / -nano) reject `reasoning_effort` on the
+  // /v1/chat/completions endpoint when function tools are also present
+  // ("Function tools with reasoning_effort are not supported … Please use
+  // /v1/responses instead."). Omit the knob in that combo; the larger
+  // reasoning models still accept it.
+  const isSmallReasoning = /^gpt-5\.[45]-(mini|nano)\b/.test(apiModelId)
+  const hasTools = !!(args.tools && args.tools.length)
+  const reasoningEffortBlocked = isSmallReasoning && hasTools
+  const maxTokens = args.maxTokens
+    ? Math.min(args.maxTokens, openAiMaxCompletionTokens(apiModelId))
+    : undefined
   if (isReasoning) {
-    if (args.maxTokens) {
-      body.max_completion_tokens = args.maxTokens
+    if (maxTokens) {
+      body.max_completion_tokens = maxTokens
     }
-    const effort = openAiReasoningEffort(cleanId, args.stage)
-    if (effort) {
-      body.reasoning = { effort }
+    if (!reasoningEffortBlocked) {
+      const effort = openAiReasoningEffort(apiModelId, args.stage)
+      if (effort) {
+        // Chat Completions takes a top-level string (`reasoning_effort: "low"`).
+        // The nested `{ reasoning: { effort } }` shape is the Responses API; the
+        // /v1/chat/completions endpoint rejects it as `unknown_parameter`.
+        body.reasoning_effort = effort
+      }
     }
   } else {
-    if (args.maxTokens) {
-      body.max_tokens = args.maxTokens
+    if (maxTokens) {
+      body.max_tokens = maxTokens
     }
     if (args.temp !== undefined) {
       body.temperature = args.temp
@@ -164,6 +201,9 @@ function openAiBody(args: {
 
   return body
 }
+
+/** Test-only surface — do not import outside of *.test.ts */
+export const __testInternals = { openAiBody, openAiApiModelId, openAiMaxCompletionTokens }
 
 /* ----------------------------- Exported endpoints ----------------------------- */
 

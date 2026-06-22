@@ -35,7 +35,7 @@ describe('CodexClient thread lifecycle', () => {
   it('starts and stores a provider thread for a new saved chat', async () => {
     const { client, requests, persisted } = makeClient()
 
-    const result = await (client as any).ensureThread({
+    const result = await (client as any).threadStore.ensureThread({
       conversationId: 'conv-1',
       modelId: 'gpt-5.5'
     })
@@ -48,7 +48,7 @@ describe('CodexClient thread lifecycle', () => {
   it('resumes the provider thread for the same saved chat after restart', async () => {
     const { client, requests, persisted } = makeClient('thread-saved')
 
-    const result = await (client as any).ensureThread({
+    const result = await (client as any).threadStore.ensureThread({
       conversationId: 'conv-1',
       modelId: 'gpt-5.5'
     })

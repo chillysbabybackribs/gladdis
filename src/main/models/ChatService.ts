@@ -21,11 +21,10 @@ import { ValidationService } from './capabilities/ValidationService'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
 import type { ModelCallLedger } from './ModelCallLedger'
 import { ASK_SYSTEM, CODEX_SYSTEM, buildAgentSystem } from './prompts'
-import {
-  extractLocalPreviewUrl,
-  isUserFacingLocalPreviewRequest,
-  stripActivePagePreamble
-} from './routing'
+import { stripActivePagePreamble } from './routing'
+import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
+import { generateChatTitle } from './chatTitleService'
+import { runProviderAgenticTurn } from './agentLoopRunner'
 import {
   buildContractTrace,
   resolveTurnContextPolicy,
@@ -38,27 +37,19 @@ import {
   completeAnthropic,
   runAnthropicToolLoop,
   streamAnthropicPlain,
-  stubOldResults,
-  titleAnthropic
+  stubOldResults
 } from './providers/anthropic'
 import {
   completeGoogle,
   runGoogleToolLoop,
   streamGooglePlain,
-  stubOldGoogleResults,
-  titleGoogle
+  stubOldGoogleResults
 } from './providers/google'
-import {
-  completeGrok,
-  runGrokToolLoop,
-  streamGrokPlain,
-  titleGrok
-} from './providers/grok'
+import { completeGrok, runGrokToolLoop, streamGrokPlain } from './providers/grok'
 import {
   completeOpenAi,
   runOpenAiToolLoop,
-  streamOpenAiPlain,
-  titleOpenAi
+  streamOpenAiPlain
 } from './providers/openai'
 export {
   extractLocalPreviewUrl,
@@ -230,76 +221,26 @@ export class ChatService {
   }
 
   /**
-   * Produce a short (≤6 word) conversation title from its messages via one
-   * cheap, non-streaming call. Returns null on any failure so the caller can
-   * fall back to the first-message title. Tool chips are ignored — only the
-   * user/assistant text matters for a title.
+   * Produce a short conversation title from its messages via one cheap,
+   * non-streaming call. Delegates to chatTitleService; returns null on any
+   * failure so the caller can fall back to the first-message title.
    */
-  async generateTitle(modelId: string, messages: { role: string; text: string }[]): Promise<string | null> {
+  async generateTitle(
+    modelId: string,
+    messages: { role: string; text: string }[]
+  ): Promise<string | null> {
     const model = this.model(modelId)
     if (!model) return null
-    // A couple of turns is plenty of signal and keeps the call tiny/cheap.
-    const transcript = messages
-      .slice(0, 4)
-      .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.text.slice(0, 500)}`)
-      .join('\n')
-    const instruction =
-      'Write a concise title (3-6 words, Title Case, no quotes, no trailing punctuation) ' +
-      'for this conversation. Reply with the title only.\n\n' +
-      transcript
-    try {
-      // Codex titles via a cheap provider call aren't available; fall back to
-      // the first-message title (return null) for codex-only sessions.
-      if (model.provider === 'codex') return null
-      const raw =
-        model.provider === 'anthropic'
-          ? await this.titleAnthropic(model.id, instruction)
-          : model.provider === 'openai'
-            ? await this.titleOpenAi(model.id, instruction)
-            : model.provider === 'grok'
-              ? await this.titleGrok(model.id, instruction)
-              : await this.titleGoogle(model.id, instruction)
-      const title = raw.trim().replace(/^["'\s]+|["'\s.]+$/g, '').replace(/\s+/g, ' ')
-      return title || null
-    } catch (e) {
-      console.warn('[chats] title generation failed:', e)
-      return null
-    }
-  }
-
-  private async titleAnthropic(modelId: string, prompt: string): Promise<string> {
-    return titleAnthropic({
-      client: this.anthropic(),
-      audit: this.audit,
-      modelId,
-      prompt
-    })
-  }
-
-  private async titleGoogle(modelId: string, prompt: string): Promise<string> {
-    return titleGoogle({
-      ai: this.google(),
-      audit: this.audit,
-      modelId,
-      prompt
-    })
-  }
-
-  private async titleOpenAi(modelId: string, prompt: string): Promise<string> {
-    return titleOpenAi({
-      apiKey: this.openAiKey(),
-      audit: this.audit,
-      modelId,
-      prompt
-    })
-  }
-
-  private async titleGrok(modelId: string, prompt: string): Promise<string> {
-    return titleGrok({
-      apiKey: this.grokKey(),
-      audit: this.audit,
-      modelId,
-      prompt
+    return generateChatTitle({
+      model,
+      messages,
+      deps: {
+        audit: this.audit,
+        anthropic: () => this.anthropic(),
+        google: () => this.google(),
+        openAiKey: () => this.openAiKey(),
+        grokKey: () => this.grokKey()
+      }
     })
   }
 
@@ -439,7 +380,13 @@ export class ChatService {
             codexSystem,
             true
           )
-          await this.openCodexLocalPreviewIfRequested(req, actionableText, output)
+          await openCodexLocalPreviewIfRequested({
+            req,
+            userText: actionableText,
+            output,
+            tools: this.tools,
+            emit: this.emit
+          })
           supervisor.complete('Codex task loop completed.')
           call.finish({ output })
         } catch (err) {
@@ -451,19 +398,19 @@ export class ChatService {
       } else if (model.provider === 'anthropic') {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         if (agentic) await this.agentAnthropic(req, model.id, controller.signal, browserLlm)
-        else await this.streamAnthropic(req, model.id, controller.signal)
+        else await this.streamPlain('anthropic', req, model.id, controller.signal)
       } else if (model.provider === 'openai') {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         if (agentic) await this.agentOpenAi(req, model.id, controller.signal, browserLlm)
-        else await this.streamOpenAi(req, model.id, controller.signal)
+        else await this.streamPlain('openai', req, model.id, controller.signal)
       } else if (model.provider === 'grok') {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         if (agentic) await this.agentGrok(req, model.id, controller.signal, browserLlm)
-        else await this.streamGrok(req, model.id, controller.signal)
+        else await this.streamPlain('grok', req, model.id, controller.signal)
       } else {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         if (agentic) await this.agentGoogle(req, model.id, controller.signal, browserLlm)
-        else await this.streamGoogle(req, model.id, controller.signal)
+        else await this.streamPlain('google', req, model.id, controller.signal)
       }
       this.emit({ requestId: req.requestId, type: 'done' })
     } catch (err) {
@@ -499,142 +446,32 @@ export class ChatService {
     }
   }
 
-  /**
-   * Mixed Codex tasks often need filesystem/shell work first, then a
-   * user-facing browser result. When the user's request explicitly asks to view
-   * a local preview and Codex reports a localhost URL, make the final handoff
-   * visible by navigating Gladdis's active tab.
-   */
-  private async openCodexLocalPreviewIfRequested(req: ChatRequest, userText: string, output: string): Promise<void> {
-    if (!isUserFacingLocalPreviewRequest(userText)) return
-    const url = extractLocalPreviewUrl(output)
-    if (!url) return
-
-    const tabId = this.tools.tabs.liveTabId(req.tabId)
-    const callId = `codex-local-preview-${Date.now()}`
-    this.emit({
-      requestId: req.requestId,
-      type: 'tool_call',
-      tool: 'navigate',
-      args: { url, owner: 'gladdis', reason: 'codex-local-preview' },
-      callId
-    })
-    this.tools.tabs.navigate(tabId, url)
-    this.emit({
-      requestId: req.requestId,
-      type: 'tool_result',
-      callId,
-      ok: true,
-      preview: `Opened ${url} in the browser.`
-    })
-    this.emit({
-      requestId: req.requestId,
-      type: 'delta',
-      text: `\nOpened the local preview in the browser: ${url}\n`
-    })
-    await this.captureLocalPreviewScreenshot(req.requestId, tabId, url)
-  }
-
-  private async captureLocalPreviewScreenshot(requestId: string, tabId: string, url: string): Promise<void> {
-    const callId = `codex-local-preview-screenshot-${Date.now()}`
-    this.emit({
-      requestId,
-      type: 'tool_call',
-      tool: 'screenshot_confirmation',
-      args: { url, fullPage: false, reason: 'local-preview-confirmation' },
-      callId
-    })
-    try {
-      // Give the WebContentsView a beat to commit the navigation and paint.
-      await sleep(800)
-      const imageBase64 = await this.tools.tabs.capturePagePng(tabId, false)
-      const bytes = Math.round((imageBase64.length * 3) / 4)
-      const kb = Math.max(1, Math.round(bytes / 1024))
-      this.emit({
-        requestId,
-        type: 'tool_result',
-        callId,
-        ok: true,
-        preview: `Captured visible screenshot confirmation for ${url} (${kb} KB).`
-      })
-      this.emit({
-        requestId,
-        type: 'delta',
-        text: `Screenshot confirmation captured for the local preview.\n`
-      })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      this.emit({
-        requestId,
-        type: 'tool_result',
-        callId,
-        ok: false,
-        preview: `Screenshot confirmation failed: ${message}`
-      })
-      this.emit({
-        requestId,
-        type: 'delta',
-        text: `Screenshot confirmation failed: ${message}\n`
-      })
-    }
-  }
-
   /* ============================ ASK MODE ============================ */
 
-  private async streamAnthropic(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
-    this.logSystemPrompt('anthropic', 'plain', ASK_SYSTEM)
-    return streamAnthropicPlain({
-      client: this.anthropic(),
-      audit: this.audit,
-      emit: this.emit,
-      req,
-      modelId,
-      signal,
-      system: ASK_SYSTEM,
-      maxTokens: ANTHROPIC_MAX_TOKENS
-    })
-  }
-
-  private async streamGoogle(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
-    this.logSystemPrompt('google', 'plain', ASK_SYSTEM)
-    return streamGooglePlain({
-      ai: this.google(),
-      audit: this.audit,
-      emit: this.emit,
-      req,
-      modelId,
-      signal,
-      system: ASK_SYSTEM,
-      maxOutputTokens: MAX_OUTPUT_TOKENS
-    })
-  }
-
-  private async streamOpenAi(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
-    this.logSystemPrompt('openai', 'plain', ASK_SYSTEM)
-    return streamOpenAiPlain({
-      apiKey: this.openAiKey(),
-      audit: this.audit,
-      emit: this.emit,
-      req,
-      modelId,
-      signal,
-      system: ASK_SYSTEM,
-      maxTokens: MAX_OUTPUT_TOKENS
-    })
-  }
-
-  private async streamGrok(req: ChatRequest, modelId: string, signal: AbortSignal): Promise<void> {
-    this.logSystemPrompt('grok', 'plain', ASK_SYSTEM)
-    return streamGrokPlain({
-      apiKey: this.grokKey(),
-      audit: this.audit,
-      emit: this.emit,
-      req,
-      modelId,
-      signal,
-      system: ASK_SYSTEM,
-      maxTokens: MAX_OUTPUT_TOKENS
-    })
+  /**
+   * Dispatch a non-agentic ASK-mode turn to the right provider stream. All
+   * four providers accept the same shape modulo client-vs-apiKey + token-cap
+   * naming, so we inline the dispatch here instead of carrying four near-
+   * identical wrappers.
+   */
+  private async streamPlain(
+    provider: 'anthropic' | 'google' | 'openai' | 'grok',
+    req: ChatRequest,
+    modelId: string,
+    signal: AbortSignal
+  ): Promise<void> {
+    this.logSystemPrompt(provider, 'plain', ASK_SYSTEM)
+    const common = { audit: this.audit, emit: this.emit, req, modelId, signal, system: ASK_SYSTEM }
+    switch (provider) {
+      case 'anthropic':
+        return streamAnthropicPlain({ ...common, client: this.anthropic(), maxTokens: ANTHROPIC_MAX_TOKENS })
+      case 'google':
+        return streamGooglePlain({ ...common, ai: this.google(), maxOutputTokens: MAX_OUTPUT_TOKENS })
+      case 'openai':
+        return streamOpenAiPlain({ ...common, apiKey: this.openAiKey(), maxTokens: MAX_OUTPUT_TOKENS })
+      case 'grok':
+        return streamGrokPlain({ ...common, apiKey: this.grokKey(), maxTokens: MAX_OUTPUT_TOKENS })
+    }
   }
 
   /* ============================ AGENT MODE (Anthropic) ============================ */
@@ -648,35 +485,32 @@ export class ChatService {
     const profile = this.agentToolProfile(req)
     const agentSystem = await buildAgentSystem(profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
-    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
-    supervisor.start()
-    this.logSystemPrompt('anthropic', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
-    try {
-      await runAnthropicToolLoop({
-        client: this.anthropic(),
-        audit: this.audit,
-        emit: this.emit,
-        req,
-        modelId,
-        signal,
-        browserLlm,
-        tools: this.tools,
-        ctx: this.toolContext(req, browserLlm),
-        toolDefs: profile.tools,
-        agentSystem,
-        workspaceBlock,
-        maxTokens: ANTHROPIC_MAX_TOKENS,
-        keepResults: VERBATIM_TOOL_RESULTS,
-        supervisor: {
-          iterationStarted: supervisor.iterationStarted,
-          transition: supervisor.transition
-        }
-      })
-      supervisor.complete()
-    } catch (err) {
-      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
-      throw err
-    }
+    await runProviderAgenticTurn({
+      provider: 'anthropic',
+      agentSystem,
+      workspaceBlock,
+      signal,
+      supervisor: createTurnSupervisor((event) => this.emitLoopState(req, event)),
+      logSystemPrompt: (provider, mode, system) => this.logSystemPrompt(provider, mode, system),
+      loop: (supervisor) =>
+        runAnthropicToolLoop({
+          client: this.anthropic(),
+          audit: this.audit,
+          emit: this.emit,
+          req,
+          modelId,
+          signal,
+          browserLlm,
+          tools: this.tools,
+          ctx: this.toolContext(req, browserLlm),
+          toolDefs: profile.tools,
+          agentSystem,
+          workspaceBlock,
+          maxTokens: ANTHROPIC_MAX_TOKENS,
+          keepResults: VERBATIM_TOOL_RESULTS,
+          supervisor
+        })
+    })
   }
 
   /**
@@ -804,35 +638,32 @@ export class ChatService {
     const profile = this.agentToolProfile(req)
     const agentSystem = await buildAgentSystem(profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
-    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
-    supervisor.start()
-    this.logSystemPrompt('google', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
-    try {
-      await runGoogleToolLoop({
-        ai: this.google(),
-        audit: this.audit,
-        emit: this.emit,
-        req,
-        modelId,
-        signal,
-        browserLlm,
-        tools: this.tools,
-        ctx: this.toolContext(req, browserLlm),
-        toolDefs: profile.tools,
-        agentSystem,
-        workspaceBlock,
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-        keepResults: VERBATIM_TOOL_RESULTS,
-        supervisor: {
-          iterationStarted: supervisor.iterationStarted,
-          transition: supervisor.transition
-        }
-      })
-      supervisor.complete()
-    } catch (err) {
-      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
-      throw err
-    }
+    await runProviderAgenticTurn({
+      provider: 'google',
+      agentSystem,
+      workspaceBlock,
+      signal,
+      supervisor: createTurnSupervisor((event) => this.emitLoopState(req, event)),
+      logSystemPrompt: (provider, mode, system) => this.logSystemPrompt(provider, mode, system),
+      loop: (supervisor) =>
+        runGoogleToolLoop({
+          ai: this.google(),
+          audit: this.audit,
+          emit: this.emit,
+          req,
+          modelId,
+          signal,
+          browserLlm,
+          tools: this.tools,
+          ctx: this.toolContext(req, browserLlm),
+          toolDefs: profile.tools,
+          agentSystem,
+          workspaceBlock,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          keepResults: VERBATIM_TOOL_RESULTS,
+          supervisor
+        })
+    })
   }
 
   /* ============================ AGENT MODE (OpenAI) ============================ */
@@ -846,35 +677,32 @@ export class ChatService {
     const profile = this.agentToolProfile(req)
     const agentSystem = await buildAgentSystem(profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
-    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
-    supervisor.start()
-    this.logSystemPrompt('openai', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
-    try {
-      await runOpenAiToolLoop({
-        apiKey: this.openAiKey(),
-        audit: this.audit,
-        emit: this.emit,
-        req,
-        modelId,
-        signal,
-        browserLlm,
-        tools: this.tools,
-        ctx: this.toolContext(req, browserLlm),
-        toolDefs: profile.tools,
-        agentSystem,
-        workspaceBlock,
-        maxTokens: MAX_OUTPUT_TOKENS,
-        keepResults: VERBATIM_TOOL_RESULTS,
-        supervisor: {
-          iterationStarted: supervisor.iterationStarted,
-          transition: supervisor.transition
-        }
-      })
-      supervisor.complete()
-    } catch (err) {
-      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
-      throw err
-    }
+    await runProviderAgenticTurn({
+      provider: 'openai',
+      agentSystem,
+      workspaceBlock,
+      signal,
+      supervisor: createTurnSupervisor((event) => this.emitLoopState(req, event)),
+      logSystemPrompt: (provider, mode, system) => this.logSystemPrompt(provider, mode, system),
+      loop: (supervisor) =>
+        runOpenAiToolLoop({
+          apiKey: this.openAiKey(),
+          audit: this.audit,
+          emit: this.emit,
+          req,
+          modelId,
+          signal,
+          browserLlm,
+          tools: this.tools,
+          ctx: this.toolContext(req, browserLlm),
+          toolDefs: profile.tools,
+          agentSystem,
+          workspaceBlock,
+          maxTokens: MAX_OUTPUT_TOKENS,
+          keepResults: VERBATIM_TOOL_RESULTS,
+          supervisor
+        })
+    })
   }
 
   /* ============================ AGENT MODE (Grok) ============================ */
@@ -888,35 +716,32 @@ export class ChatService {
     const profile = this.agentToolProfile(req)
     const agentSystem = await buildAgentSystem(profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
-    const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
-    supervisor.start()
-    this.logSystemPrompt('grok', 'agentic', workspaceBlock ? `${agentSystem}\n\n${workspaceBlock}` : agentSystem)
-    try {
-      await runGrokToolLoop({
-        apiKey: this.grokKey(),
-        audit: this.audit,
-        emit: this.emit,
-        req,
-        modelId,
-        signal,
-        browserLlm,
-        tools: this.tools,
-        ctx: this.toolContext(req, browserLlm),
-        toolDefs: profile.tools,
-        agentSystem,
-        workspaceBlock,
-        maxTokens: MAX_OUTPUT_TOKENS,
-        keepResults: VERBATIM_TOOL_RESULTS,
-        supervisor: {
-          iterationStarted: supervisor.iterationStarted,
-          transition: supervisor.transition
-        }
-      })
-      supervisor.complete()
-    } catch (err) {
-      supervisor.blocked(err instanceof Error ? err.message : String(err), signal.aborted)
-      throw err
-    }
+    await runProviderAgenticTurn({
+      provider: 'grok',
+      agentSystem,
+      workspaceBlock,
+      signal,
+      supervisor: createTurnSupervisor((event) => this.emitLoopState(req, event)),
+      logSystemPrompt: (provider, mode, system) => this.logSystemPrompt(provider, mode, system),
+      loop: (supervisor) =>
+        runGrokToolLoop({
+          apiKey: this.grokKey(),
+          audit: this.audit,
+          emit: this.emit,
+          req,
+          modelId,
+          signal,
+          browserLlm,
+          tools: this.tools,
+          ctx: this.toolContext(req, browserLlm),
+          toolDefs: profile.tools,
+          agentSystem,
+          workspaceBlock,
+          maxTokens: MAX_OUTPUT_TOKENS,
+          keepResults: VERBATIM_TOOL_RESULTS,
+          supervisor
+        })
+    })
   }
 
   /* ---------------- clients ---------------- */
@@ -951,8 +776,4 @@ function normalizeMaxOutputTokens(value: number): number {
 
 function estimateTokens(system: string, user: string): number {
   return Math.ceil((system.length + user.length) / 4)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

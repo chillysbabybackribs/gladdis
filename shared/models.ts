@@ -45,8 +45,6 @@ export const MODELS: ModelOption[] = [
   { id: 'openai-gpt-5.4-nano', label: 'GPT 5.4 Nano', provider: 'openai', availability: 'verified' },
   { id: 'openai-gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai', availability: 'verified' },
   { id: 'openai-gpt-4-1-mini', label: 'GPT-4.1 Mini', provider: 'openai', availability: 'verified' },
-  { id: 'openai-gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openai', availability: 'verified' },
-  { id: 'openai-gpt-4-1-mini', label: 'GPT-4.1 Mini', provider: 'openai', availability: 'verified' },
   { id: 'gpt-5.5', label: 'Codex · GPT-5.5', provider: 'codex' },
   { id: 'gpt-5.4', label: 'Codex · GPT-5.4', provider: 'codex' },
   { id: 'gpt-5.4-mini', label: 'Codex · GPT-5.4 Mini', provider: 'codex' },

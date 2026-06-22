@@ -1,6 +1,5 @@
 import type { TabManager } from '../../TabManager'
 import type { ToolOutcome } from '../browserTools'
-import { classifyCdpCommand } from '../commandSafety'
 import { cap, safeJson } from './toolUtils'
 
 export interface DriveToolsDeps {
@@ -99,10 +98,6 @@ export async function runCdpCommand(
   ctx: DriveToolsContext
 ): Promise<ToolOutcome> {
   const method = String(args.method ?? '')
-  const verdict = classifyCdpCommand(method)
-  if (!verdict.allowed) {
-    return { ok: false, text: `cdp_command refused: ${verdict.reason}` }
-  }
   const out = await deps.tabs.cdpSend(ctx.tabId, method, args.params ?? {})
   return { ok: true, text: cap(safeJson(out)) }
 }

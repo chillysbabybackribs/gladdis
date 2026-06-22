@@ -26,14 +26,15 @@ export function ChatMessageList({
   }
   return (
     <>
-      {messages.map((m, i) =>
-        m.role === 'assistant' ? (
-          <div key={i} className="chat-msg assistant">
+      {messages.map((m, i) => {
+        const itemKey = m.id ?? `${m.role}-${i}`
+        return m.role === 'assistant' ? (
+          <div key={itemKey} className="chat-msg assistant">
             <ChatMessageBody message={m} />
             {m.text && !(streaming && i === messages.length - 1) && <CopyButton text={m.text} />}
           </div>
         ) : (
-          <div key={i} className="chat-msg user">
+          <div key={itemKey} className="chat-msg user">
             {m.text}
             {m.images && m.images.length > 0 && (
               <div className="chat-msg-images">
@@ -50,7 +51,7 @@ export function ChatMessageList({
             )}
           </div>
         )
-      )}
+      })}
     </>
   )
 }

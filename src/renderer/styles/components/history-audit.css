@@ -360,7 +360,10 @@
   }
   .model-menu {
     bottom: calc(100% + 4px);
-    width: calc(100cqw - 16px);
+    width: 140px;
+  }
+  .model-submenu {
+    width: min(245px, calc(100cqw - 160px));
   }
   .chat-messages {
     padding: 14px 10px;

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { completeOpenAi, streamOpenAiPlain, runOpenAiToolLoop, titleOpenAi } from './openai'
+import {
+  __testInternals,
+  completeOpenAi,
+  streamOpenAiPlain,
+  runOpenAiToolLoop,
+  titleOpenAi
+} from './openai'
 import type { ChatRequest } from '../../../../shared/types'
 
 function fakeAudit() {
@@ -35,7 +41,8 @@ describe('completeOpenAi', () => {
     expect(String(url)).toContain('/chat/completions')
     const body = JSON.parse(String(init.body))
     expect(body.model).toBe('gpt-5.5')
-    expect(body.reasoning).toEqual({ effort: 'medium' })
+    expect(body.reasoning_effort).toBe('medium')
+    expect(body.reasoning).toBeUndefined()
     expect(body.messages).toEqual([
       { role: 'developer', content: 'be brief' },
       { role: 'user', content: 'hello' }
@@ -65,7 +72,8 @@ describe('completeOpenAi', () => {
     const [, init] = fetchSpy.mock.calls[0]
     const body = JSON.parse(String(init.body))
     expect(body.model).toBe('gpt-5.4')
-    expect(body.reasoning).toEqual({ effort: 'high' })
+    expect(body.reasoning_effort).toBe('high')
+    expect(body.reasoning).toBeUndefined()
     expect(body.max_completion_tokens).toBe(100)
     expect(body.max_tokens).toBeUndefined()
   })
@@ -91,6 +99,81 @@ describe('titleOpenAi', () => {
     const [, init] = fetchSpy.mock.calls[0]
     const body = JSON.parse(String(init.body))
     expect(body.model).toBe('gpt-5.5')
-    expect(body.reasoning).toEqual({ effort: 'low' })
+    expect(body.reasoning_effort).toBe('low')
+    expect(body.reasoning).toBeUndefined()
+  })
+})
+
+describe('openAiBody (reasoning_effort + tools compatibility)', () => {
+  const { openAiBody } = __testInternals
+  const messages = [{ role: 'user' as const, content: 'hi' }]
+  const toolDef = [{ type: 'function', function: { name: 't', description: '', parameters: {} } }]
+
+  it('omits reasoning_effort for gpt-5.4-nano when function tools are present', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-5.4-nano',
+      messages,
+      tools: toolDef,
+      stage: 'chat:browser:0',
+      maxTokens: 200
+    })
+    expect(body.model).toBe('gpt-5.4-nano')
+    expect(body.tools).toEqual(toolDef)
+    expect(body.reasoning_effort).toBeUndefined()
+    expect(body.max_completion_tokens).toBe(200)
+  })
+
+  it('omits reasoning_effort for gpt-5.5-mini when function tools are present', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-5.5-mini',
+      messages,
+      tools: toolDef,
+      stage: 'chat:browser:0'
+    })
+    expect(body.reasoning_effort).toBeUndefined()
+  })
+
+  it('keeps reasoning_effort for gpt-5.4-nano when no tools are present', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-5.4-nano',
+      messages,
+      stage: 'chat:browser:0'
+    })
+    expect(body.reasoning_effort).toBe('medium')
+  })
+
+  it('keeps reasoning_effort for full-size gpt-5.5 even with tools', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-5.5',
+      messages,
+      tools: toolDef,
+      stage: 'chat:browser:0'
+    })
+    expect(body.reasoning_effort).toBe('medium')
+    expect(body.tools).toEqual(toolDef)
+  })
+
+  it('maps legacy gpt-4-1-mini id to the OpenAI api model name', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-4-1-mini',
+      messages,
+      stage: 'chat:plain',
+      maxTokens: 100
+    })
+    expect(body.model).toBe('gpt-4.1-mini')
+    expect(body.max_tokens).toBe(100)
+    expect(body.reasoning_effort).toBeUndefined()
+  })
+
+  it('caps max_tokens for gpt-4o-mini below the global agent ceiling', () => {
+    const body = openAiBody({
+      modelId: 'openai-gpt-4o-mini',
+      messages,
+      stage: 'chat:browser:0',
+      maxTokens: 32_000,
+      tools: toolDef
+    })
+    expect(body.model).toBe('gpt-4o-mini')
+    expect(body.max_tokens).toBe(16_384)
   })
 })

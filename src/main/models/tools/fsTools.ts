@@ -43,15 +43,44 @@ export async function runWriteFile(deps: FsToolsDeps, args: Record<string, any>)
 }
 
 export async function runEditFile(deps: FsToolsDeps, args: Record<string, any>): Promise<ToolOutcome> {
-  const r = await deps.files.edit(
-    String(args.path ?? ''),
-    String(args.old_string ?? ''),
-    String(args.new_string ?? ''),
-    args.replace_all === true
-  )
-  return {
-    ok: true,
-    text: `Edited ${r.path} — ${r.replacements} replacement(s); +${r.diff.added} -${r.diff.removed}\n${r.diff.preview}`
+  const path = String(args.path ?? '')
+  const oldString = String(args.old_string ?? '')
+  const newString = String(args.new_string ?? '')
+  // Guard the two malformed-edit cases that the model produces most often.
+  // Surface a clear, actionable result instead of throwing so the loop
+  // doesn't burn turns retrying a no-op edit (and the validation supervisor
+  // doesn't treat a failed edit as if real content changed).
+  if (!path) {
+    return { ok: false, text: 'edit_file: "path" is required.' }
+  }
+  if (!oldString) {
+    return {
+      ok: false,
+      text:
+        'edit_file: old_string is empty. Provide the exact text to replace, ' +
+        'or call write_file if you mean to create / overwrite the whole file.'
+    }
+  }
+  if (oldString === newString) {
+    return {
+      ok: false,
+      text:
+        `edit_file: old_string equals new_string for ${path} — nothing to change. ` +
+        'If the file already contains the desired content, skip this edit and move on; ' +
+        'otherwise correct new_string and call edit_file again.'
+    }
+  }
+  try {
+    const r = await deps.files.edit(path, oldString, newString, args.replace_all === true)
+    return {
+      ok: true,
+      text: `Edited ${r.path} — ${r.replacements} replacement(s); +${r.diff.added} -${r.diff.removed}\n${r.diff.preview}`
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      text: `edit_file failed: ${(err as Error)?.message ?? String(err)}`
+    }
   }
 }
 

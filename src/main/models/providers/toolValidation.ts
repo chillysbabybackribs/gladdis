@@ -230,6 +230,11 @@ export function noteToolOutcome(
   outcome: Pick<ToolOutcome, 'ok' | 'text'>
 ): void {
   if (name === 'edit_file' || name === 'write_file') {
+    // A failed edit didn't change the file (no-op, missing match, identical
+    // strings, etc.). Don't trip pendingSinceEdit — otherwise the supervisor
+    // forces a validation pass for nothing and the loop ends in
+    // task_blocked even though no real edit landed.
+    if (!outcome.ok) return
     state.pendingSinceEdit = true
     state.reminderSent = false
     state.autoValidationAttempted = false

@@ -41,7 +41,8 @@ export async function runSearchTool(
       tabId: ctx.tabId,
       limitPerQuery: clampInt(args.limit, 1, 8, 4),
       digestTop: clampInt(args.digest_top, 0, 3, 2),
-      focus: args.focus ? String(args.focus) : undefined
+      focus: args.focus ? String(args.focus) : undefined,
+      navigateVisible: typeof args.navigate_visible === 'boolean' ? args.navigate_visible : false
     }
   )
   if (!outcome.ok) return { ok: false, text: outcome.text }

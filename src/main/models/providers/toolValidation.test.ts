@@ -111,6 +111,29 @@ describe('handleNoToolCallsAfterEdits', () => {
   })
 })
 
+describe('noteToolOutcome', () => {
+  it('ignores failed edit_file outcomes so a no-op edit does not force validation', () => {
+    const state = createToolValidationState()
+    noteToolOutcome(state, 'edit_file', {
+      ok: false,
+      text: 'edit_file: old_string equals new_string — nothing to change.'
+    } as any)
+    expect(state.pendingSinceEdit).toBe(false)
+  })
+
+  it('still tracks successful edit_file outcomes', () => {
+    const state = createToolValidationState()
+    noteToolOutcome(state, 'edit_file', { ok: true, text: 'edited' } as any)
+    expect(state.pendingSinceEdit).toBe(true)
+  })
+
+  it('ignores failed write_file outcomes', () => {
+    const state = createToolValidationState()
+    noteToolOutcome(state, 'write_file', { ok: false, text: 'write_file: path is required.' } as any)
+    expect(state.pendingSinceEdit).toBe(false)
+  })
+})
+
 describe('continueAfterToolCalls', () => {
   it('returns an explicit continue decision for tool-result iterations', () => {
     expect(continueAfterToolCalls(2)).toEqual({

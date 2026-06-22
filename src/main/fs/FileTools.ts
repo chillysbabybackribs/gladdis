@@ -133,7 +133,14 @@ export class FileTools {
     const abs = this.resolve(path)
     const prior = await this.tryReadString(abs)
     if (prior == null) throw new Error(`File does not exist: ${abs}`)
-    if (oldString === newString) throw new Error('oldString and newString are identical')
+    if (oldString === newString) {
+      // Identical strings can't change anything. Return a no-op result so the
+      // caller (and the agent) can move on instead of swallowing a throw and
+      // forcing a retry. The tool wrapper in fsTools.ts surfaces this case
+      // earlier with a more actionable message; this branch keeps direct
+      // FileTools consumers safe.
+      return { path: abs, replacements: 0, diff: diffSummary(prior, prior) }
+    }
 
     const occurrences = countOccurrences(prior, oldString)
     if (occurrences === 0) throw new Error('oldString not found in file')

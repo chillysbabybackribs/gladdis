@@ -102,7 +102,7 @@ describe('unifiedSearch', () => {
 
     const outcome = await runUnifiedSearch(
       { tabs: tabs as any, extractor: extractor as any },
-      { query: 'electron WebContentsView', tabId: 'tab-1', digestTop: 1 }
+      { query: 'electron WebContentsView', tabId: 'tab-1', digestTop: 1, navigateVisible: true }
     )
 
     expect(outcome.ok).toBe(true)

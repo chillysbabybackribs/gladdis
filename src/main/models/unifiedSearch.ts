@@ -42,6 +42,8 @@ export interface UnifiedSearchOptions {
   /** Top ranked hits to open for live extraction. Default 2. */
   digestTop?: number
   focus?: string
+  /** Whether to navigate the active visible tab to the best hit. Default false. */
+  navigateVisible?: boolean
 }
 
 export interface UnifiedSearchOutcome {
@@ -256,7 +258,8 @@ async function probeTopHits(
   visibleTabId: string,
   digestTop: number,
   query: string,
-  focus?: string
+  focus?: string,
+  navigateVisible?: boolean
 ): Promise<LivePageDigest[]> {
   const hits = ranked.slice(0, digestTop)
   if (hits.length === 0) return []
@@ -277,9 +280,11 @@ async function probeTopHits(
 
   // Navigate the active visible tab to the best successfully-probed hit
   // so the user can see where the answer came from
-  const bestUrl = digests[0]?.url ?? ranked[0]?.url
-  if (bestUrl) {
-    try { deps.tabs.navigate(visibleTabId, bestUrl) } catch { /* non-fatal */ }
+  if (navigateVisible) {
+    const bestUrl = digests[0]?.url ?? ranked[0]?.url
+    if (bestUrl) {
+      try { deps.tabs.navigate(visibleTabId, bestUrl) } catch { /* non-fatal */ }
+    }
   }
 
   return digests
@@ -329,7 +334,7 @@ export async function runUnifiedSearch(
 
   // ── Live probe pass (parallel background tabs) ────────────────────────────
   const digests = digestTop > 0
-    ? await probeTopHits(deps, ranked, tabId, digestTop, query, options.focus)
+    ? await probeTopHits(deps, ranked, tabId, digestTop, query, options.focus, options.navigateVisible)
     : []
 
   const text = formatCompactSearchOutput(query, ranked, digests)

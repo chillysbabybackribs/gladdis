@@ -106,12 +106,23 @@ export function useSlotBounds(ref: RefObject<HTMLElement | null>, deps: unknown[
     }
   }, [ref])
 
-  // Volatile triggers: re-measure when layout deps change. deps is collapsed to a
-  // single stable key so this hook's dependency array is always length-1.
-  const depKey = JSON.stringify(deps)
+  // Volatile triggers: re-measure when layout deps change. Shallow element-by-element
+  // comparison avoids JSON.stringify/string serialization overhead on every single render.
+  const prevDepsRef = useRef<unknown[]>(deps)
+  const changeCountRef = useRef(0)
+
+  const depsChanged =
+    deps.length !== prevDepsRef.current.length ||
+    deps.some((dep, i) => dep !== prevDepsRef.current[i])
+
+  if (depsChanged) {
+    prevDepsRef.current = deps
+    changeCountRef.current += 1
+  }
+
   useEffect(() => {
     if (ref.current && ref.current !== observedElementRef.current) setupRef.current()
     if (observedElementRef.current) measureRef.current()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depKey])
+  }, [changeCountRef.current])
 }

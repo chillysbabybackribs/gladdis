@@ -39,19 +39,20 @@ export function useEnvironmentStatus(): EnvironmentStatus {
   const [workspace, setWorkspace] = useState<Workspace>({ folder: null })
 
   useEffect(() => {
-    void window.gladdis.keys.status().then(setKeyStatus)
-    void window.gladdis.workspace.get().then(setWorkspace)
-    void window.gladdis.codex.status().then(setCodexStatus).catch(() => setCodexStatus(null))
-    void window.gladdis.codex
-      .models()
-      .then((codexModels) => {
-        if (!codexModels.length) return
+    void Promise.all([
+      window.gladdis.keys.status(),
+      window.gladdis.workspace.get(),
+      window.gladdis.codex.status().catch(() => null), // Handle potential error for codex.status
+      window.gladdis.codex.models().catch(() => []) // Handle potential error for codex.models
+    ]).then(([keyStatus, workspace, codexStatus, codexModels]) => {
+      setKeyStatus(keyStatus)
+      setWorkspace(workspace)
+      setCodexStatus(codexStatus)
+      if (codexModels.length) {
         const nonCodex = MODELS.filter((m) => m.provider !== 'codex')
         setModels([...nonCodex, ...codexModels])
-      })
-      .catch(() => {
-        /* keep static fallback */
-      })
+      }
+    })
   }, [])
 
   const pickWorkspace = async () => {

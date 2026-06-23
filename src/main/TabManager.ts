@@ -45,12 +45,21 @@ export class TabManager {
   private activeId: string | null = null
   private bounds: ViewBounds = { x: 0, y: 0, width: 0, height: 0 }
   private seq = 0
+  private onPageNavigation?: (tabId: string) => void
 
   constructor(
     private readonly win: BaseWindow,
     private readonly onChange: () => void,
     private readonly onCdpEvent: (e: CdpEventPayload) => void
   ) {}
+
+  setNavigationCacheInvalidator(handler: (tabId: string) => void): void {
+    this.onPageNavigation = handler
+  }
+
+  private notifyPageNavigation(tabId: string): void {
+    this.onPageNavigation?.(tabId)
+  }
 
   private nextId(): string {
     this.seq += 1
@@ -92,8 +101,12 @@ export class TabManager {
     wc.on('did-start-navigation', (_e, _url, _inPage, isMainFrame) => {
       if (isMainFrame) {
         tab.favicon = null
+        this.notifyPageNavigation(id)
         this.onChange()
       }
+    })
+    wc.on('did-navigate-in-page', () => {
+      this.notifyPageNavigation(id)
     })
     wc.on('did-start-loading', emit)
     wc.on('did-stop-loading', emit)
@@ -316,6 +329,12 @@ export class TabManager {
     return this.activeId
   }
 
+  getTabUrl(tabId: string): string {
+    const tab = this.tabs.get(tabId)
+    if (!tab) return ''
+    return tab.view.webContents.getURL()
+  }
+
   /**
    * Resolve a guaranteed-usable visible tab id, creating one if needed.
    *
@@ -364,5 +383,4 @@ export class TabManager {
     await ensureSessionImpl()
   }
 }
-
 

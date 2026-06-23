@@ -3,13 +3,32 @@ import type { PageExtractor } from '../../extract/PageExtractor'
 import type { ToolOutcome } from '../browserTools'
 import { digestPage } from '../PageDigest'
 
+export interface ReadPageCacheEntry {
+  pageUrl: string
+  digest: string
+  capturedAt: number
+}
+
+export interface ReadPageCacheStats {
+  hits: number
+  misses: number
+  expired: number
+  evictions: number
+  size: number
+  limit: number
+  ttlMs: number
+}
+
 export interface PerceiveToolsDeps {
   tabs: TabManager
   extractor: PageExtractor
   /** Read-through digest cache, keyed by `${tabId}:${focus}:${viewportOnly}`. */
-  pageCache: Map<string, string>
+  pageCache: Map<string, ReadPageCacheEntry>
   pageCacheLimit: number
+  pageCacheTtlMs: number
   appCapture: (() => Promise<string>) | null
+  getPageCacheStats: () => ReadPageCacheStats
+  recordPageCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') => void
 }
 
 export async function runReadPage(
@@ -18,21 +37,55 @@ export async function runReadPage(
   tabId: string
 ): Promise<ToolOutcome> {
   const cacheKey = `${tabId}:${args.focus ?? ''}:${args.viewportOnly === true}`
+  const now = Date.now()
+  const currentUrl = normalizePageUrl(deps.tabs.getTabUrl(tabId))
   const cached = deps.pageCache.get(cacheKey)
-  if (cached) return { ok: true, text: cached }
+
+  if (cached) {
+    if (cached.pageUrl === currentUrl && now - cached.capturedAt <= deps.pageCacheTtlMs) {
+      deps.recordPageCacheEvent('hit')
+      return { ok: true, text: appendReadPageCacheMetrics(cached.digest, deps.getPageCacheStats()) }
+    }
+    if (cached.pageUrl === currentUrl) {
+      deps.recordPageCacheEvent('expired')
+    }
+    if (deps.pageCache.delete(cacheKey)) {
+      deps.recordPageCacheEvent('evicted')
+    }
+    deps.recordPageCacheEvent('miss')
+  } else {
+    deps.recordPageCacheEvent('miss')
+  }
 
   const capData = await deps.extractor.run(tabId)
+  const resolvedUrl = normalizePageUrl(typeof capData.url === 'string' ? capData.url : currentUrl)
   const digest = digestPage(capData, {
     focus: args.focus ? String(args.focus) : undefined,
     viewportOnly: args.viewportOnly === true
   })
+  const nowCaptured = Date.now()
 
   if (deps.pageCache.size >= deps.pageCacheLimit) {
     const first = deps.pageCache.keys().next().value
     if (first !== undefined) deps.pageCache.delete(first)
+    deps.recordPageCacheEvent('evicted')
   }
-  deps.pageCache.set(cacheKey, digest)
-  return { ok: true, text: digest }
+  deps.pageCache.set(cacheKey, { pageUrl: resolvedUrl, digest, capturedAt: nowCaptured })
+  return { ok: true, text: appendReadPageCacheMetrics(digest, deps.getPageCacheStats()) }
+}
+
+function normalizePageUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.hash = ''
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
+function appendReadPageCacheMetrics(digest: string, stats: ReadPageCacheStats): string {
+  return `${digest}\n[read_page cache] size=${stats.size}/${stats.limit}, ttl=${stats.ttlMs}ms, hits=${stats.hits}, misses=${stats.misses}, expired=${stats.expired}, evictions=${stats.evictions}`
 }
 
 export async function runScreenshot(

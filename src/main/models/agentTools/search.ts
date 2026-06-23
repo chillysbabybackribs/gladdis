@@ -9,20 +9,13 @@ export const SEARCH_TOOLS: ToolDef[] = [
   {
     name: 'search',
     description:
-      'This is your DEFAULT, primary tool for finding web pages, looking up documentation, and answering factual queries. ' +
-      'Web search via embedded Chromium (DuckDuckGo). Searches your query exactly as given — ' +
-      'it does NOT invent query variants, so phrase the query well. ' +
-      'Returns a SERP index (with instant answers) plus live evidence extracted from the top ' +
-      'results probed in background tabs. ' +
-      'This tool does NOT automatically navigate or change the active visible tab unless navigate_visible: true is explicitly passed, ' +
-      'allowing you to search safely without disrupting the user\'s view or your own page state. ' +
-      'Use fetch_page on a URL from the search results when you want to open and read a specific page in the visible tab.',
+      'Find web pages and evidence. Returns ranked SERP results and keeps the visible tab unchanged by default.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The search query.' },
-        limit: { type: 'number', description: 'Max SERP hits to return (1–8). Default 4.' },
-        digest_top: { type: 'number', description: 'Top hits to probe for live evidence (0–3). Default 2.' },
+        limit: { type: 'number', description: 'SERP hits to return (1-8). Default 4.' },
+        digest_top: { type: 'number', description: 'Live-evidence hits to probe (0-3). Default 2.' },
         focus: { type: 'string', description: 'Optional keyword to weight excerpt selection.' },
         navigate_visible: {
           type: 'boolean',
@@ -37,8 +30,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
   {
     name: 'fetch_page',
     description:
-      'Open a specific URL in the visible browser tab, wait for navigation to settle, and return a bounded page digest. ' +
-      'Use when you already have a target URL (from search results or the user) and need to navigate to it and read its content.',
+      'Open a URL in the visible tab and return a bounded digest after navigation settles.',
     parameters: {
       type: 'object',
       properties: {
@@ -58,25 +50,18 @@ export const SEARCH_TOOLS: ToolDef[] = [
   {
     name: 'deep_search',
     description:
-      'Use ONLY for highly complex, multi-faceted research tasks, comprehensive comparisons, or troubleshooting topics ' +
-      'that require extensive multi-page scraping and recursive link harvesting. DO NOT use for standard queries, ' +
-      'simple lookups, or finding a single documentation page where search + fetch_page is faster, cleaner, and more precise. ' +
-      'First formulates a strategic research plan (using Gemini 2.5 Flash-lite), then executes a fully deterministic parallel ' +
-      'crawl across search results and harvested links using native background Chromium tabs. ' +
-      'It reads, extracts, and score-ranks information on multiple pages recursively without requiring any intermediate LLM calls, ' +
-      'reducing token consumption by 90%+. Returns a beautifully compiled, highly detailed knowledge dossier.',
+      'Research topic with recursive web crawl + synthesis. For routine lookups, use search + fetch_page.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'The main research topic or question.' },
         depth: {
           type: 'number',
-          description:
-            'Recursion depth (1: only direct search hits, 2: search hits + harvesting links on those hits). Default 2.'
+          description: 'Recursion depth: 1 direct-only, 2 includes links. Default 2.'
         },
         max_pages: {
           type: 'number',
-          description: 'Maximum total pages to crawl and read across all steps. Default 5.'
+          description: 'Maximum pages to crawl. Default 5.'
         }
       },
       required: ['query']

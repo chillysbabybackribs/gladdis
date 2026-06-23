@@ -110,6 +110,16 @@ function LoopStateCard({ part }: { part: LoopStatePart }) {
 
 function CapabilityActivityCard({ part }: { part: CapabilityActivityPart }) {
   const title = `${CAPABILITY_EVENT_LABEL[part.event]} ${part.capability}${part.cached ? ' (cached)' : ''}`
+  const cacheMeta = [
+    part.cacheSize != null ? `cache: ${part.cacheSize}/${part.cacheLimit ?? 0}` : null,
+    part.cacheTtlMs != null ? `ttl=${part.cacheTtlMs}ms` : null,
+    part.cacheHitCount != null ? `hits=${part.cacheHitCount}` : null,
+    part.cacheMissCount != null ? `misses=${part.cacheMissCount}` : null,
+    part.cacheExpired != null ? `expired=${part.cacheExpired}` : null,
+    part.cacheEvictions != null ? `evictions=${part.cacheEvictions}` : null
+  ]
+    .filter(Boolean)
+    .join(' · ')
   const meta = [part.service, part.artifactId ? `artifact ${part.artifactId}` : null]
     .filter(Boolean)
     .join(' · ')
@@ -117,7 +127,7 @@ function CapabilityActivityCard({ part }: { part: CapabilityActivityPart }) {
     <CompactEventCard
       title={title}
       meta={part.durationMs != null ? formatMs(part.durationMs) : meta}
-      detail={[part.summary, meta].filter(Boolean).join('\n') || null}
+      detail={[part.summary, cacheMeta, meta].filter(Boolean).join('\n') || null}
       tone={
         part.event === 'capability_failed'
           ? 'error'

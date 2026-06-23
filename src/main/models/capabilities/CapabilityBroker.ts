@@ -58,6 +58,24 @@ export interface CapabilityResponse {
   cacheStatus: 'hit' | 'miss'
 }
 
+interface TimedCacheEntry<T> {
+  value: T
+  expiresAt: number
+}
+
+interface TimedCacheStats {
+  hitCount: number
+  missCount: number
+  expiredCount: number
+  evictionCount: number
+}
+
+interface CapabilityCachePayload {
+  ok: boolean
+  summary: string
+  structuredPayload?: unknown
+}
+
 interface RepoOverviewCacheEntry extends CapabilityResponse {
   capability: 'repo_overview'
   cacheKey: string
@@ -73,7 +91,14 @@ export interface CapabilityServices {
 
 export class CapabilityBroker {
   private readonly repoOverviewCache = new Map<string, RepoOverviewCacheEntry>()
+  private readonly searchRepoCache = new Map<string, TimedCacheEntry<CapabilityCachePayload>>()
+  private readonly readSpansCache = new Map<string, TimedCacheEntry<CapabilityCachePayload>>()
+  private readonly searchRepoCacheStats: TimedCacheStats = { hitCount: 0, missCount: 0, expiredCount: 0, evictionCount: 0 }
+  private readonly readSpansCacheStats: TimedCacheStats = { hitCount: 0, missCount: 0, expiredCount: 0, evictionCount: 0 }
   private capabilityCallSequence = 0
+  private static readonly CAPABILITY_CACHE_TTL_MS = 120_000
+  private static readonly SEARCH_REPO_CACHE_LIMIT = 32
+  private static readonly READ_SPANS_CACHE_LIMIT = 24
 
   constructor(
     private readonly services: CapabilityServices,
@@ -145,27 +170,47 @@ export class CapabilityBroker {
   }
 
   async searchRepo(ctx: BrokerCallContext, args: SearchRepoArgs): Promise<CapabilityResponse> {
+    const cacheKey = this.searchRepoCacheKey(args)
     const startedAt = Date.now()
     const callId = this.nextCapabilityCallId(ctx, 'search_repo')
     this.emitPhase(ctx, 'inspect', `Searching repository for ${args.query}.`)
+    const cacheMetrics = () => this.cacheMetrics(this.searchRepoCacheStats, this.searchRepoCache, CapabilityBroker.SEARCH_REPO_CACHE_LIMIT)
     this.emitCapability(ctx, callId, 'search_repo', 'capability_requested', {
       summary: `Searching repo for ${args.query}.`
     })
+
+    const cached = this.getCache(this.searchRepoCache, cacheKey, this.searchRepoCacheStats)
+    if (cached) {
+      this.emitCapability(ctx, callId, 'search_repo', 'capability_cache_hit', {
+        cached: true,
+        summary: 'Using cached search_repo result.',
+        ...cacheMetrics()
+      })
+      this.emitCapability(ctx, callId, 'search_repo', 'capability_completed', {
+        cached: true,
+        summary: cached.summary,
+        ...cacheMetrics()
+      })
+      return { ...cached, cacheStatus: 'hit' }
+    }
+
     this.emitCapability(ctx, callId, 'search_repo', 'capability_started', {
       summary: 'Running repo search.'
     })
     try {
       const result = await this.services.searchRepo(args)
-      this.emitCapability(ctx, callId, 'search_repo', 'capability_completed', {
-        summary: result.summary,
-        durationMs: Date.now() - startedAt
-      })
-      return {
+      const response: CapabilityCachePayload = {
         ok: true,
         summary: result.summary,
-        structuredPayload: result.structuredPayload,
-        cacheStatus: 'miss'
+        structuredPayload: result.structuredPayload
       }
+      this.setCache(this.searchRepoCache, cacheKey, response, CapabilityBroker.SEARCH_REPO_CACHE_LIMIT, this.searchRepoCacheStats)
+      this.emitCapability(ctx, callId, 'search_repo', 'capability_completed', {
+        summary: result.summary,
+        durationMs: Date.now() - startedAt,
+        ...cacheMetrics()
+      })
+      return { ...response, cacheStatus: 'miss' }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       this.emitCapability(ctx, callId, 'search_repo', 'capability_failed', {
@@ -181,27 +226,47 @@ export class CapabilityBroker {
   }
 
   async readSpans(ctx: BrokerCallContext, args: ReadSpanArgs): Promise<CapabilityResponse> {
+    const cacheKey = this.readSpansCacheKey(args)
     const startedAt = Date.now()
     const callId = this.nextCapabilityCallId(ctx, 'read_spans')
     this.emitPhase(ctx, 'inspect', `Reading ${args.items.length} repository span(s).`)
+    const cacheMetrics = () => this.cacheMetrics(this.readSpansCacheStats, this.readSpansCache, CapabilityBroker.READ_SPANS_CACHE_LIMIT)
     this.emitCapability(ctx, callId, 'read_spans', 'capability_requested', {
       summary: `Reading ${args.items.length} repo span(s).`
     })
+
+    const cached = this.getCache(this.readSpansCache, cacheKey, this.readSpansCacheStats)
+    if (cached) {
+      this.emitCapability(ctx, callId, 'read_spans', 'capability_cache_hit', {
+        cached: true,
+        summary: 'Using cached read_spans result.',
+        ...cacheMetrics()
+      })
+      this.emitCapability(ctx, callId, 'read_spans', 'capability_completed', {
+        cached: true,
+        summary: cached.summary,
+        ...cacheMetrics()
+      })
+      return { ...cached, cacheStatus: 'hit' }
+    }
+
     this.emitCapability(ctx, callId, 'read_spans', 'capability_started', {
       summary: 'Reading bounded file spans.'
     })
     try {
       const result = await this.services.readSpans(args)
-      this.emitCapability(ctx, callId, 'read_spans', 'capability_completed', {
-        summary: result.summary,
-        durationMs: Date.now() - startedAt
-      })
-      return {
+      const response: CapabilityCachePayload = {
         ok: true,
         summary: result.summary,
-        structuredPayload: result.structuredPayload,
-        cacheStatus: 'miss'
+        structuredPayload: result.structuredPayload
       }
+      this.setCache(this.readSpansCache, cacheKey, response, CapabilityBroker.READ_SPANS_CACHE_LIMIT, this.readSpansCacheStats)
+      this.emitCapability(ctx, callId, 'read_spans', 'capability_completed', {
+        summary: result.summary,
+        durationMs: Date.now() - startedAt,
+        ...cacheMetrics()
+      })
+      return { ...response, cacheStatus: 'miss' }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       this.emitCapability(ctx, callId, 'read_spans', 'capability_failed', {
@@ -343,6 +408,79 @@ export class CapabilityBroker {
       workspaceRoot: args.workspaceRoot,
       focus: args.focus?.trim().toLowerCase() || ''
     })
+  }
+
+  private searchRepoCacheKey(args: SearchRepoArgs): string {
+    return JSON.stringify({
+      workspaceRoot: args.workspaceRoot,
+      query: args.query,
+      glob: args.glob ?? null,
+      maxResults: args.maxResults ?? null
+    })
+  }
+
+  private readSpansCacheKey(args: ReadSpanArgs): string {
+    const items = args.items
+      .map((item) => ({ path: item.path, startLine: item.startLine ?? null, endLine: item.endLine ?? null }))
+      .sort((a, b) => {
+        if (a.path === b.path) {
+          return (a.startLine ?? 0) - (b.startLine ?? 0) || (a.endLine ?? 0) - (b.endLine ?? 0)
+        }
+        return a.path.localeCompare(b.path)
+      })
+    return JSON.stringify({ workspaceRoot: args.workspaceRoot, items })
+  }
+
+  private getCache<T>(cache: Map<string, TimedCacheEntry<T>>, key: string, stats: TimedCacheStats): T | null {
+    const entry = cache.get(key)
+    if (!entry) {
+      stats.missCount += 1
+      return null
+    }
+    if (entry.expiresAt < Date.now()) {
+      cache.delete(key)
+      stats.missCount += 1
+      stats.expiredCount += 1
+      return null
+    }
+    stats.hitCount += 1
+    return entry.value
+  }
+
+  private setCache<T>(cache: Map<string, TimedCacheEntry<T>>, key: string, value: T, limit: number, stats: TimedCacheStats): void {
+    if (cache.has(key)) cache.delete(key)
+    if (cache.size >= limit) {
+      const first = cache.keys().next().value
+      if (first !== undefined) {
+        cache.delete(first)
+        stats.evictionCount += 1
+      }
+    }
+    cache.set(key, { value, expiresAt: Date.now() + CapabilityBroker.CAPABILITY_CACHE_TTL_MS })
+  }
+
+  private cacheMetrics(
+    stats: TimedCacheStats,
+    cache: Map<string, unknown>,
+    limit: number
+  ): {
+    cacheHitCount: number
+    cacheMissCount: number
+    cacheSize: number
+    cacheLimit: number
+    cacheTtlMs: number
+    cacheExpired: number
+    cacheEvictions: number
+  } {
+    return {
+      cacheHitCount: stats.hitCount,
+      cacheMissCount: stats.missCount,
+      cacheSize: cache.size,
+      cacheLimit: limit,
+      cacheTtlMs: CapabilityBroker.CAPABILITY_CACHE_TTL_MS,
+      cacheExpired: stats.expiredCount,
+      cacheEvictions: stats.evictionCount
+    }
   }
 
   private emitCapability(

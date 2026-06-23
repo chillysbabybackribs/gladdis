@@ -1,12 +1,21 @@
 import type { ChatStore } from '../ChatStore'
 import type { Conversation, ConversationMeta } from '../../../../shared/types'
 import type { ToolContext, ToolOutcome } from '../browserTools'
-import { toolGroupNames } from '../agentTools'
+import {
+  isKnownToolGroup,
+  isKnownToolName,
+  normalizeRequestedGroups,
+  normalizeRequestedTools,
+  toolGroupNames
+} from '../agentTools'
 import { cap } from './toolUtils'
 
 export interface HistoryToolsDeps {
   chats: ChatStore
 }
+
+const REQUEST_TOOLS_ERROR =
+  'request_tools: provide {"group":"filesystem|browser|research"} or {"tools":[...tool_names...]}.'
 
 /**
  * Pull in additional tools at runtime by group name. Lets a model start a
@@ -17,17 +26,38 @@ export async function runRequestTools(
   args: Record<string, any>,
   ctx: ToolContext
 ): Promise<ToolOutcome> {
-  const group = String(args.group ?? '').trim()
-  const names = toolGroupNames(group)
+  const requestedGroups = normalizeRequestedGroups(args.group)
+  const requestedTools = normalizeRequestedTools(args.tools)
+  const unknownGroups = requestedGroups.filter((group) => !isKnownToolGroup(group))
+  const groupNames = requestedGroups.filter((group) => !unknownGroups.includes(group)).flatMap((group) => toolGroupNames(group))
+  const unknownTools = requestedTools.filter((tool) => !isKnownToolName(tool))
+
+  if (unknownTools.length > 0) {
+    return {
+      ok: false,
+      text: `request_tools: unknown tool(s): ${unknownTools.join(', ')}.`
+    }
+  }
+
+  const names = Array.from(new Set([...groupNames, ...requestedTools]))
   if (names.length === 0) {
-    return { ok: false, text: `request_tools: unknown group "${group}". Use filesystem, browser, or research.` }
+    if (requestedGroups.length > 0 && unknownGroups.length > 0) {
+      return { ok: false, text: `request_tools: unknown group "${requestedGroups[0]}". Use filesystem, browser, or research.` }
+    }
+    return { ok: false, text: REQUEST_TOOLS_ERROR }
   }
   const granted = (ctx.grantedTools ??= new Set<string>())
   for (const name of names) granted.add(name)
   return {
     ok: true,
-    text: `Granted ${group} tools for this turn: ${names.join(', ')}. Call them now to continue.`
+    text: `Granted ${groupNameLabel(requestedGroups, requestedTools)} for this turn: ${names.join(', ')}. Call them now to continue.`
   }
+}
+
+function groupNameLabel(groupNames: string[], toolNames: string[]): string {
+  if (groupNames.length > 0 && toolNames.length > 0) return 'groups/tools'
+  if (toolNames.length > 0) return 'tools'
+  return 'group'
 }
 
 /**
@@ -46,7 +76,7 @@ export function runRecallHistory(
   const toolCallId = args.tool_call_id ? String(args.tool_call_id) : null
   if (toolCallId) {
     const full = ctx.fullResults?.get(toolCallId)
-    if (full != null) return { ok: true, text: cap(full, 30_000) }
+    if (full != null) return { ok: true, text: cap(full, 20_000) }
     return { ok: false, text: `No tool result found for id "${toolCallId}" in this request.` }
   }
 

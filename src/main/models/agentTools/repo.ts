@@ -10,8 +10,7 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'repo_overview',
     description:
-      'Build a compact overview of the selected workspace: package name, scripts, top directories, key files, and likely entrypoints. ' +
-      'Use at the start of a coding task when you need fast orientation before reading specific files.',
+      'Build a compact workspace orientation: package, scripts, top directories, key files, and likely entrypoints.',
     parameters: {
       type: 'object',
       properties: {
@@ -25,8 +24,7 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'search_repo',
     description:
-      'Search the selected workspace and return compact matches for code or filenames. ' +
-      'Use this before broad file reads when locating symbols, modules, or feature areas.',
+      'Search workspace symbols/modules/filenames, then open focused files next.',
     parameters: {
       type: 'object',
       properties: {
@@ -46,26 +44,25 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'read_spans',
     description:
-      'Read one or more bounded windows from files in the selected workspace. ' +
-      'Use after search_repo to inspect exact code regions without broad whole-file reads.',
+      'Read bounded line windows from workspace files, plus multi-span batches.',
     parameters: {
       type: 'object',
-      properties: {
+    properties: {
         path: {
           type: 'string',
-          description: 'Single-file convenience form: relative path in the selected workspace.'
+          description: 'Single-file convenience path.'
         },
         start_line: {
           type: 'number',
-          description: 'Single-file convenience form: starting line number.'
+          description: 'Optional starting line.'
         },
         end_line: {
           type: 'number',
-          description: 'Single-file convenience form: ending line number.'
+          description: 'Optional ending line.'
         },
         items: {
           type: 'array',
-          description: 'Multi-span form for reading several precise windows at once.',
+          description: 'Multi-span form for several precise windows.',
           items: {
             type: 'object',
             properties: {
@@ -82,18 +79,17 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'research_dossier',
     description:
-      'Ask Gemini to synthesize a compact repo reconnaissance dossier for a coding question using bounded workspace evidence. ' +
-      'Use when you need a higher-level map of relevant modules before reading or editing specific files.',
+      'Ask Gemini for a compact repo dossier from bounded evidence before deep edits.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'The engineering question or focus area to investigate in the selected workspace.'
+          description: 'The question or focus area to investigate.'
         },
         glob: {
           type: 'string',
-          description: 'Optional file glob to bias search and evidence gathering.'
+          description: 'Optional file glob to focus evidence gathering.'
         },
         max_results: {
           type: 'number',
@@ -106,8 +102,8 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'verify_change',
     description:
-      'Run a deterministic validation pass for the selected workspace and emit structured verification state. ' +
-      'Use after edits to confirm the change passes the right check or to surface the real blocker.',
+      'Run deterministic workspace validation and return structured verification output. ' +
+      'Use after edits to confirm checks pass or to surface the real blocker.',
     parameters: {
       type: 'object',
       properties: {

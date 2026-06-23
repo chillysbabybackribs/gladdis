@@ -138,7 +138,13 @@ export function usageFromOpenAi(usage: any): FinishUsage | undefined {
     : { inputTokens, outputTokens, cachedInputTokens, reasoningOutputTokens }
 }
 
-export function toOpenAiMessages(req: ChatRequest): OpenAiMessage[] {
+export interface HistoryCompactionOptions {
+  maxMessages?: number
+  keepTail?: number
+  maxChars?: number
+}
+
+export function toOpenAiMessages(req: ChatRequest, opts: HistoryCompactionOptions = {}): OpenAiMessage[] {
   // Chat history compounding optimization for OpenAI models.
   // When messages exceed maxMessages, we prune down to keepTailMessages.
   // We keep a chunk-based truncation approach rather than dropping message-by-message,
@@ -146,8 +152,8 @@ export function toOpenAiMessages(req: ChatRequest): OpenAiMessage[] {
   const maxMessagesStr = process.env.GLADDIS_OPENAI_MAX_MESSAGES
   const keepTailStr = process.env.GLADDIS_OPENAI_KEEP_TAIL
 
-  const maxMessages = maxMessagesStr ? parseInt(maxMessagesStr, 10) : 30
-  const keepTail = keepTailStr ? parseInt(keepTailStr, 10) : 12
+  const maxMessages = opts.maxMessages ?? (maxMessagesStr ? parseInt(maxMessagesStr, 10) : 30)
+  const keepTail = opts.keepTail ?? (keepTailStr ? parseInt(keepTailStr, 10) : 12)
 
   let messagesToMap = req.messages
 
@@ -158,7 +164,7 @@ export function toOpenAiMessages(req: ChatRequest): OpenAiMessage[] {
 
     const systemNotice: ChatMessage = {
       role: 'user',
-      content: `[System Notice: To optimize performance and token usage, ${trimmedCount} earlier messages of this conversation have been trimmed. The most recent ${actualKeepTail} messages are preserved verbatim below.]`
+      content: `[Trimmed ${trimmedCount} earlier messages; keeping the last ${actualKeepTail} verbatim.]`
     }
 
     messagesToMap = [systemNotice, ...tailMessages]
@@ -616,7 +622,7 @@ export function stubOldOpenAiResults(msgs: OpenAiMessage[], keep: number): void 
     const msg = msgs[i]
     if (msg.role === 'tool' && typeof msg.content === 'string') {
       if (msg.content.startsWith(STUB_PREFIX)) continue
-      msg.content = `${STUB_PREFIX} (id ${msg.tool_call_id}) — earlier result trimmed to save tokens. Call recall_history with tool_call_id "${msg.tool_call_id}" to read it in full.`
+      msg.content = `${STUB_PREFIX} (id ${msg.tool_call_id}) — trimmed to save tokens. Use recall_history("${msg.tool_call_id}") for full text.`
     }
   }
 }

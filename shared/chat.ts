@@ -299,6 +299,13 @@ export interface CapabilityActivityTrace {
   cached?: boolean
   artifactId?: string
   durationMs?: number
+  cacheHitCount?: number
+  cacheMissCount?: number
+  cacheSize?: number
+  cacheLimit?: number
+  cacheTtlMs?: number
+  cacheExpired?: number
+  cacheEvictions?: number
 }
 
 export interface StoredCapabilityActivityPart extends CapabilityActivityTrace {
@@ -522,6 +529,13 @@ export type ChatStreamEvent =
       cached?: boolean
       artifactId?: string
       durationMs?: number
+      cacheHitCount?: number
+      cacheMissCount?: number
+      cacheSize?: number
+      cacheLimit?: number
+      cacheTtlMs?: number
+      cacheExpired?: number
+      cacheEvictions?: number
     }
   | {
       requestId: string

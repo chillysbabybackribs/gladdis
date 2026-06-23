@@ -89,7 +89,14 @@ export function applyStreamEventToMessages(
         summary: event.summary,
         cached: event.cached,
         artifactId: event.artifactId,
-        durationMs: event.durationMs
+        durationMs: event.durationMs,
+        ...(event.cacheHitCount != null ? { cacheHitCount: event.cacheHitCount } : {}),
+        ...(event.cacheMissCount != null ? { cacheMissCount: event.cacheMissCount } : {}),
+        ...(event.cacheSize != null ? { cacheSize: event.cacheSize } : {}),
+        ...(event.cacheLimit != null ? { cacheLimit: event.cacheLimit } : {}),
+        ...(event.cacheTtlMs != null ? { cacheTtlMs: event.cacheTtlMs } : {}),
+        ...(event.cacheExpired != null ? { cacheExpired: event.cacheExpired } : {}),
+        ...(event.cacheEvictions != null ? { cacheEvictions: event.cacheEvictions } : {})
       }]
     }
     return out

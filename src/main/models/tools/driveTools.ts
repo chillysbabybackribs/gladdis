@@ -2,6 +2,7 @@ import type { TabManager } from '../../TabManager'
 import type { ToolOutcome } from '../browserTools'
 import { cap, safeJson } from './toolUtils'
 import { executeGrepInTab } from './perceiveTools'
+import { clampInt } from './toolUtils'
 
 export interface DriveToolsDeps {
   tabs: TabManager
@@ -46,8 +47,25 @@ export async function runNavigate(
   args: Record<string, any>,
   ctx: DriveToolsContext
 ): Promise<ToolOutcome> {
-  deps.tabs.navigate(ctx.tabId, String(args.url ?? ''))
-  return { ok: true, text: `Navigating to ${args.url}` }
+  const rawUrl = String(args.url ?? '').trim()
+  if (!rawUrl) {
+    return { ok: false, text: 'navigate: "url" is required.' }
+  }
+
+  const shouldWait = args.wait === undefined ? true : !!args.wait
+  const timeoutMs = clampInt(args.timeout_ms, 500, 8_000, 2_000)
+
+  deps.tabs.navigate(ctx.tabId, rawUrl)
+  if (shouldWait) {
+    await deps.tabs.waitForNavigationSettled(ctx.tabId, timeoutMs)
+  }
+
+  return {
+    ok: true,
+    text: shouldWait
+      ? `Navigated to ${rawUrl} (waited up to ${timeoutMs}ms).`
+      : `Navigating to ${rawUrl}.`
+  }
 }
 
 export async function runClickXY(

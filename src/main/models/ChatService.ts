@@ -536,17 +536,9 @@ export class ChatService {
     // tell the model so it escalates (request_tools "filesystem") to act on the
     // project instead of answering generically about it.
     if (profile && profile.name !== 'filesystem' && profile.name !== 'full') {
-      return (
-        `A project folder is selected: ${folder}\n` +
-        `If the request is about THIS project (inspect, edit, install, run, optimize), ` +
-        `call request_tools("filesystem") and work in it — do not answer generically.`
-      )
+      return `Workspace: ${folder}\nUse request_tools("filesystem") for repo and shell work.`
     }
-    return (
-      `Working folder: ${folder}\n` +
-      `Relative paths in read_file/write_file/edit_file/list_dir/search_files resolve ` +
-      `from the selected working folder. Absolute paths can work outside of it.`
-    )
+    return `Workspace: ${folder}`
   }
 
   private async codexRepoOverviewBlock(req: ChatRequest, userText: string): Promise<string | null> {

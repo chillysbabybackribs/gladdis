@@ -6,7 +6,7 @@
  *
  *   DRIVE    → blind actions (navigate / click / type / press / cdp).
  *              Return only ack strings; the LLM never sees raw page data.
- *   PERCEIVE → `read_page`, the only path for the LLM to read the page.
+ *   PERCEIVE → `read_page`, `grep_page`; path for bounded page reads and targeting.
  *              Internally runs PageExtractor, formats through PageDigest.
  *   CAPTURE  → `screenshot`, `screenshot_app`. PNGs returned to the model.
  *   SEARCH   → `search`, `deep_search`, `fetch_page`.
@@ -31,6 +31,12 @@ export type {
 } from './agentTools/profiles'
 export {
   AGENT_TOOLS,
+  isKnownToolGroup,
+  isKnownToolName,
+  knownToolByName,
+  normalizeRequestedGroups,
+  normalizeRequestedTools,
+  normalizeToolName,
   resolveTurnTools,
   selectAgentToolProfile,
   toolGroupNames

@@ -26,7 +26,7 @@ import {
   runSearchFiles,
   runWriteFile
 } from './tools/fsTools'
-import { runGrepPage, runReadPage, runScreenshot, runScreenshotApp } from './tools/perceiveTools'
+import { type ReadPageCacheEntry, runGrepPage, runReadPage, runScreenshot, runScreenshotApp } from './tools/perceiveTools'
 import {
   runReadSpans,
   runRepoOverview,
@@ -48,6 +48,7 @@ import {
   runValidation
 } from './tools/taskTools'
 import { runRecallHistory, runRequestTools } from './tools/historyTools'
+import type { ReadPageCacheStats } from './tools/perceiveTools'
 
 export interface ToolDef {
   name: string
@@ -108,8 +109,15 @@ export class BrowserTools {
   private capabilityBroker: CapabilityBroker | null = null
 
   /** Read-through digest cache for `read_page`. Keyed `${tabId}:${focus}:${viewportOnly}`. */
-  private readonly pageCache = new Map<string, string>()
+  private readonly pageCache = new Map<string, ReadPageCacheEntry>()
   private static readonly PAGE_CACHE_LIMIT = 32
+  private static readonly PAGE_CACHE_TTL_MS = 120_000
+  private readonly pageCacheStats: Pick<ReadPageCacheStats, 'hits' | 'misses' | 'expired' | 'evictions'> = {
+    hits: 0,
+    misses: 0,
+    expired: 0,
+    evictions: 0
+  }
 
   constructor(
     public readonly tabs: TabManager,
@@ -162,6 +170,15 @@ export class BrowserTools {
     scope.set(key, summary)
   }
 
+  clearPageCacheForTab(tabId: string): void {
+    for (const key of this.pageCache.keys()) {
+      if (key.startsWith(`${tabId}:`)) {
+        this.pageCache.delete(key)
+        this.recordPageCacheEvent('evicted')
+      }
+    }
+  }
+
   // Bound dep bundles for each tool module. Recomputed per call only because
   // a few of them depend on `this.capabilityBroker` which the renderer can
   // wire up post-construction.
@@ -179,8 +196,28 @@ export class BrowserTools {
       extractor: this.extractor,
       pageCache: this.pageCache,
       pageCacheLimit: BrowserTools.PAGE_CACHE_LIMIT,
-      appCapture: this.appCapture
+      pageCacheTtlMs: BrowserTools.PAGE_CACHE_TTL_MS,
+      appCapture: this.appCapture,
+      getPageCacheStats: () => this.getPageCacheStatsSnapshot(),
+      recordPageCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') =>
+        this.recordPageCacheEvent(event)
     }
+  }
+
+  private getPageCacheStatsSnapshot(): ReadPageCacheStats {
+    return {
+      ...this.pageCacheStats,
+      size: this.pageCache.size,
+      limit: BrowserTools.PAGE_CACHE_LIMIT,
+      ttlMs: BrowserTools.PAGE_CACHE_TTL_MS
+    }
+  }
+
+  private recordPageCacheEvent(event: 'hit' | 'miss' | 'expired' | 'evicted'): void {
+    if (event === 'hit') this.pageCacheStats.hits += 1
+    if (event === 'miss') this.pageCacheStats.misses += 1
+    if (event === 'expired') this.pageCacheStats.expired += 1
+    if (event === 'evicted') this.pageCacheStats.evictions += 1
   }
 
   private searchDeps() {

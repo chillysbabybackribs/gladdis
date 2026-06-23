@@ -11,12 +11,21 @@ export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'navigate',
     description:
-      'Navigate the active browser tab to a URL. ' +
-      'Returns an ack when the page-load event fires. ' +
-      'Call read_page afterwards to see the page content.',
+      'Navigate the active browser tab to a URL and ack on load settle. ' +
+      'Call read_page afterwards if you need the page content.',
     parameters: {
       type: 'object',
-      properties: { url: { type: 'string', description: 'Full URL to load.' } },
+      properties: {
+        url: { type: 'string', description: 'Full URL to load.' },
+        wait: {
+          type: 'boolean',
+          description: 'Wait for page-load settle before returning (default true).'
+        },
+        timeout_ms: {
+          type: 'number',
+          description: 'Maximum wait time in milliseconds when wait=true.'
+        }
+      },
       required: ['url']
     }
   },
@@ -54,9 +63,8 @@ export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'execute_in_browser',
     description:
-      'Run JavaScript in the active page. Use `return <expr>` to get a value. ' +
-      'For reading page state prefer read_page (cheaper); use this for surgical ' +
-      'DOM mutations, form fills, or extracting a specific scalar value.',
+      'Run JavaScript in the active page. Use `return <expr>` for a value. ' +
+      'Prefer read_page for state checks; use this for targeted DOM edits/mutations or scalar reads.',
     parameters: {
       type: 'object',
       properties: {
@@ -82,15 +90,13 @@ export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'grep_click',
     description:
-      'Search the page for a CSS selector, XPath, or text string, and click the first/best match. ' +
-      'Combines discovery and click in a single step to save time and tokens. ' +
-      'Returns details of the element that was clicked, or an error if no match was found.',
+      'Find a selector/XPath/text match and click it in one step.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'A CSS selector (e.g., "button.primary", "#login-btn"), XPath, or a unique text substring to search for.'
+          description: 'CSS selector, XPath, or unique text to match.'
         },
         type: {
           type: 'string',
@@ -108,15 +114,13 @@ export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'grep_type',
     description:
-      'Search the page for an input/textarea element by selector or text, click it to focus, and type the specified text into it. ' +
-      'Combines discovery, clicking/focusing, and typing in a single action to save time and tokens. ' +
-      'Returns details of the matched element, or an error if no match was found.',
+      'Find an input/textarea by selector or text, focus it, and type in one step.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'A CSS selector, XPath, or adjacent/placeholder text substring to search for the input element.'
+          description: 'CSS selector, XPath, or nearby/placeholder text to match the input.'
         },
         text: {
           type: 'string',

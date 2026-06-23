@@ -110,7 +110,8 @@ describe('ChatService provider hardening', () => {
     expect(browserProfile.tools.map((tool) => tool.name)).not.toContain('write_file')
 
     const mixedProfile = selectAgentToolProfile('edit the app UI and validate it with a browser screenshot')
-    expect(mixedProfile.name).toBe('full')
+    expect(mixedProfile.name).toBe('filesystem')
+    expect(mixedProfile.tools.map((tool) => tool.name)).toContain('run_validation')
 
     const localPageProfile = selectAgentToolProfile('create a login form page in src/renderer')
     expect(localPageProfile.name).toBe('filesystem')
@@ -173,9 +174,48 @@ describe('ChatService provider hardening', () => {
     expect(next).toContain('run_command')
     expect(next).toContain('edit_file')
 
+    const toolOnlyGranted = new Set<string>()
+    const exact = await bt.run('request_tools', { tools: ['read_file', 'edit_file'] }, { tabId: 'tab-1', grantedTools: toolOnlyGranted } as any)
+    expect(exact.ok).toBe(true)
+    expect(toolOnlyGranted.has('read_file')).toBe(true)
+    expect(toolOnlyGranted.has('edit_file')).toBe(true)
+    expect(toolOnlyGranted.has('run_command')).toBe(false)
+    const nextExact = resolveTurnTools(lean.tools, toolOnlyGranted).map((t) => t.name)
+    expect(nextExact).toContain('read_file')
+    expect(nextExact).toContain('edit_file')
+    expect(nextExact).not.toContain('run_command')
+
+    const normalizedAlias = new Set<string>()
+    const alias = await bt.run(
+      'request_tools',
+      { group: 'fs', tools: ['Read File', 'RUN-COMMAND'] },
+      { tabId: 'tab-1', grantedTools: normalizedAlias } as any
+    )
+    expect(alias.ok).toBe(true)
+    expect(normalizedAlias.has('read_file')).toBe(true)
+    expect(normalizedAlias.has('run_command')).toBe(true)
+
+    const normalizedStringArgs = new Set<string>()
+    const aliasFromString = await bt.run(
+      'request_tools',
+      {
+        group: 'file_system, web search',
+        tools: 'read_file, RUN-COMMAND'
+      },
+      { tabId: 'tab-1', grantedTools: normalizedStringArgs } as any
+    )
+    expect(aliasFromString.ok).toBe(true)
+    expect(normalizedStringArgs.has('run_command')).toBe(true)
+    expect(normalizedStringArgs.has('read_file')).toBe(true)
+    expect(normalizedStringArgs.has('search')).toBe(true)
+    expect(normalizedStringArgs.has('fetch_page')).toBe(true)
+    expect(normalizedStringArgs.has('deep_search')).toBe(true)
+
     // An unknown group is rejected, not silently granted.
     const bad = await bt.run('request_tools', { group: 'nonsense' }, { tabId: 'tab-1', grantedTools: new Set() } as any)
     expect(bad.ok).toBe(false)
+    const badTools = await bt.run('request_tools', { tools: ['non_existent_tool'] }, { tabId: 'tab-1', grantedTools: new Set() } as any)
+    expect(badTools.ok).toBe(false)
   })
 
   it('describes recall_history as context recovery, not automatic continuation', () => {
@@ -281,7 +321,7 @@ describe('ChatService provider hardening', () => {
     // Filesystem-capable turn: full path-resolution block.
     const fs = block('edit src/main/index.ts')
     expect(fs).toContain('/tmp/selected-project')
-    expect(fs).toContain('Working folder')
+    expect(fs).toContain('Workspace:')
 
     // Lean turn WITH a folder selected: a short hint that points at request_tools,
     // so "what should we install" can escalate instead of answering generically.
@@ -755,7 +795,7 @@ describe('ChatService provider hardening', () => {
       listModels: vi.fn()
     }
     // localPreviewBridge runs via the browser pipeline; tests don't exercise it here.
-    vi.spyOn(service as any, 'workspaceSystemBlock').mockReturnValue('Working folder: /tmp/selected-project')
+    vi.spyOn(service as any, 'workspaceSystemBlock').mockReturnValue('Workspace: /tmp/selected-project')
     vi.spyOn(service as any, 'codexRepoOverviewBlock').mockResolvedValue(null)
 
     await service.send({

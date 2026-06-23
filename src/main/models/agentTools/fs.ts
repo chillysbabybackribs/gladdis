@@ -9,17 +9,15 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'read_file',
     description:
-      'Read a UTF-8 file from the local filesystem. Small files return whole by default; ' +
-      'large files return a bounded preview with total-line metadata. For unknown code, ' +
-      'use search_files first, then read the exact start_line / end_line range around hits. ' +
-      'Pass full: true only when the entire file is genuinely needed. Large outputs are capped.',
+      'Read a UTF-8 file with optional line bounds. Small files return whole; ' +
+      'large files return a bounded preview plus metadata.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string' },
         start_line: { type: 'number', description: 'First line (1-based).' },
         end_line: { type: 'number', description: 'Last line (inclusive).' },
-        full: { type: 'boolean', description: 'Return the whole file up to the hard cap.' }
+        full: { type: 'boolean', description: 'Return full file within the hard cap.' }
       },
       required: ['path']
     }
@@ -27,13 +25,12 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'write_file',
     description:
-      'Create or completely overwrite a file. Parent dirs are created automatically. ' +
-      'Prefer edit_file for surgical changes.',
+      'Create or fully overwrite a file. Parent dirs are created automatically. Prefer edit_file for surgical changes.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string' },
-        content: { type: 'string', description: 'Full file contents.' }
+        content: { type: 'string', description: 'New file contents.' }
       },
       required: ['path', 'content']
     }
@@ -66,27 +63,24 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'search_files',
     description:
-      'Ripgrep-backed recursive search before reading unknown files. Fixed-string queries use ' +
-      'smart-case matching and also surface strong file-path/name hits alongside content hits; ' +
-      'set regex: true for patterns. Returns ranked hits, compact context, and a suggested ' +
-      'read_file follow-up. Skips node_modules/.git/build. Optional glob filter (e.g. "*.ts").',
+      'Recursive search for symbols before reading files. Returns ranked path hits and a read_file suggestion.',
     parameters: {
       type: 'object',
       properties: {
         query: { type: 'string' },
-        path: { type: 'string', description: 'Root dir to search. Defaults to ".".' },
-        glob: { type: 'string', description: 'File-name glob, e.g. "*.ts".' },
+        path: { type: 'string', description: 'Root dir. Defaults to ".".' },
+        glob: { type: 'string', description: 'Filename glob, e.g. "*.ts".' },
         context_lines: {
           type: 'number',
-          description: 'Nearby lines to include around each hit. Defaults to 2; max 8.'
+          description: 'Context lines around each hit. Defaults 2; max 8.'
         },
         max_results: {
           type: 'number',
-          description: 'Maximum hits to return. Defaults to 1000; use smaller values for broad queries.'
+          description: 'Max hits to return. Defaults 1000.'
         },
         regex: {
           type: 'boolean',
-          description: 'Treat query as a regular expression instead of a fixed substring.'
+          description: 'Use regex matching.'
         }
       },
       required: ['query']
@@ -95,9 +89,7 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'run_validation',
     description:
-      'Run a fixed project validation command after code edits. ' +
-      'Use typecheck for most TypeScript changes, test for behavioral changes, build for packaging/runtime confidence, ' +
-      'or check for the full local gate. Do not claim code edits are complete until relevant validation passes.',
+      'Compatibility alias. Prefer verify_change where possible.',
     parameters: {
       type: 'object',
       properties: {
@@ -113,15 +105,14 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'read_clipboard',
     description:
-      'Read the current OS clipboard text (CLIPBOARD selection by default). ' +
-      'Use this to inspect what is in the clipboard before copying code, error text, or task notes.',
+      'Read OS clipboard text.',
     parameters: {
       type: 'object',
       properties: {
         selection: {
           type: 'string',
           enum: ['clipboard', 'primary'],
-          description: 'Clipboard selection to read. Defaults to "clipboard".'
+          description: 'Selection to read. Defaults to "clipboard".'
         }
       }
     }
@@ -129,16 +120,15 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'write_clipboard',
     description:
-      'Write plain text to the OS clipboard. This is the preferred way to copy model outputs so you can paste them elsewhere. ' +
-      'For large text, pass it in full; output is truncated only in tool display.',
+      'Write plain text to the OS clipboard.',
     parameters: {
       type: 'object',
       properties: {
-        text: { type: 'string', description: 'Text to place on the clipboard.' },
+        text: { type: 'string', description: 'Clipboard text.' },
         selection: {
           type: 'string',
           enum: ['clipboard', 'primary'],
-          description: 'Clipboard selection to write. Defaults to "clipboard".'
+          description: 'Selection to write. Defaults to "clipboard".'
         }
       },
       required: ['text']
@@ -147,9 +137,7 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'publish_changes',
     description:
-      'Commit and push local repository changes after successful code edits and validation. ' +
-      'Stages changes according to .gitignore, creates one commit, and pushes the current branch to the configured Git remote. ' +
-      'Use this automatically at the end of coding tasks when validation has passed, unless the user explicitly says not to push.',
+      'Commit and push local changes after validation.',
     parameters: {
       type: 'object',
       properties: {
@@ -171,27 +159,21 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'run_command',
     description:
-      'Run an arbitrary shell command on the local machine and return its combined stdout/stderr. ' +
-      'Use this to install or update whatever the task needs — packages (npm/pnpm/pip/apt-get/brew), ' +
-      'repos (git clone), CLIs, or any other tool — and to run build/setup steps that run_validation does not cover. ' +
-      'The command runs as the current OS user with full access; there is no approval prompt. ' +
-      'For system packages that need root (e.g. apt-get/dpkg), prefix the command with "sudo" — passwordless sudo is configured, so "sudo apt-get install -y <pkg>" runs unattended. ' +
-      'Prefer run_validation for the fixed typecheck/test/build checks; use this for everything else. ' +
-      'Note: a small high-signal denylist (rm -rf /, dd of=/dev/sd*, fork bombs, …) is enforced by default; see the README "Threat model" section for the env overrides.',
+      'Run a shell command and return combined stdout/stderr output.',
     parameters: {
       type: 'object',
       properties: {
         command: {
           type: 'string',
-          description: 'The full shell command line to execute, e.g. "npm install -g pnpm" or "git clone <url>".'
+          description: 'Shell command to execute.'
         },
         timeout_ms: {
           type: 'number',
-          description: 'Command timeout in milliseconds. Clamped to 250ms-10min. Defaults to 600000ms.'
+          description: 'Timeout in ms. Clamped 250ms-10min. Default 600000ms.'
         },
         cwd: {
           type: 'string',
-          description: 'Working directory. Defaults to the workspace root.'
+          description: 'Working directory (defaults to workspace root).'
         }
       },
       required: ['command']
@@ -200,22 +182,18 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'audit_codebase',
     description:
-      'Runs a Google Gemini sub-agent to audit the codebase. It parses the file tree, package.json, ' +
-      'and major configs to return a rich markdown map of the technology stack, module architecture, ' +
-      'core entry points, schemas, and guidelines. Defaults to a fast/cheap model with automatic ' +
-      'fallback if it has been retired; pass `model` to pin a specific Google model. ' +
-      'Call this first to understand the workspace layout.',
+      'Run only on explicit full-audit requests.',
     parameters: {
       type: 'object',
       properties: {
         focusPath: {
           type: 'string',
-          description: 'Optional folder or file path to focus the audit on (e.g. "src/renderer").'
+          description: 'Optional folder/file path to focus the audit.'
         },
         model: {
           type: 'string',
           description:
-            'Optional Google model id override (e.g. "gemini-2.5-pro"). If unset, uses the audit fallback chain.'
+            'Optional model override (e.g. "gemini-2.5-pro").'
         }
       }
     }
@@ -223,39 +201,38 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'launch_web_dev_server',
     description:
-      'Launches a local development server or preview server asynchronously and optionally loads it in the embedded browser. ' +
-      'Monitors startup logs to auto-detect the URL and port, or waits for a specified port/URL to become responsive.',
+      'Launch and monitor a local dev/preview server.',
     parameters: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          description: 'The action to perform: "start", "stop", "status", or "restart". Defaults to "start".',
+          description: 'Action: "start", "stop", "status", or "restart".',
           enum: ['start', 'stop', 'status', 'restart']
         },
         command: {
           type: 'string',
-          description: 'The command to run to start the dev server (e.g. "npm run dev", "vite"). If omitted, the tool will try to auto-detect a script from package.json.'
+          description: 'Server command (e.g. npm run dev). Auto-detect if omitted.'
         },
         cwd: {
           type: 'string',
-          description: 'The working directory where the server command should be run (relative to workspace root or absolute).'
+          description: 'Working directory for the server command.'
         },
         port: {
           type: 'number',
-          description: 'Expected port number the server will listen on. If provided, the tool waits until this port becomes responsive.'
+          description: 'Expected port to wait on.'
         },
         url: {
           type: 'string',
-          description: 'Expected URL / health endpoint to hit (e.g. "http://localhost:3000/"). If provided, the tool polls this URL until it responds.'
+          description: 'Expected URL/health endpoint to poll.'
         },
         open_browser: {
           type: 'boolean',
-          description: 'Whether to automatically open the dev server URL in a new browser tab once it is ready. Defaults to true.'
+          description: 'Open ready URL in a new tab when true.'
         },
         timeout_ms: {
           type: 'number',
-          description: 'Maximum time in milliseconds to wait for the server to become ready. Defaults to 30000.'
+          description: 'Milliseconds to wait for readiness.'
         }
       }
     }

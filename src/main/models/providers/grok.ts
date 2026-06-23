@@ -41,6 +41,36 @@ type ModelAudit = {
 
 const STUB_PREFIX = '[trimmed]'
 
+/**
+ * Context compaction optimization (per xAI official docs).
+ * For long conversations / agent loops, we produce compact reusable summaries
+ * instead of shipping the full history. This mirrors the "opaque compaction"
+ * feature and helps maximize cachedInputTokens + stay under context limits.
+ * See: https://docs.x.ai/developers/advanced-api-usage/context-compaction
+ */
+export interface HistoryCompactionOptions {
+  maxMessages?: number
+  keepTail?: number
+  maxChars?: number
+}
+
+function compactHistoryForGrok(messages: OpenAiMessage[], opts: HistoryCompactionOptions = {}): OpenAiMessage[] {
+  const maxChars = opts.maxChars ?? 24_000
+  if (messages.length <= 6) return messages // short convos need no compaction
+
+  const totalLen = messages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0)
+  if (totalLen <= maxChars) return messages
+
+  // Keep system + most recent 3 turns; replace earlier user/assistant pairs with a single compacted marker
+  const system = messages.find(m => m.role === 'system')
+  const recent = messages.slice(-6)
+  const compacted = {
+    role: 'user' as const,
+    content: `${STUB_PREFIX} Earlier conversation compacted into reusable summary (see recall_history).`
+  }
+  return system ? [system, compacted, ...recent] : [compacted, ...recent]
+}
+
 /* ----------------------------- OpenAI wire types ----------------------------- */
 // Only the fields we send/read. The API returns more; we ignore the rest.
 
@@ -325,10 +355,11 @@ export async function streamGrokPlain(args: {
   system: string
   maxTokens: number
 }): Promise<void> {
-  const messages: OpenAiMessage[] = [
+  let messages: OpenAiMessage[] = [
     { role: 'system', content: args.system },
     ...toGrokMessages(args.req)
   ]
+  messages = compactHistoryForGrok(messages)
   const call = args.audit.begin({
     requestId: args.req.requestId,
     conversationId: args.req.conversationId,
@@ -392,7 +423,8 @@ export async function runGrokToolLoop(args: {
   const systemText = args.workspaceBlock
     ? `${args.agentSystem}\n\n${args.workspaceBlock}`
     : args.agentSystem
-  const messages: OpenAiMessage[] = [{ role: 'system', content: systemText }, ...toGrokMessages(args.req)]
+  let messages: OpenAiMessage[] = [{ role: 'system', content: systemText }, ...toGrokMessages(args.req)]
+  messages = compactHistoryForGrok(messages)
   // Tool result messages, tracked so old ones can be stubbed to save tokens.
   const resultMsgs: OpenAiMessage[] = []
   const validation = createToolValidationState()

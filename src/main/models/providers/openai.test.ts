@@ -216,7 +216,7 @@ describe('toOpenAiMessages with history compaction', () => {
       role: 'user' as const,
       content: `msg ${i}`
     }))
-    const req: ChatRequest = { messages }
+    const req: ChatRequest = { requestId: 'test-req-1', modelId: 'openai-test', messages }
     const result = toOpenAiMessages(req)
 
     expect(result.length).toBe(10)
@@ -225,20 +225,17 @@ describe('toOpenAiMessages with history compaction', () => {
   })
 
   it('compacts messages when total count exceeds maxMessages', () => {
-    vi.stubEnv('GLADDIS_OPENAI_MAX_MESSAGES', '10')
-    vi.stubEnv('GLADDIS_OPENAI_KEEP_TAIL', '4')
-
     const messages = Array.from({ length: 15 }, (_, i) => ({
       role: i % 2 === 0 ? ('user' as const) : ('assistant' as const),
       content: `msg ${i}`
     }))
-    const req: ChatRequest = { messages }
-    const result = toOpenAiMessages(req)
+    const req: ChatRequest = { requestId: 'test-req-1', modelId: 'openai-test', messages }
+    const result = toOpenAiMessages(req, { maxMessages: 10, keepTail: 4 })
 
     // Expected: 1 notice + 4 tail messages = 5 messages
     expect(result.length).toBe(5)
     expect(result[0].role).toBe('user')
-    expect(result[0].content).toContain('[System Notice: To optimize performance and token usage, 11 earlier messages of this conversation have been trimmed. The most recent 4 messages are preserved verbatim below.]')
+    expect(result[0].content).toContain('[Trimmed 11 earlier messages; keeping the last 4 verbatim.]')
 
     // Verbatim tail messages preserved: msg 11, msg 12, msg 13, msg 14
     expect(result[1].content).toBe('msg 11')

@@ -161,7 +161,7 @@ so the model emits plans instead of directly seeing a tool menu.
 
 Tool families:
 
-- **Browser** — `browse_task`, `read_page`, `check_page`, `navigate`,
+- **Browser** — `browse_task`, `read_page`, `navigate`,
   `grep_page`, `grep_click`, `grep_type`, `click_xy`, `type_text`, `press_key`, `execute_in_browser`, `cdp_command`.
   Prefer `grep_page` for discovery and `grep_click` / `grep_type` for direct action when the target is identifiable from page text or selectors. The active tab is still fully owned by CDP; this list is transitional and should collapse behind one deterministic runtime.
 - **Filesystem** (`src/main/fs/FileTools.ts`) — `read_file`, `write_file`,
@@ -185,7 +185,7 @@ sandbox. Codex is not allowed to become a second browser automation stack.
 Gladdis is the browser owner: page reading, UI preview, screenshots, and visual verification
 must flow through the embedded `WebContentsView` tab via app-server dynamic tools
 (`gladdis.search_task`, `gladdis.browse_task`, `gladdis.read_page`,
-`gladdis.check_page`, `gladdis.screenshot`) or through Gladdis's own post-Codex
+`gladdis.screenshot`) or through Gladdis's own post-Codex
 preview handoff.
 
 The Codex config disables native web search for Gladdis sessions, and the main
@@ -211,6 +211,32 @@ Codex can use `thread/resume` for that same conversation. A fresh chat gets a ne
 provider thread. If the user asks to pick up where they left off, `recall_history`
 uses the current chat's explicit lineage when present, otherwise it treats the
 most recently updated saved chat as the obvious previous chat.
+
+### Tool-surface optimization (selection, caching, normalization)
+
+Gladdis keeps prompt/tool payload size low by sending a focused tool set first:
+
+- `selectAgentToolProfile(userText)` chooses a lean starting profile:
+  - `conversation`: memory tools only
+  - `filesystem`: repo + fs tools
+  - `browser`: browse/read/click/capture tools
+  - `research`: search/fetch/browse-task tools
+  - `full`: broad prompts
+- Every profile includes `request_tools`, so the model can escalate mid-turn:
+  - `request_tools({ group: 'filesystem' })` for a broad domain grant
+  - `request_tools({ tools: [...] })` for exact-token-efficient escalation
+- `request_tools` normalizes inputs (aliases, punctuation, casing, spacing) so
+  values like `web search`, `FS`, `file_system`, and `read-file` resolve to
+  canonical tool/group names.
+- In-memory caches reuse resolved tool signatures and normalized names so repeated
+  prompts and repeats of the same requested set stay O(1).
+
+Recent benchmark snapshot (raw tool JSON only):
+- Full surface (`39` tools): ~`26,107` chars (`~6,537` OpenAI tokens)
+- Conversation profile (`7` tools): ~`3,784` chars (`~946` OpenAI tokens)
+- Filesystem profile (`24` tools): ~`15,434` chars (`~3,861` OpenAI tokens)
+- Browser profile (`23` tools): ~`15,431` chars (`~3,866` OpenAI tokens)
+- Research profile (`12` tools): ~`9,705` chars (`~2,433` OpenAI tokens)
 
 Within a single browser-capable run, bulky execution results (page reads,
 file reads, command output) are kept verbatim only for the most recent `VERBATIM_TOOL_RESULTS`

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "workspace": {
-    "updatedAt": "2026-06-22T04:23:07.345Z",
+    "updatedAt": "2026-06-22T09:59:41.201Z",
     "notes": {
       "projectName": {
         "value": "Gladdis"
@@ -27,6 +27,15 @@
           "o3-mini",
           "gpt-4o mini",
           "gpt-4.1 mini"
+        ]
+      },
+      "grok_optimization_plan": {
+        "review": "Grok provider uses raw /chat/completions. Has reasoning_effort, cached token parsing, history via recall. No compaction. turnContextPolicy and historyTools handle selective context.",
+        "optimizations": [
+          "Add context compaction step before long histories sent to Grok (official docs recommendation)",
+          "Leverage existing recall/summary for opaque reusable summaries",
+          "Ensure high cachedInputTokens by stable prompts",
+          "Tighten caps on tool results for Grok turns"
         ]
       }
     }

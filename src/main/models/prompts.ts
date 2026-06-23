@@ -133,7 +133,8 @@ function buildSystemSignature(tools: ToolDef[]): string {
 }
 
 function cacheSystemPrompt(signature: string, prompt: string): string {
-  if (SYSTEM_CACHE.has(signature)) return SYSTEM_CACHE.get(signature)!
+  const existing = SYSTEM_CACHE.get(signature)
+  if (existing) return existing
   if (SYSTEM_CACHE.size >= SYSTEM_CACHE_LIMIT) {
     const first = SYSTEM_CACHE.keys().next()
     if (!first.done && first.value !== undefined) SYSTEM_CACHE.delete(first.value)

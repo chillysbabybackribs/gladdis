@@ -165,9 +165,11 @@ export class TabManager {
     }).finally(() => {
       this.onChange()
     })
-    void cdp.attach().catch((err) => {
-      console.error(`[tab ${id}] cdp attach failed during creation:`, err)
-    })
+    if (!options.background) {
+      void cdp.attach().catch((err) => {
+        console.error(`[tab ${id}] cdp attach failed during creation:`, err)
+      })
+    }
     return this.info(tab)
   }
 

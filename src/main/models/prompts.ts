@@ -33,99 +33,116 @@ const REASONING_METHOD =
   'For pure text-edit tasks, you can proceed without extra fact gathering.\n\n' +
   'Close with one useful next-step insight from what you found.'
 
-const BROWSER_GUIDANCE =
+const BROWSER_OVERVIEW =
   '## Browser tools\n' +
   'All browser actions act on the VISIBLE tab the user is watching — they see the page change. ' +
   'Use your own judgment about which tool fits; there is no fixed script.\n\n' +
   '  • search → finds web results, then opens the best hit in the visible tab.\n' +
   '  • fetch_page → read a known URL deeply.\n' +
-  '  • grep_page → preferred discovery for text/selector/co-ordinates, fast and precise.\n' +
-  '  • grep_click → discover and click in one step.\n' +
-  '  • grep_type → discover, focus, and type in one step.\n' +
-  '  • read_page → high-level digest (structure + actions); use for orientation, not targeting.\n' +
-  '  • navigate/click_xy/type_text/press_key/execute_in_browser/cdp_command → page actions.\n' +
   '  • browse_task → multi-step deterministic flows (logins, checkouts, multi-page processes).\n' +
   '  • screenshot/screenshot_app → visual confirmation only.\n\n' +
-
   'Start with grep_* or read_page before interactions. Prefer grep_page for precise coordinates, then act, then re-read. ' +
   'Use search only when URL intent is unknown or user asks for web search. ' +
   'Prefer finishing the user goal over literal wording and ask one clarifying option if still ambiguous.'
 
-const FILESYSTEM_GUIDANCE =
+const BROWSER_INTERACTION_GUIDANCE =
+  '## Browser interaction\n' +
+  '  • grep_page → preferred discovery for text/selector/co-ordinates, fast and precise.\n' +
+  '  • grep_click → discover and click in one step.\n' +
+  '  • grep_type → discover, focus, and type in one step.\n' +
+  '  • read_page → high-level digest (structure + actions); use for orientation, not targeting.\n' +
+  '  • navigate/click_xy/type_text/press_key/execute_in_browser/cdp_command → page actions.'
+
+const FILESYSTEM_OVERVIEW =
   '## Filesystem\n' +
   'Locate before you read: search_files first, then read_file around relevant hits. If nothing matches, try close spellings before concluding absence. ' +
-  'Read full files only when small, config-like, or explicitly requested. Use edit_file for targeted edits and write_file for new files.\n\n' +
+  'Read full files only when small, config-like, or explicitly requested.'
+
+const FILESYSTEM_EDITING =
+  '## Filesystem editing\n' +
+  'Use edit_file for targeted edits and write_file for new files.'
+
+const SHELL_GUIDANCE =
   '## Shell & installing tools\n' +
-  'Use run_command for shell tasks; if a required tool/repo/package is missing, install it directly (`npm`, `pip`, `git`, '
-  + '`sudo apt-get install -y`, passwordless). Prefer the smallest command that works. Use read_clipboard / write_clipboard for text capture.\n\n' +
+  'Use run_command for shell tasks; if a required tool/repo/package is missing, install it directly (`npm`, `pip`, `git`, ' +
+  '`sudo apt-get install -y`, passwordless). Prefer the smallest command that works. Use read_clipboard / write_clipboard for text capture.'
+
+const VALIDATION_GUIDANCE =
   '## Validation\n' +
-  'For source/config/package edits, run verify_change (or run_validation) before finishing. Choose the narrowest needed check first: typecheck, test, build, then check. If it fails, fix and rerun.\n\n' +
+  'For source/config/package edits, run verify_change (or run_validation) before finishing. Choose the narrowest needed check first: typecheck, test, build, then check. If it fails, fix and rerun.'
+
+const PUBLISH_GUIDANCE =
   '## GitHub publishing\n' +
   'After passing validation, run publish_changes before your final response with a short, descriptive commit message. ' +
   'Do not ask the user to handle git, commit, push, or GitHub manually unless publish_changes fails or they block it.'
 
-const MEMORY_GUIDANCE =
+const MEMORY_OVERVIEW =
   '## Memory\n' +
   'Only the recent tail of the conversation is in context. Past conversation memory is never injected automatically; if the user asks to resume or refers to something earlier, call recall_history first. Use recall_history with scope:"all" only when the user explicitly asks about a different or older chat. Resume process: retrieve the relevant summary, read the full saved conversation only if the summary is not enough, then tell the user what you found and ask or wait for the next concrete instruction. A bare resume request such as "pick up where we were" is context recovery, not permission to edit files, run validations, navigate pages, or continue old work automatically. Trimmed tool results (shown as "[trimmed]") are re-readable via recall_history(tool_call_id). Do not claim you cannot remember something without first calling recall_history.'
 
-const BROWSER_TOOL_NAMES = new Set([
-  'search',
-  'deep_search',
-  'fetch_page',
-  'browse_task',
-  'read_page',
-  'grep_page',
-  'grep_click',
-  'grep_type',
-  'screenshot',
-  'screenshot_app',
-  'navigate',
-  'click_xy',
-  'type_text',
-  'press_key',
-  'execute_in_browser',
-  'cdp_command'
-])
-
-const FILESYSTEM_TOOL_NAMES = new Set([
-  'read_file',
-  'write_file',
-  'edit_file',
-  'list_dir',
-  'search_files',
-  'repo_overview',
-  'search_repo',
-  'read_spans',
-  'research_dossier',
-  'run_validation',
-  'verify_change',
-  'publish_changes',
-  'run_command',
-  'audit_codebase',
-  'launch_web_dev_server',
-  'read_clipboard',
-  'write_clipboard'
-])
+const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: string }> = [
+  { enabled: () => true, text: REASONING_METHOD },
+  { enabled: () => true, text: AGENT_GUIDANCE_BASE },
+  { enabled: (names) => names.has('search') || names.has('deep_search') || names.has('fetch_page'), text: BROWSER_OVERVIEW },
+  { enabled: (names) => names.has('browse_task') || names.has('read_page') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier'), text: FILESYSTEM_OVERVIEW },
+  { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
+  { enabled: (names) => names.has('run_command') || names.has('launch_web_dev_server'), text: SHELL_GUIDANCE },
+  { enabled: (names) => names.has('run_validation') || names.has('verify_change'), text: VALIDATION_GUIDANCE },
+  { enabled: (names) => names.has('publish_changes'), text: PUBLISH_GUIDANCE },
+  { enabled: (names) => names.has('recall_history') || names.has('memory_write') || names.has('memory_read') || names.has('memory_list') || names.has('memory_forget') || names.has('memory_create_task'), text: MEMORY_OVERVIEW },
+]
 
 const SYSTEM_CACHE = new Map<string, string>()
 const SYSTEM_CACHE_LIMIT = 64
+const GUIDANCE_CACHE = new Map<string, string>()
+const GUIDANCE_CACHE_LIMIT = 128
 
 function toolGist(description: string): string {
   return description.split('. ')[0].replace(/\.$/, '')
 }
 
-function agentGuidanceForTools(tools: ToolDef[]): string {
+const GUIDANCE_BITS = {
+  browserSearch: 1 << 0,
+  browserInteract: 1 << 1,
+  filesystemRead: 1 << 2,
+  filesystemWrite: 1 << 3,
+  shell: 1 << 4,
+  validation: 1 << 5,
+  publish: 1 << 6,
+  memory: 1 << 7,
+} as const
+
+type GuidanceBit = (typeof GUIDANCE_BITS)[keyof typeof GUIDANCE_BITS]
+
+function guidanceKey(tools: ToolDef[]): GuidanceBit {
   const names = new Set(tools.map((tool) => tool.name))
-  const hasBrowser = [...BROWSER_TOOL_NAMES].some((name) => names.has(name))
-  const hasFilesystem = [...FILESYSTEM_TOOL_NAMES].some((name) => names.has(name))
-  const sections = [REASONING_METHOD, AGENT_GUIDANCE_BASE]
-  if (hasBrowser) sections.push(BROWSER_GUIDANCE)
-  if (hasFilesystem) sections.push(FILESYSTEM_GUIDANCE)
-  const hasMemoryTools = names.has('recall_history') ||
-    names.has('memory_write') || names.has('memory_read') ||
-    names.has('memory_list') || names.has('memory_forget') || names.has('memory_create_task')
-  if (hasMemoryTools) sections.push(MEMORY_GUIDANCE)
-  return sections.join('\n\n')
+  let key = 0
+  if (names.has('search') || names.has('deep_search') || names.has('fetch_page')) key |= GUIDANCE_BITS.browserSearch
+  if (names.has('browse_task') || names.has('read_page') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
+  if (names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier')) key |= GUIDANCE_BITS.filesystemRead
+  if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
+  if (names.has('run_command') || names.has('launch_web_dev_server')) key |= GUIDANCE_BITS.shell
+  if (names.has('run_validation') || names.has('verify_change')) key |= GUIDANCE_BITS.validation
+  if (names.has('publish_changes')) key |= GUIDANCE_BITS.publish
+  if (names.has('recall_history') || names.has('memory_write') || names.has('memory_read') || names.has('memory_list') || names.has('memory_forget') || names.has('memory_create_task')) key |= GUIDANCE_BITS.memory
+  return key
+}
+
+function agentGuidanceForTools(tools: ToolDef[]): string {
+  const key = guidanceKey(tools)
+  const cached = GUIDANCE_CACHE.get(String(key))
+  if (cached) return cached
+
+  const names = new Set(tools.map((tool) => tool.name))
+  const guidance = GUIDANCE_BLOCKS.filter((block) => block.enabled(names)).map((block) => block.text).join('\n\n')
+
+  if (GUIDANCE_CACHE.size >= GUIDANCE_CACHE_LIMIT) {
+    const first = GUIDANCE_CACHE.keys().next()
+    if (!first.done && first.value !== undefined) GUIDANCE_CACHE.delete(first.value)
+  }
+  GUIDANCE_CACHE.set(String(key), guidance)
+  return guidance
 }
 
 function buildSystemSignature(tools: ToolDef[]): string {

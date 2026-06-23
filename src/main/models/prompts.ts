@@ -132,6 +132,11 @@ function buildSystemSignature(tools: ToolDef[]): string {
   return tools.map((t) => `${t.name}:${toolGist(t.description)}`).join('\n')
 }
 
+function buildStaticAgentBase(signature: string): string {
+  const toolLines = signature.split('\n').map((line) => `- ${line.replace(':', ': ')}`).join('\n')
+  return `${ABOUT_GLADDIS}\n\n${toolLines}`
+}
+
 function cacheSystemPrompt(signature: string, prompt: string): string {
   const existing = SYSTEM_CACHE.get(signature)
   if (existing) return existing
@@ -151,8 +156,7 @@ export async function buildAgentSystem(tools: ToolDef[]): Promise<string> {
   const signature = buildSystemSignature(tools)
   const cached = SYSTEM_CACHE.get(signature)
   if (cached) return cached
-  const toolLines = signature.split('\n').map((line) => `- ${line.replace(':', ': ')}`).join('\n')
-  return cacheSystemPrompt(signature, `${ABOUT_GLADDIS}\n\n${toolLines}\n\n${agentGuidanceForTools(tools)}`)
+  return cacheSystemPrompt(signature, `${buildStaticAgentBase(signature)}\n\n${agentGuidanceForTools(tools)}`)
 }
 
 /**

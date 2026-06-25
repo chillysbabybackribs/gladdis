@@ -23,15 +23,15 @@ export async function checkCondition(
       case 'always':
         return { ok: true, reason: 'always' }
       case 'urlMatches': {
-        const cap = await deps.capture(tabId)
         let pattern: RegExp
         try {
           pattern = new RegExp(c.pattern)
         } catch {
           return { ok: false, reason: `invalid url pattern: ${c.pattern}` }
         }
-        const ok = pattern.test(cap.url)
-        return { ok, reason: ok ? '' : `url "${cap.url}" !~ /${c.pattern}/` }
+        const url = await currentUrl(deps, tabId)
+        const ok = !!url && pattern.test(url)
+        return { ok, reason: ok ? '' : `url "${url ?? '(unavailable)'}" !~ /${c.pattern}/` }
       }
       case 'elementExists': {
         const node = await resolveTarget(deps, tabId, c.target)
@@ -71,9 +71,10 @@ export async function checkCondition(
  * Resolve a Target → live ActionNode.
  *
  * Order matters and is intentional:
- *   1. Stable selector against the cached AX tree (cheapest, most reliable).
- *   2. Stable selector via direct CSS lookup (covers nodes outside the AX
- *      slice we cached).
+ *   1. Stable selector via direct CSS lookup (cheap and usually enough for
+ *      planned actions emitted from an earlier capture).
+ *   2. Stable selector against the captured AX/action tree (covers nodes whose
+ *      useful role/name data is richer than DOM attributes).
  *   3. role+name match (handles dynamic / shadow content where selectors
  *      change between captures).
  *   4. Brittle selector — only as a last resort, since positional CSS goes
@@ -84,19 +85,24 @@ export async function resolveTarget(
   tabId: string,
   t: Target
 ): Promise<ActionNode | null> {
-  const cap = await deps.capture(tabId)
-  const acts = cap.actions ?? []
-
+  let capActions: ActionNode[] | null = null
+  const actions = async (): Promise<ActionNode[]> => {
+    if (capActions) return capActions
+    const cap = await deps.capture(tabId)
+    capActions = cap.actions ?? []
+    return capActions
+  }
   if (t.selector) {
     const stable = stableSelector(t.selector)
     if (stable) {
-      const bySel = acts.find((a) => a.selector === stable)
-      if (bySel) return bySel
       const byCss = await resolveByCss(deps, tabId, stable)
       if (byCss) return byCss
+      const bySel = (await actions()).find((a) => a.selector === stable)
+      if (bySel) return bySel
     }
   }
   if (t.role || t.name) {
+    const acts = await actions()
     const wantRole = t.role?.toLowerCase()
     const wantName = t.name?.trim().toLowerCase()
     const byRole = acts.find(
@@ -116,10 +122,19 @@ export async function resolveTarget(
   }
 
   if (t.selector) {
+    const acts = await actions()
     const bySel = acts.find((a) => a.selector === t.selector)
     if (bySel) return bySel
   }
   return null
+}
+
+async function currentUrl(deps: PipelineDeps, tabId: string): Promise<string | null> {
+  const res = (await deps.cdpSend(tabId, 'Runtime.evaluate', {
+    expression: `location.href`,
+    returnByValue: true
+  })) as { result?: { value?: string } }
+  return typeof res.result?.value === 'string' ? res.result.value : null
 }
 
 async function resolveByCss(

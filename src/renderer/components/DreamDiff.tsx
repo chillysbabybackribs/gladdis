@@ -63,6 +63,13 @@ export function DreamDiffModal({ diff, busy, onAdopt, onDiscard, onClose }: Prop
   const hygieneSectioned = useMemo(() => groupHygieneByAction(hygiene), [hygiene])
   const adoption = diff.adoption ?? { blocked: false, issues: [] }
   const reviewSummary = useMemo(() => deriveDreamReviewSummary(diff, hygiene), [diff, hygiene])
+  const adoptButtonLabel = busy === 'adopting'
+    ? 'Adopting...'
+    : adoption.blocked
+      ? 'Adoption blocked'
+      : diff.awaitingAdopt
+        ? 'Adopt'
+        : 'Already adopted'
   const archived = diff.summary.archived ?? 0
   const demoted = diff.summary.demoted ?? 0
   const reinforced = diff.summary.reinforced ?? 0
@@ -200,7 +207,7 @@ export function DreamDiffModal({ diff, busy, onAdopt, onDiscard, onClose }: Prop
             disabled={busy !== null || !diff.awaitingAdopt || adoption.blocked}
             title={adoption.blocked ? 'Resolve blocked dream rows before adopting' : undefined}
           >
-            {busy === 'adopting' ? 'Adopting…' : diff.awaitingAdopt ? 'Adopt' : 'Already adopted'}
+            {adoptButtonLabel}
           </button>
         </div>
       </div>

@@ -123,7 +123,7 @@ export class RepoIntelligenceService {
 
   async repoOverview(input: RepoOverviewInput): Promise<RepoOverviewResult> {
     const workspaceRoot = path.resolve(input.workspaceRoot)
-    this.index.warm(workspaceRoot)
+    this.touchIndex(workspaceRoot)
     const packageJson = await this.readPackageJson(workspaceRoot)
     const topDirectories = await this.readTopDirectories(workspaceRoot)
     const keyFiles = await this.findExisting(workspaceRoot, KEY_FILE_CANDIDATES)
@@ -167,7 +167,7 @@ export class RepoIntelligenceService {
 
   async searchRepo(input: SearchRepoInput): Promise<SearchRepoResult> {
     const workspaceRoot = path.resolve(input.workspaceRoot)
-    this.index.queueRefresh(workspaceRoot)
+    this.touchIndex(workspaceRoot)
     this.files.setRoot(workspaceRoot)
     const searchPath = typeof input.path === 'string' && input.path.trim() ? input.path.trim() : '.'
     const maxResults = Math.min(20, Math.max(1, input.maxResults ?? 8))
@@ -304,7 +304,7 @@ export class RepoIntelligenceService {
 
   async relatedSpans(input: RelatedSpanInput): Promise<ReadSpanInput[]> {
     const workspaceRoot = path.resolve(input.workspaceRoot)
-    this.index.queueRefresh(workspaceRoot)
+    this.touchIndex(workspaceRoot)
     const related = await this.index.relatedFiles({
       workspaceRoot,
       paths: input.paths,
@@ -316,6 +316,11 @@ export class RepoIntelligenceService {
       startLine: file.startLine ?? 1,
       endLine: file.endLine ?? 80
     }))
+  }
+
+  private touchIndex(workspaceRoot: string): void {
+    this.index.watchWorkspace(workspaceRoot)
+    this.index.queueRefresh(workspaceRoot)
   }
 
   private async readPackageJson(

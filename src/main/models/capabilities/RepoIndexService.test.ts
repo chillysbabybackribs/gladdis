@@ -111,6 +111,31 @@ describe('RepoIndexService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 
+  it('refreshes the persisted index after watched source files change', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-watch-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    const sourcePath = path.join(workspace, 'src', 'watched.ts')
+    const indexPath = path.join(workspace, '.gladdis', 'repo-intel', 'index-v1.json')
+    await fs.writeFile(sourcePath, 'export function firstWatchedValue() { return true }\n')
+
+    const index = new RepoIndexService()
+    try {
+      await index.refresh(workspace)
+      index.watchWorkspace(workspace, 10)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      await fs.writeFile(sourcePath, 'export function secondWatchedValue() { return true }\n')
+
+      await waitFor(async () => {
+        const persisted = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+        const symbols = persisted.files[0]?.symbols?.map((symbol: { name: string }) => symbol.name) ?? []
+        return symbols.includes('secondWatchedValue')
+      })
+    } finally {
+      index.disposeWorkspace(workspace)
+      await fs.rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   it('returns local import neighbors for indexed files', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-related-'))
     await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
@@ -357,3 +382,12 @@ describe('RepoIndexService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 })
+
+async function waitFor(assertion: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await assertion()) return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  expect(await assertion()).toBe(true)
+}

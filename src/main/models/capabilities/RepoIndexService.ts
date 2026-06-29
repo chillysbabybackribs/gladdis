@@ -1,5 +1,5 @@
 import * as fs from 'fs/promises'
-import type { Dirent, Stats } from 'fs'
+import { watch, type Dirent, type FSWatcher, type Stats } from 'fs'
 import * as path from 'path'
 import ts from 'typescript'
 
@@ -73,6 +73,8 @@ const INDEX_DIR = path.join('.gladdis', 'repo-intel')
 const INDEX_FILE = 'index-v1.json'
 const MAX_INDEXED_FILE_BYTES = 512 * 1024
 const MAX_FILES_PER_BUILD = 5000
+const MAX_WATCHED_DIRS = 1000
+const MAX_WATCH_DEPTH = 6
 const BACKGROUND_REFRESH_DEBOUNCE_MS = 500
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 15_000
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
@@ -93,6 +95,9 @@ interface WorkspaceState {
   warmPromise?: Promise<void>
   queuedRefresh?: ReturnType<typeof setTimeout>
   lastRefreshCompletedAt?: number
+  watchers?: Map<string, FSWatcher>
+  watcherScanPromise?: Promise<void>
+  watchDebounceMs?: number
 }
 
 export class RepoIndexService {
@@ -119,18 +124,54 @@ export class RepoIndexService {
       })
   }
 
-  queueRefresh(workspaceRoot: string, debounceMs = BACKGROUND_REFRESH_DEBOUNCE_MS): void {
+  queueRefresh(
+    workspaceRoot: string,
+    debounceMs = BACKGROUND_REFRESH_DEBOUNCE_MS,
+    options: { force?: boolean } = {}
+  ): void {
     const root = path.resolve(workspaceRoot)
     const state = this.stateFor(root)
     const now = Date.now()
     if (state.warmPromise || state.queuedRefresh) return
-    if (state.lastRefreshCompletedAt && now - state.lastRefreshCompletedAt < BACKGROUND_REFRESH_MIN_INTERVAL_MS) return
+    if (
+      !options.force &&
+      state.lastRefreshCompletedAt &&
+      now - state.lastRefreshCompletedAt < BACKGROUND_REFRESH_MIN_INTERVAL_MS
+    ) {
+      return
+    }
 
     state.queuedRefresh = setTimeout(() => {
       state.queuedRefresh = undefined
       this.warm(root)
     }, Math.max(0, debounceMs))
     state.queuedRefresh.unref?.()
+  }
+
+  watchWorkspace(workspaceRoot: string, debounceMs = BACKGROUND_REFRESH_DEBOUNCE_MS): void {
+    const root = path.resolve(workspaceRoot)
+    const state = this.stateFor(root)
+    state.watchDebounceMs = debounceMs
+    if (state.watcherScanPromise) return
+
+    state.watcherScanPromise = this.syncWatchers(root, state)
+      .catch((err) => {
+        console.warn('[repo-index] watch setup failed:', err)
+      })
+      .finally(() => {
+        state.watcherScanPromise = undefined
+      })
+  }
+
+  disposeWorkspace(workspaceRoot: string): void {
+    const root = path.resolve(workspaceRoot)
+    const state = this.workspaces.get(root)
+    if (!state) return
+    if (state.queuedRefresh) clearTimeout(state.queuedRefresh)
+    for (const watcher of state.watchers?.values() ?? []) {
+      watcher.close()
+    }
+    this.workspaces.delete(root)
   }
 
   async refresh(workspaceRoot: string): Promise<RepoIndexSnapshot> {
@@ -369,6 +410,72 @@ export class RepoIndexService {
     }
     return state
   }
+
+  private async syncWatchers(workspaceRoot: string, state: WorkspaceState): Promise<void> {
+    const dirs = await listWatchDirectories(workspaceRoot)
+    if (!state.watchers) state.watchers = new Map()
+    for (const [watchedDir, watcher] of state.watchers) {
+      if (dirs.has(watchedDir)) continue
+      watcher.close()
+      state.watchers.delete(watchedDir)
+    }
+    for (const dir of dirs) {
+      if (state.watchers.has(dir)) continue
+      try {
+        const watcher = watch(dir, { persistent: false }, (_event, filename) => {
+          this.handleWorkspaceChange(workspaceRoot, state, filename?.toString())
+        })
+        state.watchers.set(dir, watcher)
+      } catch {
+        // Some directories may be deleted or denied between scan and watch.
+      }
+    }
+  }
+
+  private handleWorkspaceChange(workspaceRoot: string, state: WorkspaceState, filename?: string): void {
+    if (filename && shouldIgnoreWatchedName(filename)) return
+    this.queueRefresh(workspaceRoot, state.watchDebounceMs ?? BACKGROUND_REFRESH_DEBOUNCE_MS, { force: true })
+    if (!state.watcherScanPromise) {
+      state.watcherScanPromise = this.syncWatchers(workspaceRoot, state)
+        .catch(() => {})
+        .finally(() => {
+          state.watcherScanPromise = undefined
+        })
+    }
+  }
+}
+
+async function listWatchDirectories(workspaceRoot: string): Promise<Set<string>> {
+  const results = new Set<string>([workspaceRoot])
+  async function walk(absDir: string, depth: number): Promise<void> {
+    if (results.size >= MAX_WATCHED_DIRS || depth >= MAX_WATCH_DEPTH) return
+    let entries: Dirent[]
+    try {
+      entries = await fs.readdir(absDir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    for (const entry of entries) {
+      if (results.size >= MAX_WATCHED_DIRS) return
+      if (!entry.isDirectory() || IGNORE_DIRS.has(entry.name)) continue
+      const nextDir = path.join(absDir, entry.name)
+      results.add(nextDir)
+      await walk(nextDir, depth + 1)
+    }
+  }
+  await walk(workspaceRoot, 0)
+  return results
+}
+
+function shouldIgnoreWatchedName(filename: string): boolean {
+  const normalized = filename.replace(/\\/g, '/')
+  const base = path.posix.basename(normalized)
+  if (!base) return false
+  if (IGNORE_DIRS.has(base)) return true
+  if (base === INDEX_FILE || base.endsWith('.tmp')) return true
+  const extension = path.extname(base)
+  return Boolean(extension && !SOURCE_EXTENSIONS.has(extension))
 }
 
 async function listSourceFiles(workspaceRoot: string): Promise<string[]> {

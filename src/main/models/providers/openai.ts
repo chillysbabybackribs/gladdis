@@ -9,6 +9,7 @@ import {
   type SupervisorTransition
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
+import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
 
 type FinishUsage = {
@@ -155,7 +156,7 @@ export function toOpenAiMessages(req: ChatRequest, opts: HistoryCompactionOption
   const maxMessages = opts.maxMessages ?? (maxMessagesStr ? parseInt(maxMessagesStr, 10) : 30)
   const keepTail = opts.keepTail ?? (keepTailStr ? parseInt(keepTailStr, 10) : 12)
 
-  let messagesToMap = req.messages
+  let messagesToMap = withDateContext(req.messages)
 
   if (messagesToMap.length > maxMessages) {
     const actualKeepTail = Math.min(keepTail, messagesToMap.length)

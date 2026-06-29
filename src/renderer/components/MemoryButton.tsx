@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import type { DreamDiff, DreamScope, Workspace } from '../../../shared/types'
+import { createPortal } from 'react-dom'
+import type {
+  DreamDiff,
+  DreamPreferenceOrder,
+  DreamProgressEvent,
+  DreamScope,
+  DreamStage,
+  Workspace
+} from '../../../shared/types'
 import { DREAM_SCOPES } from '../../../shared/types'
 import { DreamDiffModal } from './DreamDiff'
 
@@ -14,22 +22,69 @@ const SCOPE_LABEL: Record<DreamScope, string> = {
   all: 'All time'
 }
 
+const STAGE_LABEL: Record<DreamStage, string> = {
+  sampling: 'Sampling…',
+  extracting: 'Extracting…',
+  reconciling: 'Reconciling…',
+  reviewing: 'Reviewing…',
+  curating: 'Curating…',
+  verifying: 'Verifying…',
+  persisting: 'Saving…'
+}
+
+const PREFERENCE_LABEL: Record<DreamPreferenceOrder, string> = {
+  cheapest: 'Cheapest',
+  best: 'Best'
+}
+
 const DEFAULT_SCOPE: DreamScope = '7d'
+const DEFAULT_PREFERENCE: DreamPreferenceOrder = 'cheapest'
+
+const SCOPE_STORAGE_KEY = 'gladdis:dream:scope'
+const PREFERENCE_STORAGE_KEY = 'gladdis:dream:preferenceOrder'
+
+function readScopePref(): DreamScope {
+  try {
+    const raw = localStorage.getItem(SCOPE_STORAGE_KEY)
+    if (raw && (DREAM_SCOPES as readonly string[]).includes(raw)) return raw as DreamScope
+  } catch {
+    /* localStorage unavailable */
+  }
+  return DEFAULT_SCOPE
+}
+
+function readPreferencePref(): DreamPreferenceOrder {
+  try {
+    const raw = localStorage.getItem(PREFERENCE_STORAGE_KEY)
+    if (raw === 'cheapest' || raw === 'best') return raw
+  } catch {
+    /* localStorage unavailable */
+  }
+  return DEFAULT_PREFERENCE
+}
 
 /**
- * Memory ▾ button. Opens a small menu with scope choices + "Review last
- * dream". A dream is one model-curated proposal of changes to the workspace's
- * memory file. It never auto-applies — the user reviews the diff and chooses
- * to adopt or discard. Memory is per-workspace, so the button only enables
- * when a folder is selected.
+ * Memory ▾ button. Opens a small menu with scope choices, a Cheapest/Best
+ * model preference toggle, and "Review last dream". A dream never auto-
+ * applies — the user reviews the diff and chooses to adopt or discard. Memory
+ * is per-workspace, so the button only enables when a folder is selected.
+ *
+ * While a dream is running, the button live-updates with the current stage
+ * (sampling → extracting → reconciling → verifying → saving) using the
+ * dream:progress event stream from main.
  */
 export function MemoryButton({ workspace }: Props) {
   const [open, setOpen] = useState(false)
   const [running, setRunning] = useState(false)
+  const [stage, setStage] = useState<DreamStage | null>(null)
+  const [stageDetail, setStageDetail] = useState<string | null>(null)
   const [diff, setDiff] = useState<DreamDiff | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [modalBusy, setModalBusy] = useState<'adopting' | 'discarding' | null>(null)
+  const [scope, setScope] = useState<DreamScope>(() => readScopePref())
+  const [preference, setPreference] = useState<DreamPreferenceOrder>(() => readPreferencePref())
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const activeRunIdRef = useRef<string | null>(null)
 
   const folder = workspace.folder
 
@@ -42,16 +97,62 @@ export function MemoryButton({ workspace }: Props) {
     return () => window.removeEventListener('mousedown', onAway)
   }, [open])
 
-  const runDream = async (scope: DreamScope) => {
+  // Subscribe to dream progress for the lifetime of the component.
+  useEffect(() => {
+    const off = window.gladdis.dream.onProgress((event: DreamProgressEvent) => {
+      // Ignore events for other workspaces or stale runs entirely. The run we
+      // care about is whichever one this component kicked off.
+      if (event.workspaceRoot !== folder) return
+      if (activeRunIdRef.current && event.runId !== activeRunIdRef.current && event.type !== 'started') {
+        return
+      }
+      if (event.type === 'started') {
+        activeRunIdRef.current = event.runId
+        setStage('sampling')
+        setStageDetail(null)
+      } else if (event.type === 'stage') {
+        setStage(event.stage)
+        setStageDetail(event.detail ?? null)
+      } else if (event.type === 'done') {
+        activeRunIdRef.current = null
+        setStage(null)
+        setStageDetail(null)
+      }
+    })
+    return off
+  }, [folder])
+
+  const persistScope = (next: DreamScope) => {
+    setScope(next)
+    try {
+      localStorage.setItem(SCOPE_STORAGE_KEY, next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const persistPreference = (next: DreamPreferenceOrder) => {
+    setPreference(next)
+    try {
+      localStorage.setItem(PREFERENCE_STORAGE_KEY, next)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const runDream = async (chosenScope: DreamScope) => {
     if (!folder || running) return
+    persistScope(chosenScope)
     setOpen(false)
     setRunning(true)
     setError(null)
+    setStage('sampling')
+    setStageDetail(null)
     try {
       const result = await window.gladdis.dream.run({
         workspaceRoot: folder,
-        scope,
-        preferenceOrder: 'cheapest'
+        scope: chosenScope,
+        preferenceOrder: preference
       })
       if (result.ok) {
         setDiff(result.diff)
@@ -63,6 +164,9 @@ export function MemoryButton({ workspace }: Props) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setRunning(false)
+      setStage(null)
+      setStageDetail(null)
+      activeRunIdRef.current = null
     }
   }
 
@@ -103,43 +207,69 @@ export function MemoryButton({ workspace }: Props) {
   }
 
   const disabled = !folder
+  const buttonLabel = running
+    ? stage
+      ? STAGE_LABEL[stage]
+      : 'Dreaming…'
+    : 'Memory'
   const title = disabled
     ? 'Open a workspace folder to dream over its memory'
     : running
-      ? 'Dreaming…'
+      ? `${buttonLabel}${stageDetail ? ` — ${stageDetail}` : ''}`
       : 'Curate memory from recent conversations'
 
   return (
     <div className="memory-btn-root" ref={rootRef}>
       <button
         className={`memory-btn${running ? ' is-running' : ''}${disabled ? ' is-disabled' : ''}`}
-        onClick={() => !disabled && setOpen((v) => !v)}
+        onClick={() => !disabled && !running && setOpen((v) => !v)}
         disabled={disabled}
         title={title}
         aria-haspopup="menu"
         aria-expanded={open}
       >
         <span className="memory-btn-icon" aria-hidden="true">
-          {running ? '◐' : '✦'}
+          {running ? <span className="memory-btn-spinner" /> : '✦'}
         </span>
-        <span className="memory-btn-label">{running ? 'Dreaming…' : 'Memory'}</span>
-        <span className="memory-btn-caret" aria-hidden="true">▾</span>
+        <span className="memory-btn-label">{buttonLabel}</span>
+        {!running && <span className="memory-btn-caret" aria-hidden="true">▾</span>}
       </button>
+
+      {running && stageDetail && (
+        <div className="memory-stage-detail" role="status" aria-live="polite">
+          {stageDetail}
+        </div>
+      )}
 
       {open && !running && (
         <div className="memory-menu" role="menu">
           <div className="memory-menu-section">Curate memory from…</div>
-          {DREAM_SCOPES.map((scope) => (
+          {DREAM_SCOPES.map((s) => (
             <button
-              key={scope}
-              className={`memory-menu-item${scope === DEFAULT_SCOPE ? ' is-default' : ''}`}
+              key={s}
+              className={`memory-menu-item${s === scope ? ' is-selected' : ''}`}
               role="menuitem"
-              onClick={() => runDream(scope)}
+              onClick={() => runDream(s)}
             >
-              {SCOPE_LABEL[scope]}
-              {scope === DEFAULT_SCOPE && <span className="memory-menu-default">recommended</span>}
+              {SCOPE_LABEL[s]}
+              {s === DEFAULT_SCOPE && <span className="memory-menu-default">recommended</span>}
             </button>
           ))}
+          <div className="memory-menu-divider" />
+          <div className="memory-menu-section">Model preference</div>
+          <div className="memory-pref-row" role="radiogroup" aria-label="Model preference order">
+            {(['cheapest', 'best'] as DreamPreferenceOrder[]).map((p) => (
+              <button
+                key={p}
+                role="radio"
+                aria-checked={preference === p}
+                className={`memory-pref-pill${preference === p ? ' is-active' : ''}`}
+                onClick={() => persistPreference(p)}
+              >
+                {PREFERENCE_LABEL[p]}
+              </button>
+            ))}
+          </div>
           <div className="memory-menu-divider" />
           <button className="memory-menu-item" role="menuitem" onClick={reviewLast}>
             Review last dream
@@ -153,15 +283,32 @@ export function MemoryButton({ workspace }: Props) {
         </div>
       )}
 
-      {diff && (
-        <DreamDiffModal
-          diff={diff}
-          busy={modalBusy}
-          onAdopt={adopt}
-          onDiscard={discard}
-          onClose={() => setDiff(null)}
-        />
-      )}
+      {diff &&
+        renderModalInChat(
+          rootRef.current,
+          <DreamDiffModal
+            diff={diff}
+            busy={modalBusy}
+            onAdopt={adopt}
+            onDiscard={discard}
+            onClose={() => setDiff(null)}
+          />
+        )}
     </div>
   )
+}
+
+/**
+ * Portal the DreamDiff modal up to the nearest `.chat` ancestor so its
+ * full-bleed overlay covers the chat panel rather than the tiny
+ * `.memory-btn-root` (which is the closest positioned ancestor of the
+ * button itself). We deliberately stop at `.chat` and not at document.body
+ * because Electron lays the native browser WebContentsView on top of the
+ * renderer, so anything rendered into document.body disappears behind the
+ * browser pane on the right side of the window.
+ */
+function renderModalInChat(buttonRoot: HTMLDivElement | null, modal: React.ReactNode): React.ReactNode {
+  const target = buttonRoot?.closest('.chat') as HTMLElement | null
+  if (!target) return modal
+  return createPortal(modal, target)
 }

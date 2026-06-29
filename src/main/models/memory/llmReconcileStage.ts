@@ -332,6 +332,22 @@ function applyDecisionsToWorking(
   const overrideMap = new Map(overrides.map((o) => [o.candidateIndex, o]))
   const outDecisions: ReconcileDecision[] = []
 
+  // Any existing entry surfaced as a top peer to the reviewer was observed
+  // by the dream — bump lastReferencedAt so the hygiene stage downstream
+  // sees honest recency. Done before any merges/replaces so we don't bump
+  // entries that get removed by a replace decision anyway.
+  const surfacedPeerIds = new Set<string>()
+  for (const candidate of input.candidates) {
+    for (const peer of topPeers(input.existingEntries, candidate, PEER_LIMIT)) {
+      surfacedPeerIds.add(peer.entry.id)
+    }
+  }
+  for (const entry of working) {
+    if (surfacedPeerIds.has(entry.id)) {
+      entry.freshness.lastReferencedAt = now
+    }
+  }
+
   input.candidates.forEach((rawCandidate, i) => {
     const override = overrideMap.get(i)
     const candidate = override

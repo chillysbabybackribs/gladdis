@@ -12,6 +12,7 @@ import type {
   DreamDiffAction,
   DreamDiffEntry,
   DreamDiffSummary,
+  DreamHygieneEntry,
   DreamScope,
   DreamVerification,
   MemoryEntryKindLite
@@ -19,6 +20,7 @@ import type {
 import type { Provider } from '../../../../shared/models'
 import type { MemoryEntry, MemoryEntryKind } from './types'
 import type { ReconcileDecision } from './reconcileStage'
+import type { HygieneDecision } from './hygieneStage'
 
 const PROMOTING_ACTIONS = new Set<DreamDiffAction>(['add', 'merge', 'replace'])
 const MIN_ADOPT_CONFIDENCE = 0.7
@@ -35,6 +37,7 @@ export interface ComposeDiffInput {
   resultEntries: MemoryEntry[]
   decisions: ReconcileDecision[]
   verifications: DreamVerification[]
+  hygiene?: HygieneDecision[]
   candidateFilePath?: string
   sampledSessionCount: number
 }
@@ -42,7 +45,16 @@ export interface ComposeDiffInput {
 export function composeDreamDiff(input: ComposeDiffInput): DreamDiff {
   const resultById = new Map(input.resultEntries.map((e) => [e.id, e] as const))
   const affectedExistingIds = new Set<string>()
-  const summary: DreamDiffSummary = { added: 0, merged: 0, replaced: 0, rejected: 0, unchanged: 0 }
+  const summary: DreamDiffSummary = {
+    added: 0,
+    merged: 0,
+    replaced: 0,
+    rejected: 0,
+    unchanged: 0,
+    archived: 0,
+    demoted: 0,
+    reinforced: 0
+  }
   const entries: DreamDiffEntry[] = []
 
   for (const decision of input.decisions) {
@@ -90,7 +102,42 @@ export function composeDreamDiff(input: ComposeDiffInput): DreamDiff {
     else if (action === 'replace') summary.replaced += 1
   }
 
-  summary.unchanged = input.existingEntries.filter((e) => !affectedExistingIds.has(e.id)).length
+  // Hygiene rows operate on EXISTING entries (not candidates), so they
+  // contribute to the diff after the add/merge/replace flow has populated
+  // `affectedExistingIds`. Hygiene-touched entries are not "unchanged".
+  const hygiene: DreamHygieneEntry[] = []
+  const hygieneTouched = new Set<string>()
+  if (input.hygiene && input.hygiene.length > 0) {
+    const resultEntryById = new Map(input.resultEntries.map((e) => [e.id, e] as const))
+    const existingEntryById = new Map(input.existingEntries.map((e) => [e.id, e] as const))
+    for (const dec of input.hygiene) {
+      const result = resultEntryById.get(dec.entryId) ?? existingEntryById.get(dec.entryId)
+      if (!result) continue
+      hygieneTouched.add(dec.entryId)
+      hygiene.push({
+        action: dec.action,
+        entryId: result.id,
+        kind: liftKind(result.kind),
+        scope: result.scope,
+        taskId: result.taskId,
+        text: result.text,
+        previousText: dec.previousText,
+        confidence: result.confidence,
+        previousConfidence: dec.previousConfidence,
+        reason: dec.reason
+      })
+
+      if (dec.action === 'archive') summary.archived = (summary.archived ?? 0) + 1
+      else if (dec.action === 'demote') summary.demoted = (summary.demoted ?? 0) + 1
+      else if (dec.action === 'reinforce') summary.reinforced = (summary.reinforced ?? 0) + 1
+      // 'keep' decisions are text-only refinements — surfaced in the diff
+      // for transparency but not counted in the summary pills.
+    }
+  }
+
+  summary.unchanged = input.existingEntries.filter(
+    (e) => !affectedExistingIds.has(e.id) && !hygieneTouched.has(e.id)
+  ).length
   const adoption = evaluateDreamAdoption(entries, input.verifications)
 
   return {
@@ -103,6 +150,7 @@ export function composeDreamDiff(input: ComposeDiffInput): DreamDiff {
     summary,
     verifications: input.verifications,
     entries,
+    hygiene,
     adoption,
     awaitingAdopt: true,
     candidateFilePath: input.candidateFilePath,

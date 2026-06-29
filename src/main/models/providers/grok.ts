@@ -9,6 +9,7 @@ import {
   type SupervisorTransition,
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
+import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
 
 // xAI exposes an OpenAI-compatible Chat Completions API. We talk to it with
@@ -557,7 +558,7 @@ export function stubOldGrokResults(msgs: OpenAiMessage[], keep: number): void {
 }
 
 function toGrokMessages(req: ChatRequest): OpenAiMessage[] {
-  return req.messages.map((m) => {
+  return withDateContext(req.messages).map((m) => {
     if (m.images && m.images.length > 0) {
       const content: (OpenAiTextPart | OpenAiImagePart)[] = [
         { type: 'text', text: m.content || 'Attached screenshot:' }

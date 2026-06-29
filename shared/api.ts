@@ -25,6 +25,7 @@ import type {
   DreamAdoptResult,
   DreamDiff,
   DreamDiscardResult,
+  DreamProgressEvent,
   DreamRunRequest,
   DreamRunResult,
   DreamStatus
@@ -142,6 +143,8 @@ export interface GladdisApi {
     discard: (workspaceRoot: string) => Promise<DreamDiscardResult>
     /** Is a dream currently running? At most one per workspace. */
     status: (workspaceRoot: string) => Promise<DreamStatus>
+    /** Subscribe to stage-by-stage progress; returns an unsubscribe fn. */
+    onProgress: (cb: (event: DreamProgressEvent) => void) => () => void
   }
   terminal: {
     /** Spawn a new PTY session and return its id (one shell per id). */

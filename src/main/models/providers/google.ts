@@ -7,6 +7,7 @@ import {
   type SupervisorTransition,
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
+import { withDateContext } from './dateContext'
 
 interface CacheEntry {
   name: string
@@ -418,7 +419,7 @@ export function stubOldGoogleResults(objs: GoogleToolResponseRecord[], keep: num
 }
 
 function toGoogleContents(req: ChatRequest): any[] {
-  return req.messages.map((m) => {
+  return withDateContext(req.messages).map((m) => {
     const parts: any[] = [{ text: m.content || '' }]
     if (m.images && m.images.length > 0) {
       for (const img of m.images) {

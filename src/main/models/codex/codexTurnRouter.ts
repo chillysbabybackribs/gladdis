@@ -179,10 +179,13 @@ function onItemCompleted(turn: ActiveTurn, item: ThreadItem, ctx: NotificationCo
 }
 
 /**
- * The Codex CLI offered a tool/command we refuse to allow (per
- * `findCodexToolPolicyViolation`). Synthesise a completed guardrail chip so
- * the user sees what was blocked, then interrupt the provider turn without
- * rendering a chat-level error that derails the surrounding task UI.
+ * Codex ran a native browser command we steer away from (per
+ * `findCodexToolPolicyViolation`). We do NOT interrupt the turn: under
+ * danger-full-access the command already executed by the time item/started
+ * fires, so `turn/interrupt` can't un-run it — its only effect would be to
+ * abort the user's turn as collateral. Codex sees the command's own (useless)
+ * output and the guardrail chip below, then self-corrects to the gladdis
+ * dynamic tools on its next step. The turn continues uninterrupted.
  */
 function blockPolicyViolation(
   turn: ActiveTurn,
@@ -193,8 +196,9 @@ function blockPolicyViolation(
   const tool = 'gladdis_browser_guardrail'
   const command = (item as any).command
   turn.toolItems.set(item.id, { tool })
+  // Record so onItemCompleted closes this chip instead of re-rendering it as a
+  // normal command result.
   turn.blockedItems.add(item.id)
-  const message = `${violation.reason} ${violation.guidance}`
   if (!turn.silent) {
     ctx.emit({
       requestId: turn.requestId,
@@ -208,14 +212,9 @@ function blockPolicyViolation(
       type: 'tool_result',
       callId: item.id,
       ok: true,
-      preview: `Blocked unsafe browser command. ${message}`
+      preview: `Steered to gladdis browser tools. ${violation.reason} ${violation.guidance}`
     })
   }
-  turn.aborted = true
-  if (turn.threadId) {
-    ctx.server()?.notify('turn/interrupt', { threadId: turn.threadId, turnId: turn.turnId })
-  }
-  turn.done()
 }
 
 /** Route a server-initiated request (tool calls, approvals) to the right handler. */

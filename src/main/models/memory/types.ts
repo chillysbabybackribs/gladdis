@@ -36,6 +36,15 @@ export interface MemoryFreshness {
   lastReinforcedAt: string
   lastReferencedAt?: string
   contradictsId?: string
+  /**
+   * Set by the dreamer's hygiene stage when an entry is retired. The entry
+   * stays in the file (for audit / "show retired" tooling) but is hidden from
+   * `memory_read` by default. Adopting a dream is the only way an entry gets
+   * archived; never set by the live `memory_*` tools.
+   */
+  archivedAt?: string
+  /** Short reason captured at archive time, surfaced in the diff UI. */
+  archivedReason?: string
 }
 
 export interface MemoryEntry {

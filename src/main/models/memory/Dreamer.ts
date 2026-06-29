@@ -30,6 +30,7 @@ import { pickDreamModel } from './pickDreamModel'
 import { runExtractStage } from './extractStage'
 import { runReconcileStage } from './reconcileStage'
 import { runLlmReconcileReview } from './llmReconcileStage'
+import { runHygieneStage, type HygieneDecision } from './hygieneStage'
 import { runVerifyStage } from './verifyStage'
 import { composeDreamDiff, evaluateDreamAdoption } from './diff'
 
@@ -229,6 +230,34 @@ export class Dreamer {
       )
     }
 
+    // Stage 4 — hygiene / curation. Operates on EXISTING entries (post-review
+    // working set), not on candidates. The stage picks the stalest entries
+    // deterministically, then a single model call triages them into
+    // archive / demote / reinforce / keep. Skips entirely when the store is
+    // too small for triage to be worthwhile. Like the review stage, every
+    // failure path silently keeps the unmodified working set.
+    this.emitStage(runId, workspaceRoot, 'curating')
+    const hygiene = await runHygieneStage(
+      { complete: this.deps.complete },
+      {
+        modelId: model.id,
+        workspaceRoot,
+        entries: resultEntries
+      }
+    )
+    const hygieneDecisions: HygieneDecision[] = hygiene.decisions
+    resultEntries = hygiene.resultEntries
+    this.emitStage(
+      runId,
+      workspaceRoot,
+      'curating',
+      hygiene.skipped
+        ? hygiene.triagedCount === 0
+          ? 'store too small to curate'
+          : `triaged ${hygiene.triagedCount}, no changes`
+        : `${summarizeHygiene(hygieneDecisions)} (from ${hygiene.triagedCount} triaged)`
+    )
+
     this.emitStage(runId, workspaceRoot, 'verifying')
     const verify = await runVerifyStage(
       { complete: this.deps.complete },
@@ -275,6 +304,7 @@ export class Dreamer {
       resultEntries,
       decisions,
       verifications: verify.verifications,
+      hygiene: hygieneDecisions,
       candidateFilePath: candidatePath,
       sampledSessionCount: sample.conversationIds.length
     })
@@ -382,6 +412,22 @@ function summarizeReconcile(decisions: ReadonlyArray<{ action: string }>): strin
   if (counts.merge) parts.push(`${counts.merge} merged`)
   if (counts.replace) parts.push(`${counts.replace} replaced`)
   if (counts.reject) parts.push(`${counts.reject} rejected`)
+  return parts.length === 0 ? 'no changes' : parts.join(', ')
+}
+
+function summarizeHygiene(decisions: ReadonlyArray<HygieneDecision>): string {
+  const counts = { archive: 0, demote: 0, reinforce: 0, keep: 0 }
+  for (const d of decisions) {
+    if (d.action === 'archive') counts.archive++
+    else if (d.action === 'demote') counts.demote++
+    else if (d.action === 'reinforce') counts.reinforce++
+    else if (d.action === 'keep') counts.keep++
+  }
+  const parts: string[] = []
+  if (counts.archive) parts.push(`${counts.archive} archived`)
+  if (counts.demote) parts.push(`${counts.demote} demoted`)
+  if (counts.reinforce) parts.push(`${counts.reinforce} reinforced`)
+  if (counts.keep) parts.push(`${counts.keep} reworded`)
   return parts.length === 0 ? 'no changes' : parts.join(', ')
 }
 

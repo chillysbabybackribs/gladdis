@@ -702,7 +702,35 @@
 .dream-pill-merge { border-color: rgba(120, 180, 255, 0.3); }
 .dream-pill-replace { border-color: rgba(255, 200, 110, 0.3); }
 .dream-pill-reject { border-color: rgba(220, 110, 110, 0.3); }
+.dream-pill-archive { border-color: rgba(180, 180, 180, 0.35); }
+.dream-pill-demote { border-color: rgba(200, 150, 220, 0.32); }
+.dream-pill-reinforce { border-color: rgba(150, 220, 200, 0.32); }
 .dream-pill-unchanged { color: var(--text-muted); }
+
+.dream-review-summary {
+  max-height: 132px;
+  overflow: auto;
+  margin: 8px 0 10px;
+  padding: 9px 11px;
+  border: 1px solid rgba(120, 180, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(120, 180, 255, 0.06);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.42;
+}
+.dream-review-summary-title {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+.dream-review-summary ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.dream-review-summary li + li {
+  margin-top: 4px;
+}
 
 .dream-adoption-block {
   margin: 8px 0 10px;
@@ -751,6 +779,31 @@
 .dream-row-merge { border-left-color: rgba(120, 180, 255, 0.55); }
 .dream-row-replace { border-left-color: rgba(255, 200, 110, 0.55); }
 .dream-row-reject { border-left-color: rgba(220, 110, 110, 0.55); opacity: 0.85; }
+.dream-row-archive { border-left-color: rgba(180, 180, 180, 0.6); opacity: 0.7; }
+.dream-row-demote { border-left-color: rgba(200, 150, 220, 0.55); }
+.dream-row-reinforce { border-left-color: rgba(150, 220, 200, 0.55); }
+.dream-row-reword { border-left-color: rgba(170, 200, 220, 0.45); }
+.dream-hygiene-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.dream-hygiene-archive { background: rgba(180, 180, 180, 0.18); color: var(--text-muted); }
+.dream-hygiene-demote { background: rgba(200, 150, 220, 0.18); color: #d4b3e6; }
+.dream-hygiene-reinforce { background: rgba(150, 220, 200, 0.18); color: #9edcc9; }
+.dream-hygiene-keep { background: rgba(170, 200, 220, 0.15); color: var(--text-secondary); }
+.dream-section-hint {
+  margin-left: 8px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.dream-section-hygiene .dream-section-title { color: var(--text-secondary); }
 .dream-row-head {
   display: flex;
   align-items: center;

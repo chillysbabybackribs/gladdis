@@ -188,7 +188,10 @@ function createWindow(): void {
     },
     tools,
     audit,
-    chats
+    chats,
+    (e) => {
+      if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.DREAM_PROGRESS, e)
+    }
   )
   // Seed Codex with the same persisted folder so its shell/cwd matches the fs
   // tools after a restart, not just after the user re-picks (constructed here

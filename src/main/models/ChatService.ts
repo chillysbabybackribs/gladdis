@@ -11,6 +11,7 @@ import {
   type DreamAdoptResult,
   type DreamDiff,
   type DreamDiscardResult,
+  type DreamProgressEvent,
   type DreamRunRequest,
   type DreamRunResult,
   type DreamStatus,
@@ -97,7 +98,12 @@ export class ChatService {
     private readonly sendStreamEvent: (e: ChatStreamEvent) => void,
     public readonly tools: BrowserTools,
     private readonly audit: ModelCallLedger,
-    private readonly chats: ChatStore
+    private readonly chats: ChatStore,
+    /**
+     * Memory-dream progress sink. Optional so unit tests (and any caller that
+     * builds ChatService without the renderer attached) can stay quiet.
+     */
+    private readonly sendDreamProgress?: (e: DreamProgressEvent) => void
   ) {
     const repoIntelligence = new RepoIntelligenceService()
     const researchDossier = new ResearchDossierService(() => this.google(), repoIntelligence)
@@ -264,7 +270,8 @@ export class ChatService {
         chats: this.chats,
         complete: (modelId, system, user) => this.complete(modelId, system, user, { stage: 'dream' }),
         getKeyStatus: () => this.keys.status(),
-        getDynamicCodexModels: () => this.codexModels().catch(() => [] as ModelOption[])
+        getDynamicCodexModels: () => this.codexModels().catch(() => [] as ModelOption[]),
+        emitProgress: this.sendDreamProgress
       })
     }
     return this.dreamer

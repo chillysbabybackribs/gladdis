@@ -58,6 +58,24 @@ export interface DreamDiffEntry {
   reason?: string
 }
 
+/** What the hygiene stage decided to do with an existing entry. */
+export type DreamHygieneAction = 'archive' | 'demote' | 'reinforce' | 'keep'
+
+export interface DreamHygieneEntry {
+  action: DreamHygieneAction
+  entryId: string
+  kind: MemoryEntryKindLite
+  scope: 'workspace' | 'task'
+  taskId?: string
+  text: string
+  /** Tighter wording proposed by hygiene; absent when text is unchanged. */
+  previousText?: string
+  confidence: number
+  /** Set on demote/reinforce; the prior confidence value. */
+  previousConfidence?: number
+  reason?: string
+}
+
 export type DreamVerificationVerdict = 'supported' | 'unsupported' | 'partial'
 
 export interface DreamVerification {
@@ -72,6 +90,10 @@ export interface DreamDiffSummary {
   replaced: number
   rejected: number
   unchanged: number
+  /** Hygiene-stage counters; absent on older dream diffs. */
+  archived?: number
+  demoted?: number
+  reinforced?: number
 }
 
 export type DreamAdoptionIssueCode =
@@ -103,6 +125,8 @@ export interface DreamDiff {
   summary: DreamDiffSummary
   verifications: DreamVerification[]
   entries: DreamDiffEntry[]
+  /** Hygiene-stage decisions on EXISTING entries. Absent on older dream diffs. */
+  hygiene?: DreamHygieneEntry[]
   adoption: DreamAdoptionPolicy
   /** True iff a memory.next.json exists on disk awaiting adoption. */
   awaitingAdopt: boolean
@@ -140,6 +164,7 @@ export type DreamStage =
   | 'extracting'
   | 'reconciling'
   | 'reviewing'
+  | 'curating'
   | 'verifying'
   | 'persisting'
 
@@ -148,6 +173,7 @@ export const DREAM_STAGES: readonly DreamStage[] = [
   'extracting',
   'reconciling',
   'reviewing',
+  'curating',
   'verifying',
   'persisting'
 ] as const

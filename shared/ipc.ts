@@ -41,6 +41,8 @@ export const IPC = {
   DREAM_ADOPT: 'dream:adopt',
   DREAM_DISCARD: 'dream:discard',
   DREAM_STATUS: 'dream:status',
+  /** main → renderer push: stage-by-stage progress while a dream runs. */
+  DREAM_PROGRESS: 'dream:progress',
   /** Text-to-speech: renderer sends text, main returns synthesized audio. */
   TTS_SPEAK: 'tts:speak',
   // Real-PTY terminal (xterm.js <-> @lydell/node-pty in main)

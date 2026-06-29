@@ -74,6 +74,15 @@ export function runReconcileStage(input: ReconcileStageInput): ReconcileStageOut
     }
 
     const peer = findBestPeer(working, candidate)
+    // Any peer that came back from findBestPeer was "looked at" by the
+    // dreamer this run — even when the candidate ends up being added as
+    // novel. Bumping lastReferencedAt here is what gives the hygiene stage
+    // (which runs later in the same pipeline) honest recency data: an
+    // entry the dream just considered should NEVER count as "never
+    // referenced" when curation triages staleness.
+    if (peer && peer.similarity >= 0.1) {
+      peer.entry.freshness.lastReferencedAt = now
+    }
     if (peer && peer.similarity >= MERGE_THRESHOLD) {
       const before = peer.entry.text
       mergeInto(peer.entry, candidate, now)
@@ -130,7 +139,7 @@ interface PeerMatch {
   similarity: number
 }
 
-function findBestPeer(entries: MemoryEntry[], candidate: ExtractCandidate): PeerMatch | null {
+export function findBestPeer(entries: MemoryEntry[], candidate: ExtractCandidate): PeerMatch | null {
   let best: PeerMatch | null = null
   for (const entry of entries) {
     if (entry.scope !== candidate.scope) continue
@@ -149,7 +158,7 @@ function isLegacyMatch(entryKind: MemoryEntryKind, candidateKind: MemoryEntryKin
   return entryKind === 'legacy' && candidateKind !== 'legacy'
 }
 
-function mergeInto(entry: MemoryEntry, candidate: ExtractCandidate, now: string): void {
+export function mergeInto(entry: MemoryEntry, candidate: ExtractCandidate, now: string): void {
   for (const ev of candidate.evidence) {
     if (!entry.evidence.some((existing) =>
       existing.conversationId === ev.conversationId &&
@@ -174,7 +183,7 @@ function mergeInto(entry: MemoryEntry, candidate: ExtractCandidate, now: string)
   )
 }
 
-function candidateToEntry(candidate: ExtractCandidate, workspaceRoot: string, now: string): MemoryEntry {
+export function candidateToEntry(candidate: ExtractCandidate, workspaceRoot: string, now: string): MemoryEntry {
   return {
     id: generateEntryId(),
     kind: candidate.kind,
@@ -189,7 +198,7 @@ function candidateToEntry(candidate: ExtractCandidate, workspaceRoot: string, no
   }
 }
 
-function cloneEntry(e: MemoryEntry): MemoryEntry {
+export function cloneEntry(e: MemoryEntry): MemoryEntry {
   return {
     ...e,
     evidence: e.evidence.map((ev) => ({ ...ev })),

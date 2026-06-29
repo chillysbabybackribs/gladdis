@@ -20,7 +20,7 @@ function makeTurn(): ActiveTurn {
 }
 
 describe('Codex turn router', () => {
-  it('blocks native browser commands without emitting a chat-level error', () => {
+  it('steers native browser commands to gladdis tools without killing the turn', () => {
     const turn = makeTurn()
     const events: ChatStreamEvent[] = []
     const notify = vi.fn()
@@ -58,8 +58,12 @@ describe('Codex turn router', () => {
       callId: 'item-1'
     })
     expect(events.some((event) => event.type === 'error')).toBe(false)
-    expect(turn.aborted).toBe(true)
+    // The turn must survive: no abort, no error, no turn/interrupt — otherwise a
+    // single steered browser command would tear down the whole chat task.
+    expect(turn.aborted).toBe(false)
     expect(turn.error).toBeNull()
-    expect(notify).toHaveBeenCalledWith('turn/interrupt', { threadId: 'thread-1', turnId: 'turn-1' })
+    expect(turn.blockedItems.has('item-1')).toBe(true)
+    expect(notify).not.toHaveBeenCalled()
+    expect(turn.done).not.toHaveBeenCalled()
   })
 })

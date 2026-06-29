@@ -221,7 +221,10 @@ describe('toOpenAiMessages with history compaction', () => {
 
     expect(result.length).toBe(10)
     expect(result[0].content).toBe('msg 0')
-    expect(result[9].content).toBe('msg 9')
+    // The latest user turn carries the current-date freshness preamble; its
+    // original text is preserved at the end. Earlier turns are untouched.
+    expect(result[9].content).toContain('Current date:')
+    expect(typeof result[9].content === 'string' && result[9].content.endsWith('msg 9')).toBe(true)
   })
 
   it('compacts messages when total count exceeds maxMessages', () => {
@@ -241,6 +244,9 @@ describe('toOpenAiMessages with history compaction', () => {
     expect(result[1].content).toBe('msg 11')
     expect(result[2].content).toBe('msg 12')
     expect(result[3].content).toBe('msg 13')
-    expect(result[4].content).toBe('msg 14')
+    // The latest user turn (msg 14) leads with the current-date preamble; the
+    // preamble is added before compaction so it always lands in the kept tail.
+    expect(result[4].content).toContain('Current date:')
+    expect(typeof result[4].content === 'string' && result[4].content.endsWith('msg 14')).toBe(true)
   })
 })

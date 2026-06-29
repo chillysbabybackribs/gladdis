@@ -118,6 +118,12 @@ export async function memoryWrite(args: MemoryWriteArgs, workspaceRoot: string):
     existing.freshness.lastReinforcedAt = now
     // Re-writes are reinforcements: floor at 0.7, gently approach 0.95.
     existing.confidence = Math.min(0.95, Math.max(existing.confidence + 0.05, 0.7))
+    // A live write resurrects an archived entry: the hygiene call was wrong
+    // and the key is back in active use.
+    if (existing.freshness.archivedAt) {
+      delete existing.freshness.archivedAt
+      delete existing.freshness.archivedReason
+    }
     if (typeof conversationId === 'string' && conversationId) {
       existing.evidence.push({ conversationId })
     }
@@ -219,7 +225,9 @@ export async function memoryList(args: MemoryListArgs, workspaceRoot: string): P
   const memory = await loadMemoryFile(workspaceRoot)
 
   if (scope === 'workspace') {
-    const wsEntries = memory.entries.filter((e) => e.scope === 'workspace')
+    const wsEntries = memory.entries.filter(
+      (e) => e.scope === 'workspace' && !e.freshness.archivedAt
+    )
     const keysOut = wsEntries.map((e) => e.key).filter((k): k is string => !!k)
     return {
       ok: true,
@@ -232,7 +240,13 @@ export async function memoryList(args: MemoryListArgs, workspaceRoot: string): P
       const task = memory.tasks[task_id]
       if (!task) return { ok: false, text: `Task not found: ${task_id}` }
       const keysOut = memory.entries
-        .filter((e) => e.scope === 'task' && e.taskId === task_id && e.key)
+        .filter(
+          (e) =>
+            e.scope === 'task' &&
+            e.taskId === task_id &&
+            e.key &&
+            !e.freshness.archivedAt
+        )
         .map((e) => e.key as string)
       return { ok: true, text: JSON.stringify({ task_id, label: task.label, keys: keysOut }, null, 2) }
     }
@@ -326,6 +340,7 @@ function collectEntries(
   keys?: string[]
 ): MemoryEntry[] {
   return memory.entries.filter((e) => {
+    if (e.freshness.archivedAt) return false
     if (e.scope !== scope) return false
     if (scope === 'task' && e.taskId !== taskId) return false
     if (keys?.length && (!e.key || !keys.includes(e.key))) return false

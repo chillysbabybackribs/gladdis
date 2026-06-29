@@ -9,6 +9,7 @@ import {
   type SupervisorTransition,
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
+import { withDateContext } from './dateContext'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
 type ActiveAuditCall = {
@@ -363,7 +364,7 @@ export function stubOldResults(blocks: Anthropic.ToolResultBlockParam[], keep: n
 }
 
 function toAnthropicMessages(req: ChatRequest): Anthropic.MessageParam[] {
-  return req.messages.map((m) => {
+  return withDateContext(req.messages).map((m) => {
     if (m.images && m.images.length > 0) {
       const content: Anthropic.ContentBlockParam[] = [
         { type: 'text', text: m.content || 'Attached screenshot:' }

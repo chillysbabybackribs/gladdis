@@ -244,6 +244,7 @@ export class BrowserTools {
       extractor: this.extractor,
       files: this.files,
       keys: this.keys,
+      capabilityBroker: this.capabilityBroker,
       getWorkspaceRoot: () => this.getWorkspaceRoot()
     }
   }
@@ -290,7 +291,7 @@ export class BrowserTools {
         case 'browse_task':
           return runBrowseTask(this.taskDeps(), args, ctx)
         case 'audit_codebase':
-          return runAuditCodebase(this.taskDeps(), args)
+          return runAuditCodebase(this.taskDeps(), args, ctx)
 
         // ── Drive (CDP) ─────────────────────────────────────────────────────
         case 'execute_in_browser':

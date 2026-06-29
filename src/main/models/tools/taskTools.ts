@@ -7,6 +7,7 @@ import type { FileTools } from '../../fs/FileTools'
 import type { KeyStore } from '../KeyStore'
 import type { ToolContext, ToolOutcome } from '../browserTools'
 import { CodebaseAuditor } from '../CodebaseAuditor'
+import type { CapabilityBroker } from '../capabilities/CapabilityBroker'
 import { orchestrate } from '../../pipeline/orchestrate'
 import { generatePipelineFinalResponse } from '../../pipeline/finalResponse'
 import { cap } from './toolUtils'
@@ -29,6 +30,7 @@ export interface TaskToolsDeps {
   extractor: PageExtractor
   files: FileTools
   keys?: KeyStore
+  capabilityBroker?: CapabilityBroker | null
   getWorkspaceRoot: () => string | null
 }
 
@@ -77,7 +79,8 @@ export async function runBrowseTask(
  */
 export async function runAuditCodebase(
   deps: TaskToolsDeps,
-  args: Record<string, any>
+  args: Record<string, any>,
+  ctx?: ToolContext
 ): Promise<ToolOutcome> {
   const root = deps.getWorkspaceRoot() || process.cwd()
   const googleKey = deps.keys?.get('google') || process.env.GEMINI_API_KEY
@@ -89,7 +92,18 @@ export async function runAuditCodebase(
   }
   const ai = new GoogleGenAI({ apiKey: googleKey })
   const modelOverride = typeof args.model === 'string' && args.model.trim() ? args.model.trim() : undefined
-  const auditor = new CodebaseAuditor(root, ai, modelOverride)
+  const auditor = new CodebaseAuditor(root, ai, modelOverride, {
+    capabilityBroker: deps.capabilityBroker ?? undefined,
+    brokerContext:
+      ctx?.taskId && ctx?.requestId
+        ? {
+            requestId: ctx.requestId,
+            assistantMessageId: ctx.assistantMessageId,
+            taskId: ctx.taskId,
+            iteration: ctx.iteration
+          }
+        : undefined
+  })
   const focusPath = typeof args.focusPath === 'string' ? args.focusPath : undefined
   const auditReport = await auditor.runAudit(focusPath)
   return {

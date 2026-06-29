@@ -2,6 +2,38 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { MODELS } from '../../../shared/models';
+import type { BrokerCallContext, CapabilityBroker } from './capabilities/CapabilityBroker';
+import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService';
+
+type RepoOverviewPayload = {
+  workspaceRoot: string;
+  packageManager: string | null;
+  packageName: string | null;
+  scripts: string[];
+  keyFiles: string[];
+  topDirectories: string[];
+  entryPoints: string[];
+  focus?: string;
+};
+
+type ReadSpansPayload = {
+  workspaceRoot: string;
+  items: Array<{
+    path: string;
+    startLine: number;
+    endLine: number;
+    totalLines: number;
+    truncated: boolean;
+    defaultWindow: boolean;
+    content: string;
+  }>;
+};
+
+export interface CodebaseAuditorOptions {
+  capabilityBroker?: Pick<CapabilityBroker, 'repoOverview' | 'readSpans'>;
+  brokerContext?: BrokerCallContext;
+  repoIntelligence?: RepoIntelligenceService;
+}
 
 /**
  * Models to try (in order) when no explicit model is requested. Picked from
@@ -11,12 +43,12 @@ import { MODELS } from '../../../shared/models';
  * so a real workload error doesn't get silently masked by the next candidate.
  */
 const GOOGLE_MODEL_FALLBACK_CHAIN: string[] = (() => {
-  const ordered = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro']
-  const known = new Set(MODELS.filter((m) => m.provider === 'google').map((m) => m.id))
-  const chain = ordered.filter((id) => known.has(id))
+  const ordered = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
+  const known = new Set(MODELS.filter((m) => m.provider === 'google').map((m) => m.id));
+  const chain = ordered.filter((id) => known.has(id));
   // If MODELS drifts, fall back to whatever is actually listed for google.
-  return chain.length > 0 ? chain : MODELS.filter((m) => m.provider === 'google').map((m) => m.id)
-})()
+  return chain.length > 0 ? chain : MODELS.filter((m) => m.provider === 'google').map((m) => m.id);
+})();
 
 const MODEL_NOT_FOUND_PATTERNS = [
   /model[_\s-]*not[_\s-]*found/i,
@@ -24,24 +56,47 @@ const MODEL_NOT_FOUND_PATTERNS = [
   /not\s+(?:found|supported|available)/i,
   /\b404\b/,
   /\b400\b.*model/i
-]
+];
+
+const FOCUS_TEXT_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.json',
+  '.md',
+  '.css',
+  '.html',
+  '.yaml',
+  '.yml'
+]);
 
 export class CodebaseAuditor {
+  private readonly repoIntelligence: RepoIntelligenceService;
+  private readonly capabilityBroker?: Pick<CapabilityBroker, 'repoOverview' | 'readSpans'>;
+  private readonly brokerContext?: BrokerCallContext;
+
   constructor(
     private workspaceRoot: string,
     private ai: GoogleGenAI,
-    private modelOverride?: string
-  ) {}
+    private modelOverride?: string,
+    options: CodebaseAuditorOptions = {}
+  ) {
+    this.repoIntelligence = options.repoIntelligence ?? new RepoIntelligenceService();
+    this.capabilityBroker = options.capabilityBroker;
+    this.brokerContext = options.brokerContext;
+  }
 
   /**
    * Recursively scans directories to build a lightweight representation of the project tree.
    * Standard directories like node_modules, .git, build outputs, and lockfiles are skipped.
+   * This remains as a fallback for non-brokered audits and focused directory snapshots.
    */
   async scanDirectory(dir: string, depth = 0, maxDepth = 6): Promise<string[]> {
     if (depth > maxDepth) return [];
-    
+
     const ignored = new Set([
-      'node_modules', '.git', '.next', 'dist', 'build', 'out', 
+      'node_modules', '.git', '.next', 'dist', 'build', 'out',
       '.pnpm-store', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
       '.svelte-kit', '.nuxt', '.docusaurus', 'coverage', '.cache'
     ]);
@@ -53,7 +108,7 @@ export class CodebaseAuditor {
         if (ignored.has(entry.name)) continue;
         const fullPath = path.join(dir, entry.name);
         const relativePath = path.relative(this.workspaceRoot, fullPath);
-        
+
         if (entry.isDirectory()) {
           results.push(`${relativePath}/`);
           const sub = await this.scanDirectory(fullPath, depth + 1, maxDepth);
@@ -62,178 +117,46 @@ export class CodebaseAuditor {
           results.push(relativePath);
         }
       }
-    } catch (err) {
-      // Gracefully bypass restricted/unreadable directories
-    }
-    return results;
-  }
-
-  /**
-   * Reads key configuration files if they exist in the root of the workspace.
-   */
-  private async readConfigFiles(): Promise<Record<string, string>> {
-    const configsToRead = [
-      'package.json',
-      'tsconfig.json',
-      'vite.config.ts',
-      'vite.config.js',
-      'electron.vite.config.ts',
-      'tailwind.config.js',
-      'tailwind.config.ts',
-      '.env.example',
-      'webpack.config.js',
-      'next.config.js'
-    ];
-
-    const results: Record<string, string> = {};
-    for (const filename of configsToRead) {
-      try {
-        const fullPath = path.join(this.workspaceRoot, filename);
-        const content = await fs.readFile(fullPath, 'utf-8');
-        results[filename] = content.length > 5000 
-          ? content.slice(0, 5000) + '\n... [truncated for token conservation]'
-          : content;
-      } catch {
-        // Skip if file doesn't exist or is unreadable
-      }
-    }
-    return results;
-  }
-
-  /**
-   * Reads the first N lines/characters of a file.
-   */
-  private async readHeadOfFile(filePath: string, maxChars = 4000): Promise<string> {
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      if (content.length > maxChars) {
-        return content.slice(0, maxChars) + '\n... [truncated for token conservation]';
-      }
-      return content;
     } catch {
-      return '';
-    }
-  }
-
-  /**
-   * Discovers and reads the first part of crucial entry files.
-   */
-  private async readEntryPoints(): Promise<Record<string, string>> {
-    const entriesToFind = [
-      'src/main/index.ts',
-      'src/main.ts',
-      'src/index.ts',
-      'src/preload/index.ts',
-      'src/preload.ts',
-      'src/renderer/src/main.tsx',
-      'src/renderer/main.tsx',
-      'src/renderer/index.tsx',
-      'src/renderer/App.tsx',
-      'src/App.tsx'
-    ];
-
-    const results: Record<string, string> = {};
-    for (const relPath of entriesToFind) {
-      const fullPath = path.join(this.workspaceRoot, relPath);
-      try {
-        const content = await this.readHeadOfFile(fullPath, 3000);
-        if (content) {
-          results[relPath] = content;
-        }
-      } catch {}
+      // Gracefully bypass restricted/unreadable directories.
     }
     return results;
-  }
-
-  /**
-   * Reads source code context around the focusPath if specified.
-   */
-  private async readFocusPathContext(focusPath: string): Promise<string> {
-    const fullPath = path.resolve(this.workspaceRoot, focusPath);
-    try {
-      const stats = await fs.stat(fullPath);
-      if (stats.isFile()) {
-        const content = await this.readHeadOfFile(fullPath, 15000);
-        return `=== FOCUS FILE CONTENT: ${focusPath} ===\n${content}`;
-      } else if (stats.isDirectory()) {
-        const entries = await fs.readdir(fullPath, { withFileTypes: true });
-        let combined = `=== FOCUS DIRECTORY FILES in ${focusPath} ===\n`;
-        let count = 0;
-        for (const entry of entries) {
-          if (entry.isFile() && count < 10) {
-            const ext = path.extname(entry.name);
-            const textExtensions = ['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.css', '.html', '.yaml', '.yml'];
-            if (textExtensions.includes(ext.toLowerCase())) {
-              const fileRelPath = path.join(focusPath, entry.name);
-              const fileFullPath = path.join(fullPath, entry.name);
-              const content = await this.readHeadOfFile(fileFullPath, 3000);
-              if (content) {
-                combined += `\n--- File: ${fileRelPath} ---\n${content}\n`;
-                count++;
-              }
-            }
-          }
-        }
-        return combined;
-      }
-    } catch (err: any) {
-      return `[Error loading focus path context: ${err.message}]`;
-    }
-    return '';
   }
 
   async runAudit(focusPath?: string): Promise<string> {
-    const fileTree = await this.scanDirectory(this.workspaceRoot);
-    const configFiles = await this.readConfigFiles();
-    const entryPoints = await this.readEntryPoints();
+    const workspaceRoot = path.resolve(this.workspaceRoot);
+    const overview = await this.loadOverview(workspaceRoot, focusPath);
+    const auditFiles = this.pickAuditFiles(overview.structuredPayload);
+    const [readme, fileSpans, focusContext] = await Promise.all([
+      this.readOptional(path.join(workspaceRoot, 'README.md'), 5000),
+      this.readSpans(workspaceRoot, auditFiles),
+      focusPath ? this.readFocusPathContext(workspaceRoot, focusPath) : Promise.resolve('')
+    ]);
 
-    let focusContext = '';
-    if (focusPath) {
-      focusContext = await this.readFocusPathContext(focusPath);
-    }
-
-    let readme = '';
-    try {
-      readme = await fs.readFile(path.join(this.workspaceRoot, 'README.md'), 'utf-8');
-      if (readme.length > 5000) {
-        readme = readme.slice(0, 5000) + '\n... [truncated for token conservation]';
-      }
-    } catch {}
+    const fallbackTree =
+      this.capabilityBroker ? '' : (await this.scanDirectory(workspaceRoot)).join('\n');
 
     const systemPrompt = `You are an elite, high-density Codebase Auditing Agent.
-Your task is to ingest the file structure, configuration files, primary entry points, and optional focus areas of a workspace, and synthesize an exceptionally clear, deep-dive Markdown architectural report. This report serves as a detailed blueprint for developers and AI models to understand exactly how the system functions, its core interfaces, state management flows, security mechanisms, and the exact files to edit for different features.`;
+Your task is to ingest the repository evidence, bounded source excerpts, and optional focus areas of a workspace, and synthesize an exceptionally clear, deep-dive Markdown architectural report. This report serves as a detailed blueprint for developers and AI models to understand exactly how the system functions, its core interfaces, state management flows, security mechanisms, and the exact files to edit for different features.`;
 
-    // Format configs and entries for the prompt
-    let configsBlock = '';
-    for (const [name, content] of Object.entries(configFiles)) {
-      configsBlock += `\n=== CONFIG: ${name} ===\n${content}\n`;
-    }
+    const promptSections = [
+      `Workspace Root: ${workspaceRoot}`,
+      focusPath ? `Audit Focus Target: Only focus on modules, files, and rules related to: "${focusPath}"` : null,
+      readme ? `\n=== README.md ===\n${readme}` : '\n=== README.md ===\nNone found',
+      `\n=== Repository Overview ===\n${overview.summary}`,
+      fileSpans ? `\n=== Key File Spans ===\n${fileSpans}` : '\n=== Key File Spans ===\nNone captured',
+      focusContext ? `\n${focusContext}` : null,
+      fallbackTree ? `\n=== Complete Project File Tree ===\n${fallbackTree}` : null
+    ].filter((part): part is string => Boolean(part));
 
-    let entriesBlock = '';
-    for (const [name, content] of Object.entries(entryPoints)) {
-      entriesBlock += `\n=== ENTRY POINT: ${name} ===\n${content}\n`;
-    }
-
-    const userPrompt = `
-Here is the raw context of the project codebase:
-Workspace Root: ${this.workspaceRoot}
-${focusPath ? `Audit Focus Target: Only focus on modules, files, and rules related to: "${focusPath}"` : ''}
-
-=== README.md ===
-${readme || 'None found'}
-${configsBlock}
-${entriesBlock}
-${focusContext ? `\n${focusContext}\n` : ''}
-
-=== Complete Project File Tree ===
-${fileTree.join('\n')}
+    const userPrompt = `${promptSections.join('\n')}
 
 Generate an extremely detailed, beautiful, highly structured Markdown report containing:
 
 1. **Core Technology Stack & Configurations**:
    - Comprehensive analysis of frameworks, library versions, and package structure.
    - Deep dive into the build configuration, compile targets, and bundler setups (e.g., Vite/Webpack configs, Preload script bridge setups).
-   
+
 2. **Architecture & Directory Deep-Dive**:
    - Folder-by-folder layout mapping. Explain exactly what lives where and the clean boundaries between modules (e.g. main vs. renderer vs. shared).
    - Describe communication protocols (e.g., Electron IPC channels, HTTP APIs, WebSocket structures) and how they flow across layers.
@@ -246,7 +169,7 @@ Generate an extremely detailed, beautiful, highly structured Markdown report con
    - Break down the core domains, specialized mechanisms (such as context caching, state sync, security hooks, file system management, web devtools session, or specific business logic patterns).
 
 5. **Key Types, State Schemas & IPC Protocols**:
-   - Document the exact interfaces, state stores, database structures, or IPC contracts discovered in the entry points, configuration files, or types.
+   - Document the exact interfaces, state stores, database structures, or IPC contracts discovered in the provided evidence.
 
 6. **Developer Edit Cheat Sheet & Mod Map**:
    - Provide concrete, exact relative file paths for typical engineering tasks (e.g., "To add a new browser automation tool, update X and Y", "To modify the UI layout, update Z").
@@ -270,8 +193,6 @@ Output ONLY the final Markdown document. Be rigorous, highly detailed, precise, 
         const message = err instanceof Error ? err.message : String(err);
         errors.push({ model, message });
         if (!isModelNotFoundError(message)) {
-          // A real error (network, quota, permission) — surface it instead of
-          // silently sliding to the next candidate.
           return `Error: codebase audit failed on model ${model}: ${message}`;
         }
       }
@@ -281,23 +202,122 @@ Output ONLY the final Markdown document. Be rigorous, highly detailed, precise, 
       .join(' | ')}`;
   }
 
+  private async loadOverview(
+    workspaceRoot: string,
+    focusPath?: string
+  ): Promise<{ summary: string; structuredPayload: RepoOverviewPayload }> {
+    if (this.capabilityBroker && this.brokerContext) {
+      const brokerResult = await this.capabilityBroker.repoOverview(this.brokerContext, {
+        workspaceRoot,
+        ...(focusPath ? { focus: focusPath } : {})
+      });
+      if (brokerResult.ok && brokerResult.structuredPayload) {
+        return {
+          summary: brokerResult.summary,
+          structuredPayload: brokerResult.structuredPayload as RepoOverviewPayload
+        };
+      }
+    }
+
+    return this.repoIntelligence.repoOverview({
+      workspaceRoot,
+      ...(focusPath ? { focus: focusPath } : {})
+    });
+  }
+
+  private async readSpans(workspaceRoot: string, files: string[]): Promise<string> {
+    if (files.length === 0) return '';
+
+    const items = files.slice(0, 6).map((filePath) => ({
+      path: filePath,
+      startLine: 1,
+      endLine: 160
+    }));
+
+    if (this.capabilityBroker && this.brokerContext) {
+      const brokerResult = await this.capabilityBroker.readSpans(this.brokerContext, {
+        workspaceRoot,
+        items
+      });
+      if (brokerResult.ok && brokerResult.structuredPayload) {
+        return this.formatReadSpans(brokerResult.structuredPayload as ReadSpansPayload);
+      }
+    }
+
+    const result = await this.repoIntelligence.readSpans({ workspaceRoot, items });
+    return this.formatReadSpans(result.structuredPayload);
+  }
+
+  private formatReadSpans(payload: ReadSpansPayload): string {
+    return payload.items
+      .map((item) => {
+        const meta = `=== ${item.path} (lines ${item.startLine}-${item.endLine} of ${item.totalLines}) ===`;
+        return `${meta}\n${item.content}`;
+      })
+      .join('\n\n');
+  }
+
+  private pickAuditFiles(overview: RepoOverviewPayload): string[] {
+    const seen = new Set<string>();
+    const ordered = [...overview.keyFiles, ...overview.entryPoints].filter((filePath) => {
+      if (seen.has(filePath)) return false;
+      seen.add(filePath);
+      return true;
+    });
+    return ordered.slice(0, 6);
+  }
+
+  private async readFocusPathContext(workspaceRoot: string, focusPath: string): Promise<string> {
+    const fullPath = path.resolve(workspaceRoot, focusPath);
+    try {
+      const stats = await fs.stat(fullPath);
+      if (stats.isFile()) {
+        const ext = path.extname(fullPath).toLowerCase();
+        if (FOCUS_TEXT_EXTENSIONS.has(ext)) {
+          const result = await this.readSpans(workspaceRoot, [focusPath]);
+          return result ? `=== FOCUS FILE CONTENT: ${focusPath} ===\n${result}` : '';
+        }
+        return '';
+      }
+      if (stats.isDirectory()) {
+        const snapshot = await this.scanDirectory(fullPath, 0, 2);
+        if (snapshot.length === 0) return '';
+        return `=== FOCUS DIRECTORY SNAPSHOT: ${focusPath} ===\n${snapshot.join('\n')}`;
+      }
+    } catch (err: any) {
+      return `[Error loading focus path context: ${err.message}]`;
+    }
+    return '';
+  }
+
+  private async readOptional(filePath: string, maxChars: number): Promise<string> {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      return content.length > maxChars
+        ? content.slice(0, maxChars) + '\n... [truncated for token conservation]'
+        : content;
+    } catch {
+      return '';
+    }
+  }
+
   /**
    * Build the ordered list of model IDs to try, with the explicit override
    * (constructor or env) taking precedence and the static fallback chain
    * filling in the rest. De-duplicated, preserves order.
    */
   private modelCandidates(): string[] {
-    const candidates: string[] = []
+    const candidates: string[] = [];
     const push = (id: string | undefined | null) => {
-      if (id && !candidates.includes(id)) candidates.push(id)
-    }
-    push(this.modelOverride)
-    push(process.env.GLADDIS_AUDIT_MODEL)
-    for (const id of GOOGLE_MODEL_FALLBACK_CHAIN) push(id)
-    return candidates
+      if (id && !candidates.includes(id)) candidates.push(id);
+    };
+    push(this.modelOverride);
+    push(process.env.GLADDIS_AUDIT_MODEL);
+    for (const id of GOOGLE_MODEL_FALLBACK_CHAIN) push(id);
+    return candidates;
   }
 }
 
 function isModelNotFoundError(message: string): boolean {
-  return MODEL_NOT_FOUND_PATTERNS.some((re) => re.test(message))
+  return MODEL_NOT_FOUND_PATTERNS.some((re) => re.test(message));
 }

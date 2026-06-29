@@ -27,6 +27,7 @@ describe('RepoIndexService', () => {
       expect.objectContaining({
         path: 'src/alpha.ts',
         imports: ['./beta'],
+        importBindings: [{ specifier: './beta', bindings: ['betaValue'] }],
         exports: ['AlphaOptions', 'createAlpha']
       })
     ])
@@ -112,6 +113,56 @@ describe('RepoIndexService', () => {
       workspaceRoot: workspace,
       paths: ['src/service.ts'],
       query: 'helperValue',
+      maxResults: 2
+    })
+
+    expect(related.map((file) => file.path)).toEqual(['src/helper.ts', 'src/alpha.ts'])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
+  it('uses imported binding names to rank related files', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-import-bindings-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { alphaValue } from './alpha'",
+        "import { internalValue as foo } from './helper'",
+        'export class SearchService {',
+        '  value = foo || alphaValue',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(path.join(workspace, 'src', 'alpha.ts'), 'export const alphaValue = false\n')
+    await fs.writeFile(path.join(workspace, 'src', 'helper.ts'), 'export const internalValue = true\n')
+
+    const index = new RepoIndexService()
+    const snapshot = await index.refresh(workspace)
+    const serviceFile = snapshot.files.find((file) => file.path === 'src/service.ts')
+
+    expect(serviceFile?.importBindings).toEqual([
+      { specifier: './alpha', bindings: ['alphaValue'] },
+      { specifier: './helper', bindings: ['foo', 'internalValue'] }
+    ])
+
+    const hits = await index.search({
+      workspaceRoot: workspace,
+      query: 'foo',
+      maxResults: 3
+    })
+    expect(hits).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'src/service.ts',
+        kind: 'import',
+        text: 'import foo from ./helper'
+      })
+    ]))
+
+    const related = await index.relatedFiles({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      query: 'foo',
       maxResults: 2
     })
 

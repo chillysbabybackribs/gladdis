@@ -10,11 +10,17 @@ export interface RepoIndexSymbol {
   endLine: number
 }
 
+export interface RepoIndexImport {
+  specifier: string
+  bindings: string[]
+}
+
 export interface RepoIndexFile {
   path: string
   hash: string
   bytes: number
   imports: string[]
+  importBindings: RepoIndexImport[]
   exports: string[]
   symbols: RepoIndexSymbol[]
 }
@@ -154,6 +160,18 @@ export class RepoIndexService {
           score: scoreText(imported, queryLower, 45)
         })
       }
+      for (const imported of file.importBindings ?? []) {
+        for (const binding of imported.bindings) {
+          if (!binding.toLowerCase().includes(queryLower)) continue
+          hits.push({
+            path: file.path,
+            kind: 'import',
+            line: 1,
+            text: `import ${binding} from ${imported.specifier}`,
+            score: scoreText(binding, queryLower, 55)
+          })
+        }
+      }
     }
 
     return hits
@@ -191,7 +209,7 @@ export class RepoIndexService {
         upsertRelated(related, {
           path: resolved,
           reason: `imported by ${seed}`,
-          score: 70 + scoreRelatedFile(candidate, queryLower)
+          score: 70 + scoreImportBindings(seedFile, specifier, queryLower) + scoreRelatedFile(candidate, queryLower)
         })
       }
     }
@@ -203,10 +221,15 @@ export class RepoIndexService {
         return Boolean(resolved && seeds.has(resolved))
       })
       if (importsSeed) {
+        const seedImportScore = file.imports.reduce((score, specifier) => {
+          const resolved = resolveLocalImport(file.path, specifier, fileSet)
+          if (!resolved || !seeds.has(resolved)) return score
+          return Math.max(score, scoreImportBindings(file, specifier, queryLower))
+        }, 0)
         upsertRelated(related, {
           path: file.path,
           reason: `imports ${[...seeds].join(', ')}`,
-          score: 50 + scoreRelatedFile(file, queryLower)
+          score: 50 + seedImportScore + scoreRelatedFile(file, queryLower)
         })
       }
     }
@@ -313,14 +336,17 @@ async function listSourceFiles(workspaceRoot: string): Promise<string[]> {
 function indexFile(relPath: string, content: string, bytes: number): RepoIndexFile {
   const source = ts.createSourceFile(relPath, content, ts.ScriptTarget.Latest, true, scriptKindForPath(relPath))
   const imports = new Set<string>()
+  const importBindings = new Map<string, Set<string>>()
   const exports = new Set<string>()
   const symbols: RepoIndexSymbol[] = []
 
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       imports.add(node.moduleSpecifier.text)
+      addImportBindings(importBindings, node.moduleSpecifier.text, bindingsFromImportClause(node.importClause))
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       imports.add(node.moduleSpecifier.text)
+      addImportBindings(importBindings, node.moduleSpecifier.text, bindingsFromExportClause(node.exportClause))
     }
 
     const symbol = symbolFromNode(node, source)
@@ -339,9 +365,44 @@ function indexFile(relPath: string, content: string, bytes: number): RepoIndexFi
     hash: hashText(content),
     bytes,
     imports: [...imports].sort(),
+    importBindings: [...importBindings.entries()]
+      .map(([specifier, bindings]) => ({ specifier, bindings: [...bindings].sort() }))
+      .sort((a, b) => a.specifier.localeCompare(b.specifier)),
     exports: [...exports].sort(),
     symbols: symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name))
   }
+}
+
+function addImportBindings(bindingsBySpecifier: Map<string, Set<string>>, specifier: string, bindings: string[]): void {
+  if (bindings.length === 0) return
+  let existing = bindingsBySpecifier.get(specifier)
+  if (!existing) {
+    existing = new Set()
+    bindingsBySpecifier.set(specifier, existing)
+  }
+  for (const binding of bindings) existing.add(binding)
+}
+
+function bindingsFromImportClause(importClause: ts.ImportClause | undefined): string[] {
+  if (!importClause) return []
+  const bindings = new Set<string>()
+  if (importClause.name) bindings.add('default')
+  bindingsFromNamedBindings(importClause.namedBindings).forEach((binding) => bindings.add(binding))
+  return [...bindings]
+}
+
+function bindingsFromExportClause(exportClause: ts.NamedExportBindings | undefined): string[] {
+  return bindingsFromNamedBindings(exportClause)
+}
+
+function bindingsFromNamedBindings(namedBindings: ts.NamedImportBindings | ts.NamedExportBindings | undefined): string[] {
+  if (!namedBindings) return []
+  if (ts.isNamespaceImport(namedBindings) || ts.isNamespaceExport(namedBindings)) return ['*', namedBindings.name.text]
+  return namedBindings.elements.flatMap((element) => {
+    const names = [element.name.text]
+    if (element.propertyName) names.push(element.propertyName.text)
+    return names
+  })
 }
 
 function symbolFromNode(node: ts.Node, source: ts.SourceFile): RepoIndexSymbol | null {
@@ -455,6 +516,19 @@ function scoreRelatedFile(file: RepoIndexFile, queryLower: string): number {
     const haystack = `${symbol.name} ${symbol.kind}`.toLowerCase()
     if (haystack.includes(queryLower)) {
       score = Math.max(score, scoreText(symbol.name, queryLower, 45))
+    }
+  }
+  return score
+}
+
+function scoreImportBindings(file: RepoIndexFile, specifier: string, queryLower: string): number {
+  if (!queryLower) return 0
+  const entry = file.importBindings?.find((candidate) => candidate.specifier === specifier)
+  if (!entry) return 0
+  let score = 0
+  for (const binding of entry.bindings) {
+    if (binding.toLowerCase().includes(queryLower)) {
+      score = Math.max(score, scoreText(binding, queryLower, 55))
     }
   }
   return score

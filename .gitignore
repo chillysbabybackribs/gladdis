@@ -23,6 +23,7 @@ pnpm-debug.log*
 .gladdis/memory.v1.backup.json
 .gladdis/memory.next.json
 .gladdis/memory.next.diff.json
+.gladdis/repo-intel/
 
 # Local environment
 .env

@@ -28,6 +28,7 @@ export const IPC = {
   WORKSPACE_CREATE_FOLDER: 'workspace:createFolder',
   AUDIT_LIST: 'audit:list',
   AGENTS_LIST: 'agents:list',
+  AGENTS_OPTIMIZE: 'agents:optimize',
   AGENTS_SAVE: 'agents:save',
   AGENTS_DELETE: 'agents:delete',
   CHATS_LIST: 'chats:list',

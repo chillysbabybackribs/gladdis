@@ -15,6 +15,7 @@ import {
   type DreamRunRequest,
   type GladdisApi,
   type ModelCallEvent,
+  type OptimizeAgentInput,
   type Provider,
   type SaveAgentInput,
   type SavedAgent,
@@ -107,6 +108,7 @@ const api: GladdisApi = {
   },
   agents: {
     list: () => ipcRenderer.invoke(IPC.AGENTS_LIST),
+    optimize: (input: OptimizeAgentInput) => ipcRenderer.invoke(IPC.AGENTS_OPTIMIZE, input),
     save: (input: SaveAgentInput) => ipcRenderer.invoke(IPC.AGENTS_SAVE, input),
     delete: (id: string) => ipcRenderer.invoke(IPC.AGENTS_DELETE, id),
     onUpdated: (cb: (agents: SavedAgent[]) => void) => {

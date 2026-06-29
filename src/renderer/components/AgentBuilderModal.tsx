@@ -27,6 +27,28 @@ function isModelUsable(model: ModelOption, keyStatus: ReturnType<typeof useEnvir
   }
 }
 
+function buildLocalDraft(goal: string, workspaceFolder: string | null): string {
+  return [
+    'You are a specialized task expert inside Gladdis.',
+    '',
+    'Primary objective:',
+    goal,
+    '',
+    'Operating principles:',
+    '- Optimize for direct completion of the task at the highest practical quality.',
+    '- Spend the fewest tokens that still preserve correctness, useful context, and verification.',
+    '- Do not rediscover context that is already known. Use exact paths, commands, APIs, product facts, and acceptance checks when they are provided.',
+    '- Ask for or gather missing context only when it is necessary to complete the task safely.',
+    '- Keep changes and recommendations scoped to the user goal.',
+    '- Validate the result with the most relevant available check before finishing.',
+    workspaceFolder ? `- Treat the active workspace as: ${workspaceFolder}` : '- If no workspace is selected, operate as a portable expert for this task family.',
+    '',
+    'Output contract:',
+    '- State only the plan detail needed for execution.',
+    '- Report the result, important tradeoffs, and verification.'
+  ].join('\n')
+}
+
 export default function AgentBuilderModal({ isOpen, agent = null, onClose }: AgentBuilderModalProps) {
   const { models, keyStatus, codexStatus, workspace } = useEnvironmentStatus()
   const availableModels = useMemo(
@@ -39,6 +61,8 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
   const [roughPrompt, setRoughPrompt] = useState('')
   const [optimizedPrompt, setOptimizedPrompt] = useState('')
   const [testTask, setTestTask] = useState('')
+  const [contextSummary, setContextSummary] = useState('')
+  const [optimizing, setOptimizing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const editing = !!agent
@@ -50,6 +74,8 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
     setRoughPrompt(agent?.roughPrompt ?? '')
     setOptimizedPrompt(agent?.prompt ?? '')
     setTestTask(agent?.testTask ?? '')
+    setContextSummary('')
+    setOptimizing(false)
     setSaving(false)
     setError(null)
   }, [agent, isOpen])
@@ -58,27 +84,42 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
 
   const canSave = agentName.trim().length > 0 && selectedModel.trim().length > 0 && optimizedPrompt.trim().length > 0
 
-  const handleGenerateDraft = () => {
+  const handleGenerateDraft = async () => {
     const trimmed = roughPrompt.trim()
-    if (!trimmed) return
-    const generated = [
-      'You are a specialized workspace agent operating inside the current project directory.',
-      '',
-      'Primary objective:',
-      trimmed,
-      '',
-      'Working style:',
-      '- Inspect the current repository before making changes.',
-      '- Prefer small, verifiable edits.',
-      '- Explain important tradeoffs and risks.',
-      '- Validate changes with the most relevant check before finishing.',
-      workspace.folder ? `- Treat the active workspace as: ${workspace.folder}` : '- Use the active workspace as the execution context.',
-      '',
-      'Output expectations:',
-      '- State the plan briefly before acting.',
-      '- Summarize what changed and how it was verified.'
-    ].join('\n')
-    setOptimizedPrompt(generated)
+    if (!trimmed || optimizing) return
+
+    const modelId = selectedModel || availableModels[0]?.id || ''
+    if (!modelId) {
+      setOptimizedPrompt(buildLocalDraft(trimmed, workspace.folder))
+      setTestTask(`Use this agent to complete: ${trimmed}`)
+      setContextSummary(workspace.folder ? `Used active workspace: ${workspace.folder}` : 'No workspace context was available.')
+      return
+    }
+
+    setOptimizing(true)
+    setError(null)
+    try {
+      if (!selectedModel) setSelectedModel(modelId)
+      const result = await window.gladdis.agents.optimize({
+        name: agentName,
+        modelId,
+        roughPrompt: trimmed,
+        workspaceRoot: workspace.folder,
+        existingAgent: agent
+      })
+      if (!agentName.trim() && result.name) setAgentName(result.name)
+      if (result.modelId && result.modelId !== selectedModel) setSelectedModel(result.modelId)
+      setOptimizedPrompt(result.prompt)
+      setTestTask(result.testTask)
+      setContextSummary(result.contextSummary ?? '')
+    } catch (err) {
+      setOptimizedPrompt(buildLocalDraft(trimmed, workspace.folder))
+      setTestTask(`Use this agent to complete: ${trimmed}`)
+      setContextSummary(workspace.folder ? `Used active workspace: ${workspace.folder}` : 'No workspace context was available.')
+      setError(`Used a local draft because optimization failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setOptimizing(false)
+    }
   }
 
   const handleSave = async () => {
@@ -149,12 +190,13 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
             <button
               type="button"
               onClick={handleGenerateDraft}
-              style={buttonStyle(!roughPrompt.trim())}
-              disabled={!roughPrompt.trim()}
+              style={buttonStyle(!roughPrompt.trim() || optimizing)}
+              disabled={!roughPrompt.trim() || optimizing}
             >
-              Generate Draft Prompt
+              {optimizing ? 'Optimizing...' : 'Optimize Prompt'}
             </button>
           </div>
+          {contextSummary ? <div style={contextSummaryStyle}>{contextSummary}</div> : null}
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Editable agent prompt</span>
@@ -274,6 +316,16 @@ const textareaStyle: React.CSSProperties = {
 const hintStyle: React.CSSProperties = {
   color: '#fca5a5',
   fontSize: 12
+}
+
+const contextSummaryStyle: React.CSSProperties = {
+  padding: '9px 11px',
+  borderRadius: 8,
+  border: '1px solid var(--border-subtle)',
+  background: 'rgba(255, 255, 255, 0.04)',
+  color: 'var(--text-secondary)',
+  fontSize: 12,
+  lineHeight: 1.4
 }
 
 const errorStyle: React.CSSProperties = {

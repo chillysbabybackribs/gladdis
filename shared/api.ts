@@ -23,6 +23,8 @@ import type {
   Workspace
 } from './chat'
 import type {
+  OptimizeAgentInput,
+  OptimizeAgentResult,
   SavedAgent,
   SaveAgentInput,
 } from './agents'
@@ -116,6 +118,8 @@ export interface GladdisApi {
   agents: {
     /** Saved custom agents, newest-updated first. */
     list: () => Promise<SavedAgent[]>
+    /** Turn a rough agent goal into an expert, task-specific agent prompt. */
+    optimize: (input: OptimizeAgentInput) => Promise<OptimizeAgentResult>
     /** Create or update a saved custom agent. */
     save: (input: SaveAgentInput) => Promise<SavedAgent>
     /** Delete a saved custom agent. */

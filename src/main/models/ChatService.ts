@@ -16,6 +16,8 @@ import {
   type DreamRunResult,
   type DreamStatus,
   type ModelOption,
+  type OptimizeAgentInput,
+  type OptimizeAgentResult,
 } from '../../../shared/types'
 import { Dreamer } from './memory/Dreamer'
 import { BrowserTools, type ToolContext } from './browserTools'
@@ -73,6 +75,7 @@ const VERBATIM_TOOL_RESULTS = 4
 const MAX_OUTPUT_TOKENS = 32_000
 const ANTHROPIC_MAX_TOKENS = MAX_OUTPUT_TOKENS
 const DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS = 4_096
+const AGENT_OPTIMIZER_MAX_OUTPUT_TOKENS = 2_800
 
 // The agent loop is NOT capped by a turn count — it runs until the model stops
 // calling tools (goal reached) or the user hits stop (abort signal). Both loops
@@ -90,6 +93,7 @@ export class ChatService {
   private dynamicModels = new Map<string, ModelOption>()
   private readonly toolStarts = new Map<string, number>()
   private readonly capabilityBroker: CapabilityBroker
+  private readonly repoIntelligence: RepoIntelligenceService
   /** Lazily-created so unit tests that construct ChatService don't trip on memory I/O. */
   private dreamer: Dreamer | null = null
 
@@ -105,14 +109,14 @@ export class ChatService {
      */
     private readonly sendDreamProgress?: (e: DreamProgressEvent) => void
   ) {
-    const repoIntelligence = new RepoIntelligenceService()
-    const researchDossier = new ResearchDossierService(() => this.google(), repoIntelligence)
+    this.repoIntelligence = new RepoIntelligenceService()
+    const researchDossier = new ResearchDossierService(() => this.google(), this.repoIntelligence)
     const validation = new ValidationService()
     this.capabilityBroker = new CapabilityBroker(
       {
-        repoOverview: (input) => repoIntelligence.repoOverview(input),
-        searchRepo: (input) => repoIntelligence.searchRepo(input),
-        readSpans: (input) => repoIntelligence.readSpans(input),
+        repoOverview: (input) => this.repoIntelligence.repoOverview(input),
+        searchRepo: (input) => this.repoIntelligence.searchRepo(input),
+        readSpans: (input) => this.repoIntelligence.readSpans(input),
         researchDossier: (input) => researchDossier.researchDossier(input),
         verifyChange: (input) => validation.verifyChange(input)
       },
@@ -387,6 +391,73 @@ export class ChatService {
     }
   }
 
+  async optimizeAgent(input: OptimizeAgentInput): Promise<OptimizeAgentResult> {
+    const roughPrompt = input.roughPrompt.trim()
+    if (!roughPrompt) throw new Error('Agent goal is required.')
+    const model = this.model(input.modelId)
+    if (!model) throw new Error(`Unknown model ${input.modelId}`)
+
+    const workspaceRoot = input.workspaceRoot?.trim() || this.tools.getWorkspaceRoot()
+    const contextSummary = workspaceRoot
+      ? await this.agentOptimizerWorkspaceSummary(workspaceRoot, roughPrompt)
+      : 'No workspace folder is selected. Build a portable task expert from the user goal only.'
+
+    const system = [
+      'You are Gladdis Agent Builder, an expert designer of compact, high-leverage AI agents.',
+      'Convert a rough user goal into a saved agent definition that makes the model excellent at directly completing that task.',
+      '',
+      'Design priorities:',
+      '- Optimize for direct task completion at the highest practical quality.',
+      '- Minimize token use by front-loading only durable context, constraints, exact targets, and decision rules.',
+      '- Do not make the agent rediscover information already supplied by workspace evidence or the user goal.',
+      '- Treat exact paths, component names, commands, schemas, domains, APIs, and acceptance checks as valuable context when they are known.',
+      '- Keep the agent general enough for the intended task family; do not hard-code a single file workflow unless the goal truly requires it.',
+      '- Prefer precise action policy over motivational prose.',
+      '- Preserve user intent. Do not invent repository files, APIs, product facts, or requirements.',
+      '',
+      'Return only valid JSON with this shape:',
+      '{"name":"short agent name","prompt":"system prompt for the saved agent","testTask":"one concise test task","contextSummary":"one sentence on what context was used","notes":["optional short note"]}'
+    ].join('\n')
+
+    const user = JSON.stringify(
+      {
+        roughGoal: roughPrompt,
+        requestedName: input.name?.trim() || null,
+        editingExistingAgent: input.existingAgent
+          ? {
+              name: input.existingAgent.name,
+              roughPrompt: input.existingAgent.roughPrompt ?? null,
+              testTask: input.existingAgent.testTask ?? null
+            }
+          : null,
+        selectedModel: {
+          id: model.id,
+          label: model.label,
+          provider: model.provider
+        },
+        workspaceEvidence: contextSummary
+      },
+      null,
+      2
+    )
+
+    const raw = await this.complete(input.modelId, system, user, {
+      stage: 'agent_optimizer',
+      maxOutputTokens: AGENT_OPTIMIZER_MAX_OUTPUT_TOKENS
+    })
+    const parsed = parseAgentOptimizerJson(raw)
+    if (!parsed.prompt.trim()) throw new Error('Agent optimizer returned an empty prompt.')
+    return {
+      name: parsed.name?.trim() || input.name?.trim() || undefined,
+      modelId: input.modelId,
+      prompt: parsed.prompt.trim(),
+      testTask: parsed.testTask?.trim() || `Use this agent to complete: ${roughPrompt}`,
+      contextSummary: parsed.contextSummary?.trim() || contextSummary.split('\n')[0],
+      notes: parsed.notes?.filter((note) => note.trim()).map((note) => note.trim()).slice(0, 4),
+      source: 'llm'
+    }
+  }
+
   async send(req: ChatRequest): Promise<void> {
     if (req.assistantMessageId) {
       this.assistantMessageIds.set(req.requestId, req.assistantMessageId)
@@ -600,6 +671,26 @@ export class ChatService {
       return `Workspace: ${folder}\nUse request_tools("filesystem") for repo and shell work.`
     }
     return `Workspace: ${folder}`
+  }
+
+  private async agentOptimizerWorkspaceSummary(
+    workspaceRoot: string,
+    roughPrompt: string
+  ): Promise<string> {
+    try {
+      const overview = await this.repoIntelligence.repoOverview({
+        workspaceRoot,
+        focus: roughPrompt
+      })
+      return overview.summary
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return [
+        `Workspace: ${workspaceRoot}`,
+        `Workspace overview unavailable: ${message}`,
+        `Focus: ${roughPrompt}`
+      ].join('\n')
+    }
   }
 
   private customAgentSystemBlock(req: ChatRequest): string | null {
@@ -863,6 +954,44 @@ export class ChatService {
 function normalizeMaxOutputTokens(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS
   return Math.max(1, Math.min(MAX_OUTPUT_TOKENS, Math.floor(value)))
+}
+
+interface ParsedAgentOptimizerResult {
+  name?: string
+  prompt: string
+  testTask?: string
+  contextSummary?: string
+  notes?: string[]
+}
+
+function parseAgentOptimizerJson(raw: string): ParsedAgentOptimizerResult {
+  const trimmed = raw.trim()
+  const jsonText = extractJsonObject(trimmed)
+  const parsed = JSON.parse(jsonText) as Partial<ParsedAgentOptimizerResult>
+  if (typeof parsed.prompt !== 'string') {
+    throw new Error('Agent optimizer returned JSON without a prompt.')
+  }
+  return {
+    ...(typeof parsed.name === 'string' ? { name: parsed.name } : {}),
+    prompt: parsed.prompt,
+    ...(typeof parsed.testTask === 'string' ? { testTask: parsed.testTask } : {}),
+    ...(typeof parsed.contextSummary === 'string'
+      ? { contextSummary: parsed.contextSummary }
+      : {}),
+    ...(Array.isArray(parsed.notes)
+      ? { notes: parsed.notes.filter((note): note is string => typeof note === 'string') }
+      : {})
+  }
+}
+
+function extractJsonObject(text: string): string {
+  if (text.startsWith('{') && text.endsWith('}')) return text
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  if (fenced?.[1]) return extractJsonObject(fenced[1].trim())
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start >= 0 && end > start) return text.slice(start, end + 1)
+  return text
 }
 
 function estimateTokens(system: string, user: string): number {

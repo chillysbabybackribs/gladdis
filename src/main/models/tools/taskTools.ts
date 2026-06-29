@@ -105,7 +105,8 @@ export async function runAuditCodebase(
         : undefined
   })
   const focusPath = typeof args.focusPath === 'string' ? args.focusPath : undefined
-  const auditReport = await auditor.runAudit(focusPath)
+  const auditGoal = typeof args.goal === 'string' && args.goal.trim() ? args.goal.trim() : undefined
+  const auditReport = await auditor.runAudit(focusPath, auditGoal)
   return {
     ok: !auditReport.startsWith('Error:'),
     text: auditReport

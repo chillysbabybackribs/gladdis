@@ -39,6 +39,12 @@ describe('CodebaseAuditor', () => {
     expect(report).toBe('# Simulated Codebase Audit Report\nSuccessfully mapped.');
     expect(mockAi.models.generateContent).toHaveBeenCalled();
 
+    const firstCall = vi.mocked(mockAi.models.generateContent).mock.calls[0]?.[0];
+    expect(firstCall?.config?.systemInstruction).toContain("Let the audit goal determine the report shape");
+    expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('=== Audit Goal ===');
+    expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('Run a general codebase audit');
+    expect(firstCall?.contents?.[0]?.parts?.[0]?.text).not.toContain('Core Technology Stack & Configurations');
+
     await fs.rm(mockWorkspace, { recursive: true, force: true });
   });
 
@@ -100,15 +106,20 @@ describe('CodebaseAuditor', () => {
     });
     const scanSpy = vi.spyOn(auditor, 'scanDirectory');
 
-    const report = await auditor.runAudit();
+    const report = await auditor.runAudit('src/main', 'Audit the codebase for inefficient systems in place.');
 
     expect(report).toBe('# Simulated Brokered Audit Report');
     expect(capabilityBroker.repoOverview).toHaveBeenCalledWith(
       expect.objectContaining({ requestId: 'req-audit', taskId: 'task-audit' }),
-      expect.objectContaining({ workspaceRoot: mockWorkspace })
+      expect.objectContaining({ workspaceRoot: mockWorkspace, focus: 'src/main' })
     );
     expect(capabilityBroker.readSpans).toHaveBeenCalled();
-    expect(scanSpy).not.toHaveBeenCalled();
+    expect(scanSpy).toHaveBeenCalledTimes(1);
+    expect(scanSpy).toHaveBeenCalledWith(path.join(mockWorkspace, 'src', 'main'), 0, 2);
+
+    const firstCall = vi.mocked(mockAi.models.generateContent).mock.calls[0]?.[0];
+    expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('Audit the codebase for inefficient systems in place.');
+    expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('Audit Focus Target: Only focus on modules, files, and rules related to: "src/main"');
 
     await fs.rm(mockWorkspace, { recursive: true, force: true });
   });

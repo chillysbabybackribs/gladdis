@@ -182,10 +182,14 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'audit_codebase',
     description:
-      'Run only on explicit full-audit requests.',
+      'Run only on explicit audit requests. Pass the user’s audit objective in "goal" so the report shape follows the request instead of a fixed template.',
     parameters: {
       type: 'object',
       properties: {
+        goal: {
+          type: 'string',
+          description: 'The specific audit objective to answer, ideally preserving the user request.'
+        },
         focusPath: {
           type: 'string',
           description: 'Optional folder/file path to focus the audit.'

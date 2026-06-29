@@ -100,7 +100,7 @@ export class CodebaseAuditor {
     });
   }
 
-  async runAudit(focusPath?: string): Promise<string> {
+  async runAudit(focusPath?: string, auditGoal?: string): Promise<string> {
     const workspaceRoot = path.resolve(this.workspaceRoot);
     const overview = await this.loadOverview(workspaceRoot, focusPath);
     const auditFiles = this.pickAuditFiles(overview.structuredPayload);
@@ -113,8 +113,16 @@ export class CodebaseAuditor {
     const fallbackTree =
       this.capabilityBroker ? '' : (await this.scanDirectory(workspaceRoot)).join('\n');
 
-    const systemPrompt = `You are an elite, high-density Codebase Auditing Agent.
-Your task is to ingest the repository evidence, bounded source excerpts, and optional focus areas of a workspace, and synthesize an exceptionally clear, deep-dive Markdown architectural report. This report serves as a detailed blueprint for developers and AI models to understand exactly how the system functions, its core interfaces, state management flows, security mechanisms, and the exact files to edit for different features.`;
+    const systemPrompt = `You are an elite, evidence-first Codebase Auditing Agent.
+Your job is to inspect the provided repository evidence, optional focus areas, and the caller's audit goal, then produce a precise Markdown audit that answers that goal directly.
+
+Behavioral requirements:
+- Let the audit goal determine the report shape, priorities, and depth.
+- Ground every substantive claim in the provided repository evidence.
+- Cite concrete file paths for findings and architectural claims whenever possible.
+- Separate confirmed findings from uncertainty; explicitly say when evidence is insufficient.
+- Avoid falling back to a generic template when the caller asked for something narrower or comparative.
+- If no explicit audit goal is provided, produce a balanced general codebase audit.`;
 
     const promptSections = [
       `Workspace Root: ${workspaceRoot}`,
@@ -126,32 +134,26 @@ Your task is to ingest the repository evidence, bounded source excerpts, and opt
       fallbackTree ? `\n=== Complete Project File Tree ===\n${fallbackTree}` : null
     ].filter((part): part is string => Boolean(part));
 
+    const goalText = auditGoal?.trim()
+      ? auditGoal.trim()
+      : 'Run a general codebase audit and surface the most important findings from the available evidence.';
+
     const userPrompt = `${promptSections.join('\n')}
 
-Generate an extremely detailed, beautiful, highly structured Markdown report containing:
+=== Audit Goal ===
+${goalText}
 
-1. **Core Technology Stack & Configurations**:
-   - Comprehensive analysis of frameworks, library versions, and package structure.
-   - Deep dive into the build configuration, compile targets, and bundler setups (e.g., Vite/Webpack configs, Preload script bridge setups).
+Write a Markdown audit that directly answers the audit goal above.
 
-2. **Architecture & Directory Deep-Dive**:
-   - Folder-by-folder layout mapping. Explain exactly what lives where and the clean boundaries between modules (e.g. main vs. renderer vs. shared).
-   - Describe communication protocols (e.g., Electron IPC channels, HTTP APIs, WebSocket structures) and how they flow across layers.
+Requirements:
+- Choose the report structure that best fits the audit goal instead of forcing a fixed template.
+- Prioritize the highest-signal findings for that goal.
+- Include concrete evidence with file paths for each important claim.
+- Call out strengths as well as weaknesses when the goal asks for them or when they materially affect the conclusion.
+- Add a short "Needs More Verification" section for any plausible but unconfirmed concerns.
+- If the goal is broad, organize the audit into the most useful sections you can infer from the evidence.
 
-3. **System Lifecycles, Entry Points & Boot Sequence**:
-   - Detail the boot sequence and lifecycles of the application based on the main entry points.
-   - Trace how routers are configured, databases/stores are initialized, background agents/workers are spun up, and tabs/sessions are managed.
-
-4. **Detailed Feature/Domain Architecture**:
-   - Break down the core domains, specialized mechanisms (such as context caching, state sync, security hooks, file system management, web devtools session, or specific business logic patterns).
-
-5. **Key Types, State Schemas & IPC Protocols**:
-   - Document the exact interfaces, state stores, database structures, or IPC contracts discovered in the provided evidence.
-
-6. **Developer Edit Cheat Sheet & Mod Map**:
-   - Provide concrete, exact relative file paths for typical engineering tasks (e.g., "To add a new browser automation tool, update X and Y", "To modify the UI layout, update Z").
-
-Output ONLY the final Markdown document. Be rigorous, highly detailed, precise, and ground your report completely in the provided codebase context. Do not include vague generic templates; make it specific to the files, folders, and contents you see.`;
+Output ONLY the final Markdown document. Be rigorous, precise, and fully grounded in the provided codebase context.`;
 
     const candidates = this.modelCandidates();
     const errors: Array<{ model: string; message: string }> = [];

@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import type { GoogleGenAI } from '@google/genai'
+import { snapshotDirectoryTree } from '../../fs/repoSnapshot'
 import { RepoIntelligenceService } from './RepoIntelligenceService'
 
 export interface ResearchDossierInput {
@@ -37,7 +38,11 @@ export class ResearchDossierService {
     const [readme, packageJson, tree] = await Promise.all([
       this.readOptional(path.join(workspaceRoot, 'README.md'), 4000),
       this.readOptional(path.join(workspaceRoot, 'package.json'), 4000),
-      this.scanDirectory(workspaceRoot)
+      snapshotDirectoryTree(workspaceRoot, workspaceRoot, {
+        maxDepth: 4,
+        maxEntriesPerDirectory: 40,
+        maxEntries: 120
+      })
     ])
     const search = await this.repoIntelligence.searchRepo({
       workspaceRoot,
@@ -91,40 +96,6 @@ export class ResearchDossierService {
       return text.length > maxChars ? `${text.slice(0, maxChars)}\n... [truncated]` : text
     } catch {
       return ''
-    }
-  }
-
-  private async scanDirectory(root: string, depth = 0, maxDepth = 4): Promise<string[]> {
-    if (depth > maxDepth) return []
-    const ignored = new Set([
-      '.git',
-      'node_modules',
-      'dist',
-      'build',
-      'out',
-      '.next',
-      '.cache',
-      'coverage'
-    ])
-    try {
-      const entries = await fs.readdir(root, { withFileTypes: true })
-      const lines: string[] = []
-      for (const entry of entries.slice(0, 40)) {
-        if (ignored.has(entry.name)) continue
-        const fullPath = path.join(root, entry.name)
-        const rel = path.relative(root, fullPath)
-        if (entry.isDirectory()) {
-          lines.push(`${rel}/`)
-          const nested = await this.scanDirectory(fullPath, depth + 1, maxDepth)
-          lines.push(...nested.map((item) => `${entry.name}/${item}`))
-        } else {
-          lines.push(rel)
-        }
-        if (lines.length >= 120) break
-      }
-      return lines.slice(0, 120)
-    } catch {
-      return []
     }
   }
 }

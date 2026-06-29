@@ -53,11 +53,12 @@ export async function searchWithRipgrep(
   regex: boolean
 ): Promise<SearchResult> {
   const laneLimit = searchLaneLimit(limit)
+  const pathLaneGlobs = buildPathSearchGlobs(query)
   const [content, paths] = await Promise.all([
     searchContentWithRipgrep(root, query, glob, context, laneLimit, regex),
-    regex
+    regex || pathLaneGlobs.length === 0
       ? Promise.resolve({ hits: [] as SearchHit[], truncated: false })
-      : searchPathsWithRipgrep(root, query, glob, laneLimit)
+      : searchPathsWithRipgrep(root, query, glob, laneLimit, pathLaneGlobs)
   ])
   return finalizeSearch(root, query, limit, regex, content, paths)
 }
@@ -149,11 +150,13 @@ async function searchPathsWithRipgrep(
   root: string,
   query: string,
   glob: string | undefined,
-  laneLimit: number
+  laneLimit: number,
+  queryGlobs: string[]
 ): Promise<{ hits: SearchHit[]; truncated: boolean }> {
   const args: string[] = ['--files', root]
   for (const ignore of RG_IGNORE_GLOBS) args.push('--glob', ignore)
   if (glob) args.push('--glob', glob)
+  for (const queryGlob of queryGlobs) args.push('--glob', queryGlob)
 
   const stdout = (await execFileAsync('rg', args, {
     maxBuffer: 8 * 1024 * 1024,
@@ -346,4 +349,26 @@ function contains(value: string, query: string, ignoreCase: boolean): boolean {
 
 function normalizeForMatch(value: string, ignoreCase: boolean): string {
   return ignoreCase ? value.toLowerCase() : value
+}
+
+function buildPathSearchGlobs(query: string): string[] {
+  const trimmed = query.trim()
+  if (!trimmed || trimmed.length > 80 || /[\r\n]/.test(trimmed)) return []
+
+  const hasPathHints = /[./\\_-]/.test(trimmed)
+  const words = trimmed.split(/\s+/).filter(Boolean)
+  if (words.length > 1 && !hasPathHints) return []
+
+  const tokens = trimmed
+    .replace(/\\/g, '/')
+    .split(/[^A-Za-z0-9./_-]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2)
+    .slice(0, 4)
+
+  return Array.from(new Set(tokens.map((token) => `*${escapeGlobToken(token)}*`)))
+}
+
+function escapeGlobToken(token: string): string {
+  return token.replace(/[[\]{}?!*]/g, '\\$&')
 }

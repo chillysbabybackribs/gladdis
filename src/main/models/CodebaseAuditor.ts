@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { GoogleGenAI } from '@google/genai';
 import { MODELS } from '../../../shared/models';
+import { snapshotDirectoryTree } from '../fs/repoSnapshot';
 import type { BrokerCallContext, CapabilityBroker } from './capabilities/CapabilityBroker';
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService';
 
@@ -94,33 +95,9 @@ export class CodebaseAuditor {
    */
   async scanDirectory(dir: string, depth = 0, maxDepth = 6): Promise<string[]> {
     if (depth > maxDepth) return [];
-
-    const ignored = new Set([
-      'node_modules', '.git', '.next', 'dist', 'build', 'out',
-      '.pnpm-store', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock',
-      '.svelte-kit', '.nuxt', '.docusaurus', 'coverage', '.cache'
-    ]);
-
-    const results: string[] = [];
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (ignored.has(entry.name)) continue;
-        const fullPath = path.join(dir, entry.name);
-        const relativePath = path.relative(this.workspaceRoot, fullPath);
-
-        if (entry.isDirectory()) {
-          results.push(`${relativePath}/`);
-          const sub = await this.scanDirectory(fullPath, depth + 1, maxDepth);
-          results.push(...sub);
-        } else {
-          results.push(relativePath);
-        }
-      }
-    } catch {
-      // Gracefully bypass restricted/unreadable directories.
-    }
-    return results;
+    return snapshotDirectoryTree(this.workspaceRoot, dir, {
+      maxDepth: maxDepth - depth
+    });
   }
 
   async runAudit(focusPath?: string): Promise<string> {

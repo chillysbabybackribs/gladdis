@@ -6,6 +6,8 @@
  */
 
 import type {
+  DreamAdoptionIssue,
+  DreamAdoptionPolicy,
   DreamDiff,
   DreamDiffAction,
   DreamDiffEntry,
@@ -17,6 +19,10 @@ import type {
 import type { Provider } from '../../../../shared/models'
 import type { MemoryEntry, MemoryEntryKind } from './types'
 import type { ReconcileDecision } from './reconcileStage'
+
+const PROMOTING_ACTIONS = new Set<DreamDiffAction>(['add', 'merge', 'replace'])
+const MIN_ADOPT_CONFIDENCE = 0.7
+const MIN_ADOPT_EVIDENCE = 1
 
 export interface ComposeDiffInput {
   id: string
@@ -85,6 +91,7 @@ export function composeDreamDiff(input: ComposeDiffInput): DreamDiff {
   }
 
   summary.unchanged = input.existingEntries.filter((e) => !affectedExistingIds.has(e.id)).length
+  const adoption = evaluateDreamAdoption(entries, input.verifications)
 
   return {
     id: input.id,
@@ -96,10 +103,60 @@ export function composeDreamDiff(input: ComposeDiffInput): DreamDiff {
     summary,
     verifications: input.verifications,
     entries,
+    adoption,
     awaitingAdopt: true,
     candidateFilePath: input.candidateFilePath,
     sampledSessionCount: input.sampledSessionCount
   }
+}
+
+export function evaluateDreamAdoption(
+  entries: ReadonlyArray<DreamDiffEntry>,
+  verifications: ReadonlyArray<DreamVerification>
+): DreamAdoptionPolicy {
+  const verificationById = new Map(verifications.map((v) => [v.entryId, v] as const))
+  const issues: DreamAdoptionIssue[] = []
+
+  for (const entry of entries) {
+    if (!PROMOTING_ACTIONS.has(entry.action)) continue
+
+    if (entry.confidence < MIN_ADOPT_CONFIDENCE) {
+      issues.push({
+        code: 'low-confidence',
+        entryId: entry.entryId,
+        message: `Confidence ${entry.confidence.toFixed(2)} is below the ${MIN_ADOPT_CONFIDENCE.toFixed(2)} adoption floor.`
+      })
+    }
+
+    if (entry.evidenceCount < MIN_ADOPT_EVIDENCE) {
+      issues.push({
+        code: 'thin-evidence',
+        entryId: entry.entryId,
+        message: 'Promoted memory entries need at least one evidence source.'
+      })
+    }
+
+    const verification = verificationById.get(entry.entryId)
+    if (verification?.verdict === 'unsupported') {
+      issues.push({
+        code: 'unsupported-verification',
+        entryId: entry.entryId,
+        message: verification.reason
+          ? `Verifier marked this unsupported: ${verification.reason}`
+          : 'Verifier marked this entry unsupported.'
+      })
+    } else if (verification?.verdict === 'partial') {
+      issues.push({
+        code: 'partial-verification',
+        entryId: entry.entryId,
+        message: verification.reason
+          ? `Verifier only partially supported this entry: ${verification.reason}`
+          : 'Verifier only partially supported this entry.'
+      })
+    }
+  }
+
+  return { blocked: issues.length > 0, issues }
 }
 
 function liftKind(kind: MemoryEntryKind): MemoryEntryKindLite {

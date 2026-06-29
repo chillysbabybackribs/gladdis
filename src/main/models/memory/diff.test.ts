@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { composeDreamDiff } from './diff'
+import { composeDreamDiff, evaluateDreamAdoption } from './diff'
 import type { ExtractCandidate } from './extractStage'
 import type { ReconcileDecision } from './reconcileStage'
 import type { MemoryEntry } from './types'
@@ -126,5 +126,65 @@ describe('composeDreamDiff', () => {
     expect(diff.entries[0].action).toBe('reject')
     expect(diff.entries[0].text).toBe('too vague')
     expect(diff.summary.rejected).toBe(1)
+  })
+
+  it('blocks adoption for promotable rows with weak review signals', () => {
+    const policy = evaluateDreamAdoption(
+      [
+        {
+          action: 'add',
+          entryId: 'mem_low',
+          kind: 'preference',
+          scope: 'workspace',
+          text: 'too uncertain',
+          confidence: 0.6,
+          evidenceCount: 1
+        },
+        {
+          action: 'replace',
+          entryId: 'mem_unsupported',
+          kind: 'project-fact',
+          scope: 'workspace',
+          text: 'not in evidence',
+          confidence: 0.9,
+          evidenceCount: 2
+        },
+        {
+          action: 'reject',
+          entryId: 'rejected:0',
+          kind: 'preference',
+          scope: 'workspace',
+          text: 'already rejected',
+          confidence: 0.1,
+          evidenceCount: 0
+        }
+      ],
+      [{ entryId: 'mem_unsupported', verdict: 'unsupported', reason: 'evidence says the opposite' }]
+    )
+
+    expect(policy.blocked).toBe(true)
+    expect(policy.issues.map((issue) => issue.code)).toEqual([
+      'low-confidence',
+      'unsupported-verification'
+    ])
+  })
+
+  it('allows adoption when promotable rows pass confidence, evidence, and verification checks', () => {
+    const policy = evaluateDreamAdoption(
+      [
+        {
+          action: 'merge',
+          entryId: 'mem_ok',
+          kind: 'playbook',
+          scope: 'workspace',
+          text: 'validated workflow',
+          confidence: 0.85,
+          evidenceCount: 2
+        }
+      ],
+      [{ entryId: 'mem_ok', verdict: 'supported' }]
+    )
+
+    expect(policy).toEqual({ blocked: false, issues: [] })
   })
 })

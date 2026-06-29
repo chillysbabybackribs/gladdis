@@ -14,25 +14,24 @@ import type {
   DreamAdoptResult,
   DreamDiff,
   DreamDiscardResult,
+  DreamProgressEvent,
   DreamRunRequest,
   DreamRunResult,
   DreamScope,
+  DreamStage,
   DreamStatus,
   KeyStatus,
   ModelOption
 } from '../../../../shared/types'
 import { loadMemoryFile, saveMemoryFile } from '../memoryStore'
-import {
-  type MemoryFileV2,
-  type MemoryEntry,
-  MEMORY_FILE_VERSION
-} from './types'
+import { type MemoryFileV2, MEMORY_FILE_VERSION } from './types'
 import { sampleTranscripts } from './transcriptSampler'
 import { pickDreamModel } from './pickDreamModel'
 import { runExtractStage } from './extractStage'
 import { runReconcileStage } from './reconcileStage'
+import { runLlmReconcileReview } from './llmReconcileStage'
 import { runVerifyStage } from './verifyStage'
-import { composeDreamDiff } from './diff'
+import { composeDreamDiff, evaluateDreamAdoption } from './diff'
 
 const CANDIDATE_FILE = 'memory.next.json'
 const DIFF_FILE = 'memory.next.diff.json'
@@ -45,6 +44,12 @@ export interface DreamerDeps {
   getKeyStatus: () => Promise<KeyStatus> | KeyStatus
   /** Live Codex catalog from the app-server. Falls back to MODELS when empty. */
   getDynamicCodexModels?: () => Promise<ModelOption[]> | ModelOption[]
+  /**
+   * Stage-by-stage progress sink. Optional so unit tests (and any caller that
+   * doesn't care) can stay quiet. The Dreamer never assumes delivery: if the
+   * sink throws or the renderer has closed, the run completes anyway.
+   */
+  emitProgress?: (event: DreamProgressEvent) => void
 }
 
 export class Dreamer {
@@ -88,21 +93,63 @@ export class Dreamer {
       }
     }
 
+    const runId = `drm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+
     this.inFlight.set(req.workspaceRoot, {
       startedAt: Date.now(),
       scope: req.scope,
       modelId: model.id
     })
 
+    this.emit({
+      type: 'started',
+      runId,
+      workspaceRoot: req.workspaceRoot,
+      scope: req.scope,
+      modelId: model.id,
+      modelProvider: model.provider
+    })
+
     try {
-      return await this.runPipeline(req, model)
+      const result = await this.runPipeline(req, model, runId)
+      this.emit({
+        type: 'done',
+        runId,
+        workspaceRoot: req.workspaceRoot,
+        ok: result.ok,
+        ...(result.ok ? {} : { error: result.error })
+      })
+      return result
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      this.emit({ type: 'done', runId, workspaceRoot: req.workspaceRoot, ok: false, error })
+      throw err
     } finally {
       this.inFlight.delete(req.workspaceRoot)
     }
   }
 
-  private async runPipeline(req: DreamRunRequest, model: ModelOption): Promise<DreamRunResult> {
+  private emit(event: DreamProgressEvent): void {
+    if (!this.deps.emitProgress) return
+    try {
+      this.deps.emitProgress(event)
+    } catch (err) {
+      // Never let a UI subscriber's failure break the dream.
+      console.warn('[dream] progress sink threw:', err)
+    }
+  }
+
+  private emitStage(runId: string, workspaceRoot: string, stage: DreamStage, detail?: string): void {
+    this.emit({ type: 'stage', runId, workspaceRoot, stage, ...(detail ? { detail } : {}) })
+  }
+
+  private async runPipeline(
+    req: DreamRunRequest,
+    model: ModelOption,
+    runId: string
+  ): Promise<DreamRunResult> {
     const workspaceRoot = req.workspaceRoot
+    this.emitStage(runId, workspaceRoot, 'sampling')
     const live = await loadMemoryFile(workspaceRoot)
     const sample = sampleTranscripts(this.deps.chats, req.scope)
     if (sample.conversationIds.length === 0) {
@@ -111,7 +158,14 @@ export class Dreamer {
         error: `No conversations found in scope "${req.scope}". Try a wider scope.`
       }
     }
+    this.emitStage(
+      runId,
+      workspaceRoot,
+      'sampling',
+      `${sample.conversationIds.length} session${sample.conversationIds.length === 1 ? '' : 's'}, ${sample.chars.toLocaleString()} chars${sample.truncated ? ' (truncated)' : ''}`
+    )
 
+    this.emitStage(runId, workspaceRoot, 'extracting')
     const extract = await runExtractStage(
       { complete: this.deps.complete },
       {
@@ -121,26 +175,81 @@ export class Dreamer {
         instructions: req.instructions
       }
     )
+    this.emitStage(
+      runId,
+      workspaceRoot,
+      'extracting',
+      extract.parseFailed
+        ? 'parse failed'
+        : `${extract.candidates.length} candidate${extract.candidates.length === 1 ? '' : 's'}`
+    )
 
+    this.emitStage(runId, workspaceRoot, 'reconciling')
     const reconcile = runReconcileStage({
       existingEntries: live.entries,
       candidates: extract.candidates,
       workspaceRoot
     })
+    this.emitStage(
+      runId,
+      workspaceRoot,
+      'reconciling',
+      summarizeReconcile(reconcile.decisions)
+    )
 
+    // Stage 3 — model reviews the deterministic decisions. Falls back to the
+    // deterministic result on any failure (model error, bad JSON, empty
+    // overrides). Tracks `decisions` and `resultEntries` post-review so the
+    // verify stage operates on the refined state.
+    let decisions = reconcile.decisions
+    let resultEntries = reconcile.resultEntries
+    if (extract.candidates.length > 0) {
+      this.emitStage(runId, workspaceRoot, 'reviewing')
+      const review = await runLlmReconcileReview(
+        { complete: this.deps.complete },
+        {
+          modelId: model.id,
+          workspaceRoot,
+          existingEntries: live.entries,
+          candidates: extract.candidates,
+          baselineDecisions: reconcile.decisions
+        }
+      )
+      decisions = review.decisions
+      resultEntries = review.resultEntries
+      this.emitStage(
+        runId,
+        workspaceRoot,
+        'reviewing',
+        review.skipped
+          ? 'no overrides (deterministic kept)'
+          : review.overrideCount === 0
+            ? 'reviewed, no overrides'
+            : `${review.overrideCount} override${review.overrideCount === 1 ? '' : 's'} → ${summarizeReconcile(decisions)}`
+      )
+    }
+
+    this.emitStage(runId, workspaceRoot, 'verifying')
     const verify = await runVerifyStage(
       { complete: this.deps.complete },
       {
         modelId: model.id,
-        decisions: reconcile.decisions,
-        resultEntries: reconcile.resultEntries
+        decisions,
+        resultEntries
       }
     )
+    this.emitStage(
+      runId,
+      workspaceRoot,
+      'verifying',
+      verify.skipped ? 'skipped (nothing to verify)' : `${verify.verifications.length} sampled`
+    )
 
+    this.emitStage(runId, workspaceRoot, 'persisting')
     const candidateFile: MemoryFileV2 = {
       version: MEMORY_FILE_VERSION,
       workspace: { root: workspaceRoot, updatedAt: new Date().toISOString() },
-      entries: reconcile.resultEntries,
+      entries: resultEntries,
       tasks: { ...live.tasks }
     }
     const candidatePath = join(workspaceRoot, '.gladdis', CANDIDATE_FILE)
@@ -156,15 +265,15 @@ export class Dreamer {
     }
 
     const diff = composeDreamDiff({
-      id: `drm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      id: runId,
       createdAt: Date.now(),
       modelId: model.id,
       modelProvider: model.provider,
       scope: req.scope,
       workspaceRoot,
       existingEntries: live.entries,
-      resultEntries: reconcile.resultEntries,
-      decisions: reconcile.decisions,
+      resultEntries,
+      decisions,
       verifications: verify.verifications,
       candidateFilePath: candidatePath,
       sampledSessionCount: sample.conversationIds.length
@@ -208,6 +317,7 @@ export class Dreamer {
   async adopt(workspaceRoot: string): Promise<DreamAdoptResult> {
     const dir = join(workspaceRoot, '.gladdis')
     const candidatePath = join(dir, CANDIDATE_FILE)
+    const diffPath = join(dir, DIFF_FILE)
     let raw: string
     try {
       raw = await readFile(candidatePath, 'utf8')
@@ -223,6 +333,20 @@ export class Dreamer {
     if (candidate.version !== MEMORY_FILE_VERSION) {
       return { ok: false, error: `Candidate file has wrong version ${candidate.version}.` }
     }
+
+    const adoption = await readAdoptionPolicy(diffPath)
+    if (!adoption.ok) {
+      return { ok: false, error: adoption.error }
+    }
+    if (adoption.policy.blocked) {
+      const first = adoption.policy.issues[0]
+      const rest = adoption.policy.issues.length - 1
+      return {
+        ok: false,
+        error: `Dream adoption is blocked by review policy: ${first.message}${rest > 0 ? ` (${rest} more issue${rest === 1 ? '' : 's'})` : ''}`
+      }
+    }
+
     // Defensive: re-bind to the current workspace root in case the project moved.
     candidate.workspace.root = workspaceRoot
     candidate.workspace.updatedAt = new Date().toISOString()
@@ -245,6 +369,22 @@ export class Dreamer {
   }
 }
 
+function summarizeReconcile(decisions: ReadonlyArray<{ action: string }>): string {
+  const counts = { add: 0, merge: 0, replace: 0, reject: 0 }
+  for (const d of decisions) {
+    if (d.action === 'add') counts.add++
+    else if (d.action === 'merge') counts.merge++
+    else if (d.action === 'replace') counts.replace++
+    else if (d.action === 'reject') counts.reject++
+  }
+  const parts: string[] = []
+  if (counts.add) parts.push(`${counts.add} new`)
+  if (counts.merge) parts.push(`${counts.merge} merged`)
+  if (counts.replace) parts.push(`${counts.replace} replaced`)
+  if (counts.reject) parts.push(`${counts.reject} rejected`)
+  return parts.length === 0 ? 'no changes' : parts.join(', ')
+}
+
 async function fileExists(path: string): Promise<boolean> {
   try {
     await readFile(path, 'utf8')
@@ -259,6 +399,32 @@ async function unlinkSafe(path: string): Promise<void> {
     await unlink(path)
   } catch {
     /* swallow: discarding a non-existent file is fine */
+  }
+}
+
+async function readAdoptionPolicy(
+  diffPath: string
+): Promise<{ ok: true; policy: DreamDiff['adoption'] } | { ok: false; error: string }> {
+  let raw: string
+  try {
+    raw = await readFile(diffPath, 'utf8')
+  } catch {
+    return {
+      ok: false,
+      error: 'Dream adoption requires review metadata. Run a new dream or discard this candidate.'
+    }
+  }
+
+  let diff: DreamDiff
+  try {
+    diff = JSON.parse(raw) as DreamDiff
+  } catch (err) {
+    return { ok: false, error: `Dream review metadata is unreadable: ${(err as Error).message}` }
+  }
+
+  return {
+    ok: true,
+    policy: diff.adoption ?? evaluateDreamAdoption(diff.entries ?? [], diff.verifications ?? [])
   }
 }
 

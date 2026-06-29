@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import type {
   DreamDiff,
   DreamDiffAction,
@@ -43,14 +43,34 @@ const KIND_LABEL: Record<MemoryEntryKindLite, string> = {
 
 export function DreamDiffModal({ diff, busy, onAdopt, onDiscard, onClose }: Props) {
   const sectioned = useMemo(() => groupByAction(diff.entries), [diff.entries])
+  const adoption = diff.adoption ?? { blocked: false, issues: [] }
   const verdictById = useMemo(() => {
     const map = new Map<string, { verdict: DreamVerificationVerdict; reason?: string }>()
     for (const v of diff.verifications) map.set(v.entryId, v)
     return map
   }, [diff.verifications])
 
+  // Close on Escape — matches the behavior users expect from app-wide modals.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && busy === null) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, busy])
+
+  // Stays scoped to the chat panel that opened it. We tried portaling to
+  // document.body but the native browser WebContentsView sits ABOVE the
+  // renderer in Electron's compositor, so any portaled modal disappears
+  // behind it. Inside the chat panel the modal is always visible because
+  // the chat region is owned entirely by the React renderer.
   return (
-    <div className="modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+    <div
+      className="modal-overlay dream-diff-overlay"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && busy === null) onClose()
+      }}
+    >
       <div className="modal dream-diff-modal" role="dialog" aria-label="Memory dream diff">
         <div className="modal-head">
           <div>
@@ -62,7 +82,7 @@ export function DreamDiffModal({ diff, busy, onAdopt, onDiscard, onClose }: Prop
           <button className="modal-x" onClick={onClose} aria-label="Close">×</button>
         </div>
 
-        <div className="modal-body" style={{ overflow: 'auto', maxHeight: '70vh' }}>
+        <div className="modal-body dream-diff-body">
           <div className="dream-summary">
             <SummaryPill label="New" count={diff.summary.added} cls="dream-pill-add" />
             <SummaryPill label="Merged" count={diff.summary.merged} cls="dream-pill-merge" />
@@ -70,6 +90,18 @@ export function DreamDiffModal({ diff, busy, onAdopt, onDiscard, onClose }: Prop
             <SummaryPill label="Rejected" count={diff.summary.rejected} cls="dream-pill-reject" />
             <SummaryPill label="Unchanged" count={diff.summary.unchanged} cls="dream-pill-unchanged" />
           </div>
+
+          {adoption.blocked && (
+            <div className="dream-adoption-block">
+              <div className="dream-adoption-title">Adoption blocked</div>
+              <ul>
+                {adoption.issues.slice(0, 4).map((issue, index) => (
+                  <li key={`${issue.entryId}:${issue.code}:${index}`}>{issue.message}</li>
+                ))}
+                {adoption.issues.length > 4 && <li>{adoption.issues.length - 4} more issue{adoption.issues.length - 4 === 1 ? '' : 's'}</li>}
+              </ul>
+            </div>
+          )}
 
           {diff.entries.length === 0 ? (
             <div className="dream-empty">The dreamer didn't propose any changes. Try a wider scope or a different model.</div>
@@ -106,7 +138,8 @@ export function DreamDiffModal({ diff, busy, onAdopt, onDiscard, onClose }: Prop
           <button
             className="dream-btn dream-btn-adopt"
             onClick={onAdopt}
-            disabled={busy !== null || !diff.awaitingAdopt}
+            disabled={busy !== null || !diff.awaitingAdopt || adoption.blocked}
+            title={adoption.blocked ? 'Resolve blocked dream rows before adopting' : undefined}
           >
             {busy === 'adopting' ? 'Adopting…' : diff.awaitingAdopt ? 'Adopt' : 'Already adopted'}
           </button>

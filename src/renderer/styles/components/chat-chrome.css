@@ -504,10 +504,44 @@
 .memory-btn-icon {
   font-size: 12px;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+}
+.memory-btn-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(120, 200, 255, 0.25);
+  border-top-color: rgba(120, 200, 255, 0.95);
+  border-radius: 50%;
+  animation: memory-spin 0.9s linear infinite;
+}
+@keyframes memory-spin {
+  to { transform: rotate(360deg); }
 }
 .memory-btn-caret {
   font-size: 9px;
   opacity: 0.7;
+}
+
+.memory-stage-detail {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  max-width: 280px;
+  padding: 5px 9px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  background: rgba(120, 200, 255, 0.06);
+  border: 1px solid rgba(120, 200, 255, 0.18);
+  border-radius: 6px;
+  z-index: 50;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .memory-menu {
@@ -549,10 +583,42 @@
 .memory-menu-item.is-default {
   font-weight: 500;
 }
+.memory-menu-item.is-selected::before {
+  content: '✓';
+  font-size: 10px;
+  color: rgba(120, 200, 255, 0.85);
+  margin-right: 6px;
+  margin-left: -2px;
+}
 .memory-menu-default {
   font-size: 10px;
   color: var(--text-muted);
   margin-left: 8px;
+}
+
+.memory-pref-row {
+  display: flex;
+  gap: 4px;
+  padding: 2px 6px 6px;
+}
+.memory-pref-pill {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.memory-pref-pill:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+.memory-pref-pill.is-active {
+  color: var(--text-primary);
+  background: rgba(120, 200, 255, 0.12);
+  border-color: rgba(120, 200, 255, 0.35);
 }
 .memory-menu-divider {
   height: 1px;
@@ -574,13 +640,37 @@
   z-index: 50;
 }
 
-/* DreamDiff modal */
+/* DreamDiff modal — lives inside the .chat overlay (NOT portaled). Electron
+   layers the native browser WebContentsView above the renderer compositor,
+   so any DOM portaled to document.body gets hidden behind it. Keeping the
+   modal in-panel guarantees visibility for both left and right chats. */
+.dream-diff-overlay {
+  /* Inherits .modal-overlay (position: absolute; inset: 0) — this rule
+     just bumps the z-index above other in-panel chrome and centers the
+     modal vertically so it isn't anchored to the panel top. */
+  z-index: 50;
+  place-items: center;
+}
 .dream-diff-modal {
-  width: 720px;
-  max-width: calc(100% - 24px);
-  min-height: 320px;
+  /* Cap to panel width minus a comfortable margin so the modal never clips
+     on narrow chats. The chat panel can be ~360-700px depending on the
+     split, so the cap is adaptive. */
+  width: min(560px, calc(100% - 20px));
+  max-height: calc(100% - 32px);
   display: flex;
   flex-direction: column;
+  background: var(--bg-elevated, #232323);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.dream-diff-body {
+  /* Let the head + foot keep their natural height; the body soaks up the
+     remaining space and scrolls internally if the diff is long. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 .dream-subtle {
   font-size: 11px;
@@ -613,6 +703,28 @@
 .dream-pill-replace { border-color: rgba(255, 200, 110, 0.3); }
 .dream-pill-reject { border-color: rgba(220, 110, 110, 0.3); }
 .dream-pill-unchanged { color: var(--text-muted); }
+
+.dream-adoption-block {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 200, 110, 0.28);
+  border-radius: 6px;
+  background: rgba(255, 200, 110, 0.08);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+.dream-adoption-title {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.dream-adoption-block ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.dream-adoption-block li + li {
+  margin-top: 3px;
+}
 
 .dream-section {
   margin-top: 10px;

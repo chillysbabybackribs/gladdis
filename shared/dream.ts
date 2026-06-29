@@ -74,6 +74,24 @@ export interface DreamDiffSummary {
   unchanged: number
 }
 
+export type DreamAdoptionIssueCode =
+  | 'low-confidence'
+  | 'thin-evidence'
+  | 'unsupported-verification'
+  | 'partial-verification'
+
+export interface DreamAdoptionIssue {
+  code: DreamAdoptionIssueCode
+  entryId: string
+  message: string
+}
+
+export interface DreamAdoptionPolicy {
+  /** False when every promotable row is strong enough to adopt as a batch. */
+  blocked: boolean
+  issues: DreamAdoptionIssue[]
+}
+
 export interface DreamDiff {
   id: string
   createdAt: number
@@ -85,6 +103,7 @@ export interface DreamDiff {
   summary: DreamDiffSummary
   verifications: DreamVerification[]
   entries: DreamDiffEntry[]
+  adoption: DreamAdoptionPolicy
   /** True iff a memory.next.json exists on disk awaiting adoption. */
   awaitingAdopt: boolean
   /** Absolute path of the candidate file. UI uses this for display only. */
@@ -114,3 +133,47 @@ export interface DreamStatus {
   scope?: DreamScope
   modelId?: string
 }
+
+/** Linear stages the user sees while a dream is in flight. */
+export type DreamStage =
+  | 'sampling'
+  | 'extracting'
+  | 'reconciling'
+  | 'reviewing'
+  | 'verifying'
+  | 'persisting'
+
+export const DREAM_STAGES: readonly DreamStage[] = [
+  'sampling',
+  'extracting',
+  'reconciling',
+  'reviewing',
+  'verifying',
+  'persisting'
+] as const
+
+/** Streamed main → renderer progress event. One conversation = one runId. */
+export type DreamProgressEvent =
+  | {
+      type: 'started'
+      runId: string
+      workspaceRoot: string
+      scope: DreamScope
+      modelId: string
+      modelProvider: Provider
+    }
+  | {
+      type: 'stage'
+      runId: string
+      workspaceRoot: string
+      stage: DreamStage
+      /** Optional human-readable detail (e.g. "12 candidates → 9 add, 3 merge"). */
+      detail?: string
+    }
+  | {
+      type: 'done'
+      runId: string
+      workspaceRoot: string
+      ok: boolean
+      error?: string
+    }

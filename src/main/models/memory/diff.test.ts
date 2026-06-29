@@ -187,4 +187,58 @@ describe('composeDreamDiff', () => {
 
     expect(policy).toEqual({ blocked: false, issues: [] })
   })
+
+  it('does not block adoption for a partial verification on an existing merge row', () => {
+    const policy = evaluateDreamAdoption(
+      [
+        {
+          action: 'merge',
+          entryId: 'mem_existing',
+          kind: 'caveat',
+          scope: 'workspace',
+          text: 'existing claim with additional evidence',
+          confidence: 0.9,
+          evidenceCount: 2
+        }
+      ],
+      [{ entryId: 'mem_existing', verdict: 'partial', reason: 'some but not all evidence is explicit' }]
+    )
+
+    expect(policy).toEqual({ blocked: false, issues: [] })
+  })
+
+  it('still blocks partial verification for new or replacement text', () => {
+    const policy = evaluateDreamAdoption(
+      [
+        {
+          action: 'add',
+          entryId: 'mem_new',
+          kind: 'preference',
+          scope: 'workspace',
+          text: 'new partially supported claim',
+          confidence: 0.9,
+          evidenceCount: 1
+        },
+        {
+          action: 'replace',
+          entryId: 'mem_replace',
+          kind: 'project-fact',
+          scope: 'workspace',
+          text: 'replacement partially supported claim',
+          confidence: 0.9,
+          evidenceCount: 1
+        }
+      ],
+      [
+        { entryId: 'mem_new', verdict: 'partial' },
+        { entryId: 'mem_replace', verdict: 'partial' }
+      ]
+    )
+
+    expect(policy.blocked).toBe(true)
+    expect(policy.issues.map((issue) => issue.code)).toEqual([
+      'partial-verification',
+      'partial-verification'
+    ])
+  })
 })

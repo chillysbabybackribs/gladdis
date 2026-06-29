@@ -23,6 +23,7 @@ import type { ReconcileDecision } from './reconcileStage'
 import type { HygieneDecision } from './hygieneStage'
 
 const PROMOTING_ACTIONS = new Set<DreamDiffAction>(['add', 'merge', 'replace'])
+const NEW_TEXT_ACTIONS = new Set<DreamDiffAction>(['add', 'replace'])
 const MIN_ADOPT_CONFIDENCE = 0.7
 const MIN_ADOPT_EVIDENCE = 1
 
@@ -193,7 +194,7 @@ export function evaluateDreamAdoption(
           ? `Verifier marked this unsupported: ${verification.reason}`
           : 'Verifier marked this entry unsupported.'
       })
-    } else if (verification?.verdict === 'partial') {
+    } else if (verification?.verdict === 'partial' && NEW_TEXT_ACTIONS.has(entry.action)) {
       issues.push({
         code: 'partial-verification',
         entryId: entry.entryId,

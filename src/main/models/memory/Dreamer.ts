@@ -340,6 +340,7 @@ export class Dreamer {
     } catch {
       return null
     }
+    parsed.adoption = evaluateDreamAdoption(parsed.entries ?? [], parsed.verifications ?? [])
     parsed.awaitingAdopt = await fileExists(join(workspaceRoot, '.gladdis', CANDIDATE_FILE))
     return parsed
   }
@@ -470,7 +471,7 @@ async function readAdoptionPolicy(
 
   return {
     ok: true,
-    policy: diff.adoption ?? evaluateDreamAdoption(diff.entries ?? [], diff.verifications ?? [])
+    policy: evaluateDreamAdoption(diff.entries ?? [], diff.verifications ?? [])
   }
 }
 

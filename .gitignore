@@ -14,6 +14,16 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Per-workspace Gladdis runtime state (auto-dream config, history,
+# migration backups, telemetry). `memory.json` is intentionally tracked
+# so dreamer changes show up in diffs; the rest is user-specific.
+.gladdis/dream-auto.json
+.gladdis/dream-history.json
+.gladdis/memory-usage.jsonl
+.gladdis/memory.v1.backup.json
+.gladdis/memory.next.json
+.gladdis/memory.next.diff.json
+
 # Local environment
 .env
 .env.*

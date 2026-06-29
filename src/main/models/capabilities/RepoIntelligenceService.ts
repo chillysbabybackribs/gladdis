@@ -82,6 +82,7 @@ export interface ReadSpansResult {
 export interface RelatedSpanInput {
   workspaceRoot: string
   paths: string[]
+  query?: string
   maxResults?: number
 }
 
@@ -304,6 +305,7 @@ export class RepoIntelligenceService {
     const related = await this.index.relatedFiles({
       workspaceRoot: input.workspaceRoot,
       paths: input.paths,
+      query: input.query,
       maxResults: input.maxResults
     })
     return related.map((file) => ({

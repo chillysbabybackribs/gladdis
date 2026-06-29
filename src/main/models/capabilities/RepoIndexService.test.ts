@@ -89,4 +89,34 @@ describe('RepoIndexService', () => {
 
     await fs.rm(workspace, { recursive: true, force: true })
   })
+
+  it('ranks related files that match the query ahead of import order', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-related-rank-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { alphaValue } from './alpha'",
+        "import { helperValue } from './helper'",
+        'export class SearchService {',
+        '  value = helperValue || alphaValue',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(path.join(workspace, 'src', 'alpha.ts'), 'export const alphaValue = false\n')
+    await fs.writeFile(path.join(workspace, 'src', 'helper.ts'), 'export const helperValue = true\n')
+
+    const index = new RepoIndexService()
+    await index.refresh(workspace)
+    const related = await index.relatedFiles({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      query: 'helperValue',
+      maxResults: 2
+    })
+
+    expect(related.map((file) => file.path)).toEqual(['src/helper.ts', 'src/alpha.ts'])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
 })

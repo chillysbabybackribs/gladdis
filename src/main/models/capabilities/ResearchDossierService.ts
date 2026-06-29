@@ -82,6 +82,7 @@ export class ResearchDossierService {
     const relatedSpans = await this.relatedSpansCached({
       workspaceRoot,
       paths: search.structuredPayload.suggestedSpans.map((span) => span.path),
+      query: input.query,
       maxResults: 3
     })
     const suggestedSpans = mergeSpanSuggestions([
@@ -181,15 +182,16 @@ export class ResearchDossierService {
     return result
   }
 
-  private async relatedSpansCached(input: { workspaceRoot: string; paths: string[]; maxResults: number }): Promise<Array<{ path: string; startLine: number; endLine: number }>> {
+  private async relatedSpansCached(input: { workspaceRoot: string; paths: string[]; query?: string; maxResults: number }): Promise<Array<{ path: string; startLine: number; endLine: number }>> {
     const service = this.repoIntelligence as RepoIntelligenceService & {
-      relatedSpans?: (args: { workspaceRoot: string; paths: string[]; maxResults?: number }) => Promise<Array<{ path: string; startLine?: number; endLine?: number }>>
+      relatedSpans?: (args: { workspaceRoot: string; paths: string[]; query?: string; maxResults?: number }) => Promise<Array<{ path: string; startLine?: number; endLine?: number }>>
     }
     if (typeof service.relatedSpans !== 'function' || input.paths.length === 0) return []
 
     const spans = await service.relatedSpans({
       workspaceRoot: input.workspaceRoot,
       paths: input.paths,
+      query: input.query,
       maxResults: input.maxResults
     })
     return spans.map((span) => ({

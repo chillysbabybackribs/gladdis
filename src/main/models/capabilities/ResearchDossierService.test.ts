@@ -135,11 +135,63 @@ describe('ResearchDossierService', () => {
     const [[request]] = generateContent.mock.calls as unknown as Array<[{
       contents: Array<{ parts: Array<{ text: string }> }>
     }]>
-    const prompt = request.contents[0].parts[0].text
+    const prompt = JSON.stringify(request)
 
     expect(result.structuredPayload.suggestedSpans.map((span) => span.path)).toContain('src/helper.ts')
     expect(prompt).toContain('=== src/helper.ts')
     expect(prompt).toContain('helperValue')
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
+  it('passes the dossier query into hidden related-span ranking', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-research-dossier-related-query-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(path.join(workspace, 'package.json'), JSON.stringify({ name: 'dossier-related-query-demo' }))
+
+    const generateContent = vi.fn(async () => ({ text: '## Ranked Dossier' }))
+    const searchRepo = vi.fn(async () => ({
+      summary: 'Search query: target\nHits:\nsrc/service.ts:1 - class TargetService',
+      structuredPayload: {
+        workspaceRoot: workspace,
+        query: 'target',
+        totalHits: 1,
+        hits: [{ path: 'src/service.ts', kind: 'symbol', line: 1, text: 'class TargetService' }],
+        suggestedSpans: [{ path: 'src/service.ts', startLine: 1, endLine: 10 }]
+      }
+    }))
+    const relatedSpans = vi.fn(async () => [{ path: 'src/helper.ts', startLine: 1, endLine: 20 }])
+    const readSpans = vi.fn(async () => ({
+      summary: [
+        '=== src/service.ts (lines 1-1 of 1) ===',
+        'export class TargetService {}',
+        '=== src/helper.ts (lines 1-1 of 1) ===',
+        'export const targetHelper = true'
+      ].join('\n'),
+      structuredPayload: {
+        workspaceRoot: workspace,
+        items: []
+      }
+    }))
+    const service = new ResearchDossierService(
+      () =>
+        ({
+          models: { generateContent }
+        }) as any,
+      { searchRepo, relatedSpans, readSpans } as any
+    )
+
+    await service.researchDossier({
+      workspaceRoot: workspace,
+      query: 'targetHelper'
+    })
+
+    expect(relatedSpans).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      query: 'targetHelper',
+      maxResults: 3
+    }))
 
     await fs.rm(workspace, { recursive: true, force: true })
   })

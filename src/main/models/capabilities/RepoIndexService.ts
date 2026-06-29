@@ -44,6 +44,7 @@ export interface RepoIndexSearchHit {
 export interface RepoIndexRelatedInput {
   workspaceRoot: string
   paths: string[]
+  query?: string
   maxResults?: number
 }
 
@@ -176,30 +177,44 @@ export class RepoIndexService {
     if (seeds.size === 0) return []
 
     const byPath = new Map(snapshot.files.map((file) => [file.path, file]))
-    const related = new Map<string, RepoIndexRelatedFile>()
+    const queryLower = input.query?.trim().toLowerCase() || ''
+    const related = new Map<string, RepoIndexRelatedFile & { score: number }>()
 
     for (const seed of seeds) {
       const seedFile = byPath.get(seed)
       if (!seedFile) continue
       for (const specifier of seedFile.imports) {
         const resolved = resolveLocalImport(seed, specifier, fileSet)
-        if (!resolved || seeds.has(resolved) || related.has(resolved)) continue
-        related.set(resolved, { path: resolved, reason: `imported by ${seed}` })
+        if (!resolved || seeds.has(resolved)) continue
+        const candidate = byPath.get(resolved)
+        if (!candidate) continue
+        upsertRelated(related, {
+          path: resolved,
+          reason: `imported by ${seed}`,
+          score: 70 + scoreRelatedFile(candidate, queryLower)
+        })
       }
     }
 
     for (const file of snapshot.files) {
-      if (seeds.has(file.path) || related.has(file.path)) continue
+      if (seeds.has(file.path)) continue
       const importsSeed = file.imports.some((specifier) => {
         const resolved = resolveLocalImport(file.path, specifier, fileSet)
         return Boolean(resolved && seeds.has(resolved))
       })
       if (importsSeed) {
-        related.set(file.path, { path: file.path, reason: `imports ${[...seeds].join(', ')}` })
+        upsertRelated(related, {
+          path: file.path,
+          reason: `imports ${[...seeds].join(', ')}`,
+          score: 50 + scoreRelatedFile(file, queryLower)
+        })
       }
     }
 
-    return [...related.values()].slice(0, maxResults)
+    return [...related.values()]
+      .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+      .slice(0, maxResults)
+      .map(({ score: _score, ...file }) => file)
   }
 
   private async snapshotIfReady(workspaceRoot: string): Promise<RepoIndexSnapshot | null> {
@@ -415,6 +430,34 @@ function resolveLocalImport(fromPath: string, specifier: string, fileSet: Set<st
     ...[...SOURCE_EXTENSIONS].map((extension) => path.posix.join(base, `index${extension}`))
   ]
   return candidates.find((candidate) => fileSet.has(candidate)) ?? null
+}
+
+function upsertRelated(
+  related: Map<string, RepoIndexRelatedFile & { score: number }>,
+  candidate: RepoIndexRelatedFile & { score: number }
+): void {
+  const existing = related.get(candidate.path)
+  if (!existing || candidate.score > existing.score) {
+    related.set(candidate.path, candidate)
+  }
+}
+
+function scoreRelatedFile(file: RepoIndexFile, queryLower: string): number {
+  if (!queryLower) return 0
+  let score = 0
+  if (file.path.toLowerCase().includes(queryLower)) score = Math.max(score, scoreText(file.path, queryLower, 20))
+  for (const exported of file.exports) {
+    if (exported.toLowerCase().includes(queryLower)) {
+      score = Math.max(score, scoreText(exported, queryLower, 40))
+    }
+  }
+  for (const symbol of file.symbols) {
+    const haystack = `${symbol.name} ${symbol.kind}`.toLowerCase()
+    if (haystack.includes(queryLower)) {
+      score = Math.max(score, scoreText(symbol.name, queryLower, 45))
+    }
+  }
+  return score
 }
 
 function scoreText(value: string, queryLower: string, base: number): number {

@@ -13,7 +13,7 @@ export type Provider = 'anthropic' | 'google' | 'codex' | 'openai' | 'grok'
 export type ModelAvailability = 'verified' | 'speculative'
 
 export interface ModelOption {
-  id: string // provider model id, e.g. claude-opus-4-8 / gemini-3.5-flash
+  id: string // provider model id, e.g. claude-opus-4-8 / gemini-3.1-pro-preview
   label: string
   provider: Provider
   availability?: ModelAvailability
@@ -32,7 +32,11 @@ export const MODELS: ModelOption[] = [
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', availability: 'speculative' },
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic', availability: 'speculative' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic', availability: 'speculative' },
-  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'speculative' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'verified' },
+  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', provider: 'google', availability: 'verified' },
+  { id: 'gemini-3.1-pro-preview-customtools', label: 'Gemini 3.1 Pro Preview Custom Tools', provider: 'google', availability: 'verified' },
+  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash Preview', provider: 'google', availability: 'verified' },
+  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite', provider: 'google', availability: 'verified' },
   { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', availability: 'verified' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', availability: 'verified' },
   { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', provider: 'google', availability: 'verified' },

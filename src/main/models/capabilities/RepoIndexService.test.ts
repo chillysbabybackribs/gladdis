@@ -212,4 +212,102 @@ describe('RepoIndexService', () => {
 
     await fs.rm(workspace, { recursive: true, force: true })
   })
+
+  it('follows barrel re-exports to the file that owns the imported symbol', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-reexport-owner-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { targetHelper as helperAlias } from './index'",
+        'export function runService() {',
+        '  return helperAlias()',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(
+      path.join(workspace, 'src', 'index.ts'),
+      "export { targetHelper } from './helper'\n"
+    )
+    await fs.writeFile(
+      path.join(workspace, 'src', 'helper.ts'),
+      [
+        ...Array.from({ length: 24 }, (_, index) => `const filler${index + 1} = ${index + 1}`),
+        'export function targetHelper() {',
+        '  return true',
+        '}'
+      ].join('\n')
+    )
+
+    const index = new RepoIndexService()
+    const snapshot = await index.refresh(workspace)
+    const barrel = snapshot.files.find((file) => file.path === 'src/index.ts')
+
+    expect(barrel).toEqual(expect.objectContaining({
+      exports: ['targetHelper'],
+      reExports: [{ specifier: './helper', exports: ['targetHelper'] }]
+    }))
+
+    const related = await index.relatedFiles({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      query: 'helperAlias',
+      maxResults: 2
+    })
+
+    expect(related).toEqual([
+      expect.objectContaining({
+        path: 'src/helper.ts',
+        reason: 're-exported through src/index.ts',
+        startLine: 17,
+        endLine: 43
+      }),
+      expect.objectContaining({
+        path: 'src/index.ts',
+        reason: 'imported by src/service.ts'
+      })
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
+  it('follows wildcard barrel re-exports using the imported binding name', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-reexport-wildcard-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { targetHelper } from './index'",
+        'export function runService() {',
+        '  return targetHelper()',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(path.join(workspace, 'src', 'index.ts'), "export * from './helper'\n")
+    await fs.writeFile(path.join(workspace, 'src', 'helper.ts'), 'export function targetHelper() { return true }\n')
+
+    const index = new RepoIndexService()
+    const snapshot = await index.refresh(workspace)
+    const barrel = snapshot.files.find((file) => file.path === 'src/index.ts')
+
+    expect(barrel).toEqual(expect.objectContaining({
+      reExports: [{ specifier: './helper', exports: ['*'] }]
+    }))
+
+    const related = await index.relatedFiles({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      query: 'targetHelper',
+      maxResults: 2
+    })
+
+    expect(related[0]).toEqual(expect.objectContaining({
+      path: 'src/helper.ts',
+      reason: 're-exported through src/index.ts',
+      startLine: 1,
+      endLine: 17
+    }))
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
 })

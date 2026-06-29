@@ -15,12 +15,18 @@ export interface RepoIndexImport {
   bindings: string[]
 }
 
+export interface RepoIndexReExport {
+  specifier: string
+  exports: string[]
+}
+
 export interface RepoIndexFile {
   path: string
   hash: string
   bytes: number
   imports: string[]
   importBindings: RepoIndexImport[]
+  reExports: RepoIndexReExport[]
   exports: string[]
   symbols: RepoIndexSymbol[]
 }
@@ -208,12 +214,24 @@ export class RepoIndexService {
         if (!resolved || seeds.has(resolved)) continue
         const candidate = byPath.get(resolved)
         if (!candidate) continue
-        const span = selectRelatedSpan(candidate, queryLower, importBindingsForSpecifier(seedFile, specifier))
+        const bindings = importBindingsForSpecifier(seedFile, specifier)
+        const span = selectRelatedSpan(candidate, queryLower, bindings)
         upsertRelated(related, {
           path: resolved,
           reason: `imported by ${seed}`,
           score: 70 + scoreImportBindings(seedFile, specifier, queryLower) + scoreRelatedFile(candidate, queryLower),
           ...span
+        })
+        addReExportTargets({
+          fromPath: resolved,
+          viaPath: resolved,
+          owner: candidate,
+          byPath,
+          fileSet,
+          queryLower,
+          terms: bindings,
+          related,
+          seeds
         })
       }
     }
@@ -345,6 +363,7 @@ function indexFile(relPath: string, content: string, bytes: number): RepoIndexFi
   const source = ts.createSourceFile(relPath, content, ts.ScriptTarget.Latest, true, scriptKindForPath(relPath))
   const imports = new Set<string>()
   const importBindings = new Map<string, Set<string>>()
+  const reExports = new Map<string, Set<string>>()
   const exports = new Set<string>()
   const symbols: RepoIndexSymbol[] = []
 
@@ -355,6 +374,10 @@ function indexFile(relPath: string, content: string, bytes: number): RepoIndexFi
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       imports.add(node.moduleSpecifier.text)
       addImportBindings(importBindings, node.moduleSpecifier.text, bindingsFromExportClause(node.exportClause))
+      addImportBindings(reExports, node.moduleSpecifier.text, exportsFromExportClause(node.exportClause))
+      exportsFromExportClause(node.exportClause).forEach((name) => {
+        if (name !== '*') exports.add(name)
+      })
     }
 
     const symbol = symbolFromNode(node, source)
@@ -375,6 +398,9 @@ function indexFile(relPath: string, content: string, bytes: number): RepoIndexFi
     imports: [...imports].sort(),
     importBindings: [...importBindings.entries()]
       .map(([specifier, bindings]) => ({ specifier, bindings: [...bindings].sort() }))
+      .sort((a, b) => a.specifier.localeCompare(b.specifier)),
+    reExports: [...reExports.entries()]
+      .map(([specifier, exportsForSpecifier]) => ({ specifier, exports: [...exportsForSpecifier].sort() }))
       .sort((a, b) => a.specifier.localeCompare(b.specifier)),
     exports: [...exports].sort(),
     symbols: symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name))
@@ -401,6 +427,13 @@ function bindingsFromImportClause(importClause: ts.ImportClause | undefined): st
 
 function bindingsFromExportClause(exportClause: ts.NamedExportBindings | undefined): string[] {
   return bindingsFromNamedBindings(exportClause)
+}
+
+function exportsFromExportClause(exportClause: ts.NamedExportBindings | undefined): string[] {
+  if (!exportClause) return ['*']
+  if (ts.isNamespaceExport(exportClause)) return [exportClause.name.text]
+  if (ts.isNamedExports(exportClause)) return exportClause.elements.map((element) => element.name.text)
+  return []
 }
 
 function bindingsFromNamedBindings(namedBindings: ts.NamedImportBindings | ts.NamedExportBindings | undefined): string[] {
@@ -546,6 +579,62 @@ function scoreImportBindings(file: RepoIndexFile, specifier: string, queryLower:
 
 function importBindingsForSpecifier(file: RepoIndexFile, specifier: string): string[] {
   return file.importBindings?.find((candidate) => candidate.specifier === specifier)?.bindings ?? []
+}
+
+function addReExportTargets(input: {
+  fromPath: string
+  viaPath: string
+  owner: RepoIndexFile
+  byPath: Map<string, RepoIndexFile>
+  fileSet: Set<string>
+  queryLower: string
+  terms: string[]
+  related: Map<string, RepoIndexRelatedFile & { score: number }>
+  seeds: Set<string>
+}): void {
+  for (const reExport of input.owner.reExports ?? []) {
+    if (!reExportMatches(reExport.exports, input.queryLower, input.terms)) continue
+    const resolved = resolveLocalImport(input.fromPath, reExport.specifier, input.fileSet)
+    if (!resolved || input.seeds.has(resolved) || resolved === input.viaPath) continue
+    const candidate = input.byPath.get(resolved)
+    if (!candidate) continue
+    const terms = reExport.exports.includes('*') ? input.terms : [...input.terms, ...reExport.exports]
+    const span = selectRelatedSpan(candidate, input.queryLower, terms)
+    upsertRelated(input.related, {
+      path: resolved,
+      reason: `re-exported through ${input.viaPath}`,
+      score: 90 + scoreReExport(reExport.exports, input.queryLower, input.terms) + scoreRelatedFile(candidate, input.queryLower),
+      ...span
+    })
+  }
+}
+
+function reExportMatches(exportsForSpecifier: string[], queryLower: string, terms: string[]): boolean {
+  if (exportsForSpecifier.includes('*')) return true
+  const loweredTerms = terms.map((term) => term.toLowerCase())
+  return exportsForSpecifier.some((exported) => {
+    const exportedLower = exported.toLowerCase()
+    return Boolean(
+      queryLower && exportedLower.includes(queryLower) ||
+      loweredTerms.some((term) => term && (exportedLower.includes(term) || term.includes(exportedLower)))
+    )
+  })
+}
+
+function scoreReExport(exportsForSpecifier: string[], queryLower: string, terms: string[]): number {
+  if (exportsForSpecifier.includes('*')) return queryLower ? 5 : 0
+  const loweredTerms = terms.map((term) => term.toLowerCase())
+  let score = 0
+  for (const exported of exportsForSpecifier) {
+    const exportedLower = exported.toLowerCase()
+    if (queryLower && exportedLower.includes(queryLower)) score = Math.max(score, scoreText(exported, queryLower, 50))
+    for (const term of loweredTerms) {
+      if (!term) continue
+      if (exportedLower === term) score = Math.max(score, 80)
+      else if (exportedLower.includes(term) || term.includes(exportedLower)) score = Math.max(score, 55)
+    }
+  }
+  return score
 }
 
 function selectRelatedSpan(

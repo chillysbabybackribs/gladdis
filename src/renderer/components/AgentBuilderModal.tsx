@@ -9,35 +9,15 @@ interface AgentBuilderModalProps {
   onClose: () => void
 }
 
-type BlueprintListField =
-  | 'preferredTools'
-  | 'disallowedTools'
-  | 'knownPaths'
-  | 'knownCommands'
-  | 'workflowSteps'
-  | 'verificationSteps'
-  | 'stopConditions'
-  | 'fallbackRules'
-  | 'assumptions'
-  | 'testTasks'
-  | 'evidenceNotes'
-
-type BlueprintSummaryField =
-  | 'taskFamily'
-  | 'optimizerModelId'
-  | 'runtimeModelId'
-  | 'optimizationSummary'
-  | 'goal'
-
-function parseListText(value: string): string[] {
-  return value
-    .split('\n')
-    .map((entry) => entry.trim())
-    .filter(Boolean)
+function formatListText(value?: string[]): string {
+  const items = value?.map((entry) => entry.trim()).filter(Boolean) ?? []
+  return items.length > 0 ? items.join('\n') : 'Not available yet.'
 }
 
-function normalizeListText(value?: string[]): string {
-  return value ? value.join('\n') : ''
+function formatBooleanText(value?: boolean): string {
+  if (value === true) return 'Yes'
+  if (value === false) return 'No'
+  return 'Auto'
 }
 
 function isModelUsable(model: ModelOption, keyStatus: ReturnType<typeof useEnvironmentStatus>['keyStatus'], codexStatus: ReturnType<typeof useEnvironmentStatus>['codexStatus']): boolean {
@@ -93,7 +73,6 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
   const [optimizedPrompt, setOptimizedPrompt] = useState('')
   const [testTask, setTestTask] = useState('')
   const [contextSummary, setContextSummary] = useState('')
-  const [validationNotes, setValidationNotes] = useState<string[]>([])
   const [optimizationMode, setOptimizationMode] = useState<'quick' | 'deep'>('quick')
   const [optimizing, setOptimizing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -130,35 +109,35 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
       validationNotes: agent?.validationNotes
     })
     setContextSummary('')
-    setValidationNotes(agent?.validationNotes ?? [])
     setOptimizerFallbackNotice('')
     setOptimizing(false)
     setSaving(false)
     setError(null)
   }, [agent, isOpen])
 
-  const setBlueprintListField = (key: BlueprintListField, value: string) => {
-    setBlueprintMetadata((previous) => ({
-      ...previous,
-      [key]: parseListText(value)
-    }))
-  }
-
-  const setBlueprintTextField = (key: BlueprintSummaryField, value: string) => {
-    setBlueprintMetadata((previous) => ({
-      ...previous,
-      [key]: value.trim() ? value : undefined
-    }))
-  }
-
-  const setBlueprintBooleanField = (key: 'workspaceBound', value: boolean) => {
-    setBlueprintMetadata((previous) => ({ ...previous, [key]: value }))
-  }
-
-
   if (!isOpen) return null
 
   const canSave = agentName.trim().length > 0 && selectedModel.trim().length > 0 && optimizedPrompt.trim().length > 0
+  const validationNotes = blueprintMetadata.validationNotes ?? []
+  const hasBlueprintMetadata = Boolean(
+    blueprintMetadata.goal ||
+      blueprintMetadata.taskFamily ||
+      blueprintMetadata.optimizerModelId ||
+      blueprintMetadata.runtimeModelId ||
+      typeof blueprintMetadata.workspaceBound !== 'undefined' ||
+      blueprintMetadata.preferredTools?.length ||
+      blueprintMetadata.disallowedTools?.length ||
+      blueprintMetadata.knownPaths?.length ||
+      blueprintMetadata.knownCommands?.length ||
+      blueprintMetadata.workflowSteps?.length ||
+      blueprintMetadata.verificationSteps?.length ||
+      blueprintMetadata.stopConditions?.length ||
+      blueprintMetadata.fallbackRules?.length ||
+      blueprintMetadata.assumptions?.length ||
+      blueprintMetadata.testTasks?.length ||
+      blueprintMetadata.optimizationSummary?.trim() ||
+      blueprintMetadata.evidenceNotes?.length
+  )
 
   const handleGenerateDraft = async () => {
     const trimmed = roughPrompt.trim()
@@ -175,7 +154,6 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
     setOptimizing(true)
     setError(null)
     setOptimizerFallbackNotice('')
-    setValidationNotes([])
     try {
       if (!selectedModel.trim()) setSelectedModel(requestedModelId)
       const result = await window.gladdis.agents.optimize({
@@ -195,13 +173,11 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
       setTestTask(result.testTask)
       setBlueprintMetadata((previous) => ({ ...previous, ...result }))
       setContextSummary(result.contextSummary ?? '')
-      setValidationNotes(result.validationNotes ?? [])
     } catch (err) {
       setOptimizedPrompt(buildLocalDraft(trimmed, workspace.folder))
       setTestTask(`Use this agent to complete: ${trimmed}`)
       setContextSummary(workspace.folder ? `Used active workspace: ${workspace.folder}` : 'No workspace context was available.')
       setError(`Used a local draft because optimization failed: ${err instanceof Error ? err.message : String(err)}`)
-      setValidationNotes([])
       setBlueprintMetadata((previous) => ({ ...previous, validationNotes: [] }))
     } finally {
       setOptimizing(false)
@@ -340,186 +316,93 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
             </div>
           ) : null}
           {optimizerFallbackNotice ? <div style={fallbackNoticeStyle}>{optimizerFallbackNotice}</div> : null}
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Blueprint goal</span>
-            <input
-              value={blueprintMetadata.goal ?? ''}
-              onChange={(event) => setBlueprintTextField('goal', event.target.value)}
-              placeholder="The stable goal for this agent"
-              style={inputStyle}
-            />
-          </label>
-
-          <div style={twoColumnStyle}>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Task family</span>
-              <input
-                value={blueprintMetadata.taskFamily ?? ''}
-                onChange={(event) => setBlueprintTextField('taskFamily', event.target.value)}
-                placeholder="frontend-migration"
-                style={inputStyle}
-              />
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Workspace-bound</span>
-              <label style={checkboxLabelStyle}>
-                <input
-                  type="checkbox"
-                  checked={blueprintMetadata.workspaceBound === true}
-                  onChange={(event) => setBlueprintBooleanField('workspaceBound', event.target.checked)}
-                />
-                Restrict this agent to the active workspace
-              </label>
-            </label>
-          </div>
-
-          <div style={twoColumnStyle}>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Optimizer model ID</span>
-              <input
-                value={blueprintMetadata.optimizerModelId ?? ''}
-                onChange={(event) => setBlueprintTextField('optimizerModelId', event.target.value)}
-                placeholder="openai-gpt-4o-mini"
-                style={inputStyle}
-              />
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Runtime model ID</span>
-              <input
-                value={blueprintMetadata.runtimeModelId ?? ''}
-                onChange={(event) => setBlueprintTextField('runtimeModelId', event.target.value)}
-                placeholder="openai-gpt-4o-mini"
-                style={inputStyle}
-              />
-            </label>
-          </div>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Preferred tools (one per line)</span>
-            <textarea
-              value={normalizeListText(blueprintMetadata.preferredTools)}
-              onChange={(event) => setBlueprintListField('preferredTools', event.target.value)}
-              placeholder="read_file\nrun_command\nedit_file"
-              style={textareaStyle}
-              rows={4}
-            />
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Disallowed tools (one per line)</span>
-            <textarea
-              value={normalizeListText(blueprintMetadata.disallowedTools)}
-              onChange={(event) => setBlueprintListField('disallowedTools', event.target.value)}
-              placeholder="search_web\nresearch_dossier"
-              style={textareaStyle}
-              rows={4}
-            />
-          </label>
-
-          <div style={twoColumnStyle}>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Known paths (one per line)</span>
-              <textarea
-                value={normalizeListText(blueprintMetadata.knownPaths)}
-                onChange={(event) => setBlueprintListField('knownPaths', event.target.value)}
-                placeholder="src/main\nsrc/renderer"
-                style={textareaStyle}
-                rows={4}
-              />
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Known commands (one per line)</span>
-              <textarea
-                value={normalizeListText(blueprintMetadata.knownCommands)}
-                onChange={(event) => setBlueprintListField('knownCommands', event.target.value)}
-                placeholder="pnpm test\npnpm run build"
-                style={textareaStyle}
-                rows={4}
-              />
-            </label>
-          </div>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Workflow steps</span>
-            <textarea
-              value={normalizeListText(blueprintMetadata.workflowSteps)}
-              onChange={(event) => setBlueprintListField('workflowSteps', event.target.value)}
-              style={textareaStyle}
-              rows={5}
-            />
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Verification steps</span>
-            <textarea
-              value={normalizeListText(blueprintMetadata.verificationSteps)}
-              onChange={(event) => setBlueprintListField('verificationSteps', event.target.value)}
-              style={textareaStyle}
-              rows={5}
-            />
-          </label>
-
-          <div style={twoColumnStyle}>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Stop conditions</span>
-              <textarea
-                value={normalizeListText(blueprintMetadata.stopConditions)}
-                onChange={(event) => setBlueprintListField('stopConditions', event.target.value)}
-                style={textareaStyle}
-                rows={4}
-              />
-            </label>
-            <label style={fieldStyle}>
-              <span style={labelStyle}>Fallback rules</span>
-              <textarea
-                value={normalizeListText(blueprintMetadata.fallbackRules)}
-                onChange={(event) => setBlueprintListField('fallbackRules', event.target.value)}
-                style={textareaStyle}
-                rows={4}
-              />
-            </label>
-          </div>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Assumptions</span>
-            <textarea
-              value={normalizeListText(blueprintMetadata.assumptions)}
-              onChange={(event) => setBlueprintListField('assumptions', event.target.value)}
-              style={textareaStyle}
-              rows={4}
-            />
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Additional test tasks (one per line)</span>
-            <textarea
-              value={normalizeListText(blueprintMetadata.testTasks)}
-              onChange={(event) => setBlueprintListField('testTasks', event.target.value)}
-              style={textareaStyle}
-              rows={4}
-            />
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Optimization summary</span>
-            <textarea
-              value={blueprintMetadata.optimizationSummary ?? ''}
-              onChange={(event) => setBlueprintTextField('optimizationSummary', event.target.value)}
-              style={textareaStyle}
-              rows={4}
-            />
-          </label>
-
-          <label style={fieldStyle}>
-            <span style={labelStyle}>Evidence notes (one per line)</span>
-            <textarea
-              value={normalizeListText(blueprintMetadata.evidenceNotes)}
-              onChange={(event) => setBlueprintListField('evidenceNotes', event.target.value)}
-              style={textareaStyle}
-              rows={4}
-            />
-          </label>
+          {hasBlueprintMetadata ? (
+            <details style={detailsStyle}>
+              <summary style={summaryStyle}>Automated blueprint (review only)</summary>
+              <div style={detailsBodyStyle}>
+                <div style={twoColumnStyle}>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Goal</span>
+                    <div style={readOnlyTextStyle}>{blueprintMetadata.goal || 'Not available yet.'}</div>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Task family</span>
+                    <div style={readOnlyTextStyle}>{blueprintMetadata.taskFamily || 'Not available yet.'}</div>
+                  </label>
+                </div>
+                <div style={twoColumnStyle}>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Workspace-bound</span>
+                    <div style={readOnlyTextStyle}>{formatBooleanText(blueprintMetadata.workspaceBound)}</div>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Model IDs</span>
+                    <div style={readOnlyTextStyle}>
+                      Optimizer: {blueprintMetadata.optimizerModelId || 'Not available yet.'}
+                      <br />
+                      Runtime: {blueprintMetadata.runtimeModelId || 'Not available yet.'}
+                    </div>
+                  </label>
+                </div>
+                <div style={twoColumnStyle}>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Preferred tools</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.preferredTools)}</pre>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Disallowed tools</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.disallowedTools)}</pre>
+                  </label>
+                </div>
+                <div style={twoColumnStyle}>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Known paths</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.knownPaths)}</pre>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Known commands</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.knownCommands)}</pre>
+                  </label>
+                </div>
+                <div style={twoColumnStyle}>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Workflow steps</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.workflowSteps)}</pre>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Verification steps</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.verificationSteps)}</pre>
+                  </label>
+                </div>
+                <div style={twoColumnStyle}>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Stop conditions</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.stopConditions)}</pre>
+                  </label>
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>Fallback rules</span>
+                    <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.fallbackRules)}</pre>
+                  </label>
+                </div>
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Assumptions</span>
+                  <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.assumptions)}</pre>
+                </label>
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Additional test tasks</span>
+                  <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.testTasks)}</pre>
+                </label>
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Optimization summary</span>
+                  <div style={readOnlyTextStyle}>{blueprintMetadata.optimizationSummary || 'Not available yet.'}</div>
+                </label>
+                <label style={fieldStyle}>
+                  <span style={labelStyle}>Evidence notes</span>
+                  <pre style={readOnlyCodeStyle}>{formatListText(blueprintMetadata.evidenceNotes)}</pre>
+                </label>
+              </div>
+            </details>
+          ) : null}
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Editable agent prompt</span>
@@ -626,15 +509,6 @@ const labelStyle: React.CSSProperties = {
   color: 'var(--text-secondary)'
 }
 
-const checkboxLabelStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 10,
-  color: 'var(--text-primary)',
-  fontWeight: 500,
-  fontSize: 13
-}
-
 const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 12px',
@@ -649,6 +523,44 @@ const textareaStyle: React.CSSProperties = {
   ...inputStyle,
   resize: 'vertical',
   fontFamily: 'inherit'
+}
+
+const detailsStyle: React.CSSProperties = {
+  border: '1px solid var(--border-subtle)',
+  borderRadius: 8,
+  padding: '10px 12px'
+}
+
+const summaryStyle: React.CSSProperties = {
+  cursor: 'pointer',
+  fontSize: 13,
+  fontWeight: 600,
+  color: 'var(--text-secondary)'
+}
+
+const detailsBodyStyle: React.CSSProperties = {
+  marginTop: 10,
+  display: 'grid',
+  gap: 12
+}
+
+const readOnlyTextStyle: React.CSSProperties = {
+  ...inputStyle,
+  background: '#121212',
+  color: 'var(--text-secondary)',
+  minHeight: 36,
+  display: 'block',
+  whiteSpace: 'pre-wrap'
+}
+
+const readOnlyCodeStyle: React.CSSProperties = {
+  ...readOnlyTextStyle,
+  overflow: 'auto',
+  margin: 0,
+  padding: '8px 10px',
+  fontSize: 12,
+  whiteSpace: 'pre-wrap',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace'
 }
 
 const hintStyle: React.CSSProperties = {

@@ -198,7 +198,7 @@ Instead of “Optimize Prompt,” consider:
 ## Guardrails
 - Show evidence for discovered paths, commands, and tools.
 - Separate confirmed facts from assumptions.
-- Keep the blueprint editable.
+- Keep the blueprint reviewable, with generated discovery fields treated as defaults unless the user makes explicit edits.
 - Support both workspace-bound and portable agents.
 - Allow the user to fall back to quick optimize.
 
@@ -211,7 +211,7 @@ Instead of “Optimize Prompt,” consider:
 ### V2
 - Add eval cases / test tasks.
 - Add workflow steps and verification rules.
-- Add tool-policy editing.
+- Surface discovered tool-policy and execution metadata for review before save.
 
 ### V3
 - Add optimization from successful transcripts.
@@ -248,7 +248,7 @@ Status by slice:
 - ✅ Add mode-specific optimizer/runtime model ranking and provider availability checks.
 
 ### Slice 4: Runtime blueprint UX
-- ✅ Expose structured fields in the modal for review and edits:
+- ✅ Expose structured fields in the modal as a review-only generated blueprint:
   - `goal`, `taskFamily`, `workspaceBound`
   - model IDs, preferred/disallowed tools, paths, commands
   - workflow / verification / assumptions / stop conditions / fallback / test tasks / evidence notes
@@ -267,7 +267,7 @@ Status by slice:
   - `optimizerModelId` / `runtimeModelId` defaulted to the resolved model unless explicitly overridden by JSON.
 
 ## Current implementation checks to verify next
-- open `src/renderer/components/AgentBuilderModal.tsx` and quickly sanity-check modal state around fallback notice and list fields.
+- open `src/renderer/components/AgentBuilderModal.tsx` and quickly sanity-check modal state around fallback notice and generated-blueprint summary panel.
 - verify `window.gladdis.agents.save` continues to serialize `blueprintMetadata` as the source of truth for saved agent fields.
 
 ## Next step recommendation

@@ -73,6 +73,8 @@ export interface ToolContext {
   requestId?: string
   assistantMessageId?: string
   conversationId?: string | null
+  /** Latest substantive user request for this turn, stripped of UI preambles when applicable. */
+  latestUserText?: string
   taskId?: string
   iteration?: number
   fullResults?: Map<string, string>

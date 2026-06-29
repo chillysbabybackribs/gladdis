@@ -567,6 +567,7 @@ export class ChatService {
       requestId: req.requestId,
       assistantMessageId: req.assistantMessageId,
       conversationId: req.conversationId ?? null,
+      latestUserText: this.latestSubstantiveUserText(req),
       taskId: taskIdForRequest(req),
       iteration: 1,
       fullResults: new Map<string, string>(),
@@ -581,6 +582,15 @@ export class ChatService {
         })
       }
     }
+  }
+
+  private latestSubstantiveUserText(req: ChatRequest): string {
+    const users = [...req.messages].filter((m) => m.role === 'user')
+    const current = users.at(-1)
+    const currentText = current ? stripActivePagePreamble(current.content).trim() : ''
+    if (currentText && !isBareContinuation(currentText)) return currentText
+    const previous = users.slice(0, -1).reverse().find((m) => stripActivePagePreamble(m.content).trim())
+    return previous ? stripActivePagePreamble(previous.content).trim() : currentText
   }
 
   private agentToolProfile(req: ChatRequest): ReturnType<typeof selectAgentToolProfile> {

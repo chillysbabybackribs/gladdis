@@ -9,6 +9,7 @@ vi.mock('child_process', () => ({
 describe('searchWithRipgrep', () => {
   beforeEach(() => {
     execFileMock.mockReset()
+    vi.resetModules()
   })
 
   it('skips the path lane for multi-word content queries', async () => {
@@ -43,7 +44,7 @@ describe('searchWithRipgrep', () => {
       | undefined
     expect(pathLaneArgs).toBeDefined()
     expect(pathLaneArgs).toContain('--files')
-    expect(pathLaneArgs).toContain('*ChatService.ts*')
+    expect(pathLaneArgs).toContain('/repo')
     expect(result.hits).toEqual([
       expect.objectContaining({
         kind: 'path',
@@ -51,5 +52,25 @@ describe('searchWithRipgrep', () => {
         text: 'src/main/ChatService.ts'
       })
     ])
+  })
+
+  it('reuses the warmed path index for repeated scoped filename searches', async () => {
+    execFileMock.mockImplementation((_cmd: string, args: string[], _opts: unknown, cb: Function) => {
+      if (args.includes('--files')) {
+        cb(null, { stdout: 'focus/ChatService.ts\nfocus/ChatStore.ts\n', stderr: '' })
+        return
+      }
+      cb(null, { stdout: '', stderr: '' })
+    })
+
+    const { resetFileSearchCachesForTest, searchWithRipgrep } = await import('./fileSearch')
+    resetFileSearchCachesForTest()
+
+    await searchWithRipgrep('/repo/src/main', 'ChatService.ts', '*.ts', 1, 8, false)
+    await searchWithRipgrep('/repo/src/main', 'ChatStore.ts', '*.ts', 1, 8, false)
+
+    const pathLaneCalls = execFileMock.mock.calls.filter((call) => Array.isArray(call[1]) && call[1].includes('--files'))
+    expect(pathLaneCalls).toHaveLength(1)
+    expect(execFileMock).toHaveBeenCalledTimes(3)
   })
 })

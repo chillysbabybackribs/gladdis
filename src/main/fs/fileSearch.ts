@@ -10,6 +10,8 @@ export const DEFAULT_SEARCH_CONTEXT_LINES = 2
 export const MAX_SEARCH_CONTEXT_LINES = 8
 const SEARCH_LANE_MULTIPLIER = 3
 const MIN_SEARCH_LANE_LIMIT = 50
+const PATH_INDEX_CACHE_TTL_MS = 30_000
+const PATH_INDEX_CACHE_LIMIT = 24
 
 const RG_IGNORE_GLOBS = [
   '!node_modules/**',
@@ -20,6 +22,13 @@ const RG_IGNORE_GLOBS = [
   '!.next/**',
   '!build/**'
 ]
+
+interface PathIndexCacheEntry {
+  files: string[]
+  expiresAt: number
+}
+
+const pathIndexCache = new Map<string, PathIndexCacheEntry>()
 
 export interface SearchHit {
   path: string
@@ -153,21 +162,14 @@ async function searchPathsWithRipgrep(
   laneLimit: number,
   queryGlobs: string[]
 ): Promise<{ hits: SearchHit[]; truncated: boolean }> {
-  const args: string[] = ['--files', root]
-  for (const ignore of RG_IGNORE_GLOBS) args.push('--glob', ignore)
-  if (glob) args.push('--glob', glob)
-  for (const queryGlob of queryGlobs) args.push('--glob', queryGlob)
-
-  const stdout = (await execFileAsync('rg', args, {
-    maxBuffer: 8 * 1024 * 1024,
-    windowsHide: true
-  })).stdout
+  const files = await listSearchableFiles(root)
 
   const hits: SearchHit[] = []
   let truncated = false
-  for (const line of stdout.split('\n')) {
-    const rawPath = line.trim()
-    if (!rawPath) continue
+  for (const rawPath of files) {
+    if (!matchesSearchGlob(rawPath, glob) || !queryGlobs.every((queryGlob) => matchesSearchGlob(rawPath, queryGlob))) {
+      continue
+    }
     const fullPath = resolve(root, rawPath)
     const hit = buildPathHit(root, fullPath, query)
     if (!hit) continue
@@ -178,6 +180,38 @@ async function searchPathsWithRipgrep(
     }
   }
   return { hits, truncated }
+}
+
+async function listSearchableFiles(root: string): Promise<string[]> {
+  const now = Date.now()
+  const cached = pathIndexCache.get(root)
+  if (cached && cached.expiresAt > now) return cached.files
+  if (cached) pathIndexCache.delete(root)
+
+  const args: string[] = ['--files', root]
+  for (const ignore of RG_IGNORE_GLOBS) args.push('--glob', ignore)
+
+  const stdout = (await execFileAsync('rg', args, {
+    maxBuffer: 8 * 1024 * 1024,
+    windowsHide: true
+  })).stdout
+
+  const files = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  if (pathIndexCache.has(root)) pathIndexCache.delete(root)
+  while (pathIndexCache.size >= PATH_INDEX_CACHE_LIMIT) {
+    const oldest = pathIndexCache.keys().next().value
+    if (oldest == null) break
+    pathIndexCache.delete(oldest)
+  }
+  pathIndexCache.set(root, {
+    files,
+    expiresAt: now + PATH_INDEX_CACHE_TTL_MS
+  })
+  return files
 }
 
 /**
@@ -371,4 +405,47 @@ function buildPathSearchGlobs(query: string): string[] {
 
 function escapeGlobToken(token: string): string {
   return token.replace(/[[\]{}?!*]/g, '\\$&')
+}
+
+function matchesSearchGlob(value: string, glob: string | undefined): boolean {
+  if (!glob) return true
+  const normalizedValue = value.replace(/\\/g, '/')
+  const normalizedGlob = glob.replace(/\\/g, '/')
+  const pattern = new RegExp(`^${globToRegexSource(normalizedGlob)}$`)
+  return pattern.test(normalizedValue)
+}
+
+function globToRegexSource(glob: string): string {
+  let source = ''
+  let escaping = false
+  for (const char of glob) {
+    if (escaping) {
+      source += escapeRegexChar(char)
+      escaping = false
+      continue
+    }
+    if (char === '\\') {
+      escaping = true
+      continue
+    }
+    if (char === '*') {
+      source += '.*'
+      continue
+    }
+    if (char === '?') {
+      source += '.'
+      continue
+    }
+    source += escapeRegexChar(char)
+  }
+  if (escaping) source += '\\\\'
+  return source
+}
+
+function escapeRegexChar(char: string): string {
+  return /[|\\{}()[\]^$+*?.]/.test(char) ? `\\${char}` : char
+}
+
+export function resetFileSearchCachesForTest(): void {
+  pathIndexCache.clear()
 }

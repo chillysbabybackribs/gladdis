@@ -1,4 +1,4 @@
-import { app, BaseWindow, WebContentsView, ipcMain, dialog } from 'electron'
+import { app, BaseWindow, WebContentsView, ipcMain, dialog, desktopCapturer, screen } from 'electron'
 import { attachContextMenu } from './contextMenu'
 import { join } from 'path'
 import { TabManager } from './TabManager'
@@ -205,6 +205,35 @@ function createWindow(): void {
 }
 
 async function captureAppWindowPng(): Promise<string> {
+  const targetMediaSourceId = win?.getMediaSourceId()
+  if (win && targetMediaSourceId) {
+    try {
+      const bounds = win.getBounds()
+      const display = screen.getDisplayMatching(bounds)
+      const scaleFactor = display.scaleFactor || 1
+      const thumbnailSize = {
+        width: Math.max(1, Math.round(bounds.width * scaleFactor)),
+        height: Math.max(1, Math.round(bounds.height * scaleFactor))
+      }
+      const targetKey = targetMediaSourceId.split(':').slice(0, 2).join(':')
+      const sources = await desktopCapturer.getSources({
+        types: ['window'],
+        thumbnailSize,
+        fetchWindowIcons: false
+      })
+      const source =
+        sources.find((candidate) => candidate.id === targetMediaSourceId) ??
+        sources.find((candidate) => candidate.id.split(':').slice(0, 2).join(':') === targetKey) ??
+        sources.find((candidate) => candidate.name === win.getTitle())
+      const thumbnail = source?.thumbnail
+      if (thumbnail && !thumbnail.isEmpty()) {
+        return `data:image/png;base64,${thumbnail.toPNG().toString('base64')}`
+      }
+    } catch (error) {
+      console.warn('[screenshot_app] desktopCapturer full-window capture failed:', error)
+    }
+  }
+
   if (!uiView || uiView.webContents.isDestroyed()) return ''
   const nativeImage = await uiView.webContents.capturePage()
   return `data:image/png;base64,${nativeImage.toPNG().toString('base64')}`

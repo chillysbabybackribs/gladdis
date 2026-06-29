@@ -51,6 +51,7 @@ export async function runAutomaticValidation(args: {
     callId: string
     ok: boolean
     preview: string
+    imageDataUrl?: string
   }) => void
   rememberFullResult?: (callId: string, text: string) => void
 }): Promise<{ attempted: boolean; outcome?: ToolOutcome }> {
@@ -77,7 +78,8 @@ export async function runAutomaticValidation(args: {
     type: 'tool_result',
     callId,
     ok: outcome.ok,
-    preview: outcome.text
+    preview: outcome.text,
+    imageDataUrl: outcome.imageBase64 ? `data:image/png;base64,${outcome.imageBase64}` : undefined
   })
   return { attempted: true, outcome }
 }
@@ -142,6 +144,7 @@ export async function handleNoToolCallsAfterEdits(args: {
     callId: string
     ok: boolean
     preview: string
+    imageDataUrl?: string
   }) => void
   rememberFullResult?: (callId: string, text: string) => void
 }): Promise<ValidationDecision> {

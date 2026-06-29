@@ -147,6 +147,11 @@ function toolDetail(tool: ToolActivity): string | null {
   return preview?.length ? preview : null
 }
 
+function toolImageSrc(tool: ToolActivity): string | null {
+  const src = tool.imageDataUrl?.trim()
+  return src?.length ? src : null
+}
+
 /** A preview reads as a diff when several lines lead with +/- (unified style). */
 function looksLikeDiff(text: string): boolean {
   const diffLines = text
@@ -180,16 +185,28 @@ function DiffBlock({ text }: { text: string }) {
 
 function ToolOutput({ tool }: { tool: ToolActivity }) {
   const detail = toolDetail(tool)
-  if (!detail) return null
+  const imageSrc = toolImageSrc(tool)
+  if (!detail && !imageSrc) return null
   const isError = tool.status === 'error'
   const name = baseToolName(tool.tool)
   const title = isError ? 'Error' : name
-  const showDiff = !isError && isMutatingTool(name) && looksLikeDiff(detail)
+  const showDiff = !!detail && !isError && isMutatingTool(name) && looksLikeDiff(detail)
   return (
     <div className="tool-call-output">
       <div className="tool-call-output-box">
         <div className="tool-call-output-title">{title}</div>
-        {showDiff ? <DiffBlock text={detail} /> : <pre className="tool-call-output-pre">{detail}</pre>}
+        {imageSrc && (
+          <a
+            className="tool-call-output-image-link"
+            href={imageSrc}
+            target="_blank"
+            rel="noreferrer"
+            title="Open screenshot"
+          >
+            <img className="tool-call-output-image" src={imageSrc} alt={`${name} result`} />
+          </a>
+        )}
+        {detail && (showDiff ? <DiffBlock text={detail} /> : <pre className="tool-call-output-pre">{detail}</pre>)}
       </div>
     </div>
   )
@@ -199,7 +216,7 @@ function ToolCall({ tool }: { tool: ToolActivity }) {
   const isError = tool.status === 'error'
   const isRunning = tool.status === 'running'
   const [isExpanded, setExpanded] = useState(false)
-  const hasOutput = !!toolDetail(tool)
+  const hasOutput = !!toolDetail(tool) || !!toolImageSrc(tool)
   return (
     <div className={`tool-call-card ${isExpanded ? 'expanded' : ''} ${isError ? 'error' : ''}`}>
       <button
@@ -273,7 +290,7 @@ export const ToolRun = memo(function ToolRun({ tools }: { tools: ToolActivity[] 
   })
 
   const defaultExpandedIds = groups
-    .filter((group) => group.some((tool) => tool.status !== 'ok'))
+    .filter((group) => group.some((tool) => tool.status !== 'ok' || !!toolImageSrc(tool)))
     .map((group) => group[0].callId)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(defaultExpandedIds))
 

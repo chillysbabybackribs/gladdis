@@ -16,6 +16,7 @@ export interface ToolActivity {
   endedAt?: number
   durationMs?: number
   preview?: string
+  imageDataUrl?: string
 }
 
 export interface ProgressStepPart extends PipelineProgressStep {

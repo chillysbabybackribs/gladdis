@@ -25,6 +25,7 @@ export async function handleProviderTurnWithoutToolCalls(args: {
     callId: string
     ok: boolean
     preview: string
+    imageDataUrl?: string
   }) => void
   rememberFullResult?: (callId: string, text: string) => void
   transition?: (iteration: number, transition: SupervisorTransition) => void
@@ -72,6 +73,7 @@ export async function executeProviderToolCall(args: {
     callId: string
     ok: boolean
     preview: string
+    imageDataUrl?: string
   }) => void
   rememberFullResult?: (callId: string, text: string) => void
   validationState?: ToolValidationState
@@ -94,7 +96,8 @@ export async function executeProviderToolCall(args: {
     type: 'tool_result',
     callId: args.callId,
     ok: outcome.ok,
-    preview: outcome.text
+    preview: outcome.text,
+    imageDataUrl: outcome.imageBase64 ? `data:image/png;base64,${outcome.imageBase64}` : undefined
   })
   return {
     name: args.name,

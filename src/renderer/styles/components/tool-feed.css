@@ -465,6 +465,20 @@
   border-radius: 0;
   overflow: hidden;
 }
+.tool-call-output-image-link {
+  display: block;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.tool-call-output-image {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(0, 0, 0, 0.28);
+}
 .tool-call-output-title {
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-subtle);

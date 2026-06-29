@@ -213,6 +213,7 @@ export interface StoredToolActivity {
   endedAt?: number
   durationMs?: number
   preview?: string
+  imageDataUrl?: string
 }
 
 export type ContractTraceProfile =
@@ -589,6 +590,7 @@ export type ChatStreamEvent =
       endedAt?: number
       durationMs?: number
       preview: string
+      imageDataUrl?: string
     }
   | ({ requestId: string; assistantMessageId?: string; type: 'progress_step' } & PipelineProgressStep)
 

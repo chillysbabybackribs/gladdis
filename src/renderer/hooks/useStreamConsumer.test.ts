@@ -109,6 +109,47 @@ describe('applyStreamEventToMessages', () => {
     ])
   })
 
+  it('preserves tool screenshots on the matching assistant message', () => {
+    const messages: Message[] = [
+      { id: 'assistant-a', role: 'assistant', text: '', parts: [] }
+    ]
+
+    const withCall = applyStreamEventToMessages(messages, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'tool_call',
+      tool: 'screenshot_app',
+      args: {},
+      callId: 'shot-1'
+    })
+    const withResult = applyStreamEventToMessages(withCall, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'tool_result',
+      callId: 'shot-1',
+      ok: true,
+      preview: 'Screenshot captured.',
+      imageDataUrl: 'data:image/png;base64,abc123'
+    })
+
+    expect(withResult[0].parts).toEqual([
+      {
+        kind: 'tool',
+        tool: {
+          callId: 'shot-1',
+          tool: 'screenshot_app',
+          args: {},
+          status: 'ok',
+          startedAt: undefined,
+          endedAt: undefined,
+          durationMs: undefined,
+          preview: 'Screenshot captured.',
+          imageDataUrl: 'data:image/png;base64,abc123'
+        }
+      }
+    ])
+  })
+
   it('appends loop, capability, verification, and task-memory events as ordered parts', () => {
     const messages: Message[] = [
       { id: 'assistant-a', role: 'assistant', text: 'alpha', parts: [{ kind: 'text', text: 'alpha' }] }

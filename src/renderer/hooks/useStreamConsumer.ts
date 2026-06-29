@@ -152,7 +152,8 @@ export function applyStreamEventToMessages(
                 status: event.ok ? ('ok' as const) : ('error' as const),
                 endedAt: event.endedAt,
                 durationMs: event.durationMs,
-                preview: event.preview
+                preview: event.preview,
+                imageDataUrl: event.imageDataUrl
               }
             }
           : part

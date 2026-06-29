@@ -125,7 +125,14 @@ export async function respondToCodexBrowserToolCall(args: {
   const outcome = await args.tools.run(tool, toolArgs, ctx)
   args.respond(args.msg.id, codexDynamicToolResponse(outcome))
   if (args.requestId) {
-    args.emit({ requestId: args.requestId, type: 'tool_result', callId, ok: outcome.ok, preview: outcome.text })
+    args.emit({
+      requestId: args.requestId,
+      type: 'tool_result',
+      callId,
+      ok: outcome.ok,
+      preview: outcome.text,
+      imageDataUrl: outcome.imageBase64 ? `data:image/png;base64,${outcome.imageBase64}` : undefined
+    })
   }
 }
 

@@ -84,7 +84,8 @@ async function captureLocalPreviewScreenshot(args: {
       type: 'tool_result',
       callId,
       ok: true,
-      preview: `Captured visible screenshot confirmation for ${url} (${kb} KB).`
+      preview: `Captured visible screenshot confirmation for ${url} (${kb} KB).`,
+      imageDataUrl: `data:image/png;base64,${imageBase64}`
     })
     emit({
       requestId,

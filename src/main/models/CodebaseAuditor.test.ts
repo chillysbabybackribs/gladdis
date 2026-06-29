@@ -41,6 +41,7 @@ describe('CodebaseAuditor', () => {
 
     const firstCall = vi.mocked(mockAi.models.generateContent).mock.calls[0]?.[0];
     expect(firstCall?.config?.systemInstruction).toContain("Let the audit goal determine the report shape");
+    expect(firstCall?.config?.systemInstruction).toContain('This is an audit-only analysis task.');
     expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('=== Audit Goal ===');
     expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('Run a general codebase audit');
     expect(firstCall?.contents?.[0]?.parts?.[0]?.text).not.toContain('Core Technology Stack & Configurations');
@@ -73,6 +74,32 @@ describe('CodebaseAuditor', () => {
           keyFiles: ['package.json', 'src/main/index.ts'],
           topDirectories: ['src'],
           entryPoints: ['src/main/index.ts']
+        },
+        cacheStatus: 'miss'
+      }),
+      searchRepo: vi.fn().mockResolvedValue({
+        ok: true,
+        summary: 'Search query: inefficient systems place\nPath: src/main\nHits:\nsrc/main/index.ts:1 - export const boot = true',
+        structuredPayload: {
+          workspaceRoot: mockWorkspace,
+          query: 'inefficient systems place',
+          path: 'src/main',
+          totalHits: 1,
+          hits: [
+            {
+              path: 'src/main/index.ts',
+              kind: 'content',
+              line: 1,
+              text: 'export const boot = true'
+            }
+          ],
+          suggestedSpans: [
+            {
+              path: 'src/main/index.ts',
+              startLine: 1,
+              endLine: 10
+            }
+          ]
         },
         cacheStatus: 'miss'
       }),
@@ -113,6 +140,15 @@ describe('CodebaseAuditor', () => {
       expect.objectContaining({ requestId: 'req-audit', taskId: 'task-audit' }),
       expect.objectContaining({ workspaceRoot: mockWorkspace, focus: 'src/main' })
     );
+    expect(capabilityBroker.searchRepo).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'req-audit', taskId: 'task-audit' }),
+      expect.objectContaining({
+        workspaceRoot: mockWorkspace,
+        path: 'src/main',
+        query: 'inefficient systems place',
+        maxResults: 6
+      })
+    );
     expect(capabilityBroker.readSpans).toHaveBeenCalled();
     expect(scanSpy).toHaveBeenCalledTimes(1);
     expect(scanSpy).toHaveBeenCalledWith(path.join(mockWorkspace, 'src', 'main'), 0, 2);
@@ -120,6 +156,7 @@ describe('CodebaseAuditor', () => {
     const firstCall = vi.mocked(mockAi.models.generateContent).mock.calls[0]?.[0];
     expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('Audit the codebase for inefficient systems in place.');
     expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('Audit Focus Target: Only focus on modules, files, and rules related to: "src/main"');
+    expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('=== Goal-Driven Evidence ===');
 
     await fs.rm(mockWorkspace, { recursive: true, force: true });
   });

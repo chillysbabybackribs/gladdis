@@ -31,10 +31,29 @@ type ReadSpansPayload = {
 };
 
 export interface CodebaseAuditorOptions {
-  capabilityBroker?: Pick<CapabilityBroker, 'repoOverview' | 'readSpans'>;
+  capabilityBroker?: Pick<CapabilityBroker, 'repoOverview' | 'searchRepo' | 'readSpans'>;
   brokerContext?: BrokerCallContext;
   repoIntelligence?: RepoIntelligenceService;
 }
+
+type SearchRepoPayload = {
+  workspaceRoot: string;
+  query: string;
+  path?: string;
+  glob?: string;
+  totalHits: number;
+  hits: Array<{
+    path: string;
+    kind: 'content' | 'path';
+    line: number;
+    text: string;
+  }>;
+  suggestedSpans: Array<{
+    path: string;
+    startLine: number;
+    endLine: number;
+  }>;
+};
 
 /**
  * Models to try (in order) when no explicit model is requested. Picked from
@@ -74,7 +93,7 @@ const FOCUS_TEXT_EXTENSIONS = new Set([
 
 export class CodebaseAuditor {
   private readonly repoIntelligence: RepoIntelligenceService;
-  private readonly capabilityBroker?: Pick<CapabilityBroker, 'repoOverview' | 'readSpans'>;
+  private readonly capabilityBroker?: Pick<CapabilityBroker, 'repoOverview' | 'searchRepo' | 'readSpans'>;
   private readonly brokerContext?: BrokerCallContext;
 
   constructor(
@@ -104,10 +123,11 @@ export class CodebaseAuditor {
     const workspaceRoot = path.resolve(this.workspaceRoot);
     const overview = await this.loadOverview(workspaceRoot, focusPath);
     const auditFiles = this.pickAuditFiles(overview.structuredPayload);
-    const [readme, fileSpans, focusContext] = await Promise.all([
+    const [readme, fileSpans, focusContext, goalEvidence] = await Promise.all([
       this.readOptional(path.join(workspaceRoot, 'README.md'), 5000),
       this.readSpans(workspaceRoot, auditFiles),
-      focusPath ? this.readFocusPathContext(workspaceRoot, focusPath) : Promise.resolve('')
+      focusPath ? this.readFocusPathContext(workspaceRoot, focusPath) : Promise.resolve(''),
+      this.collectGoalEvidence(workspaceRoot, focusPath, auditGoal)
     ]);
 
     const fallbackTree =
@@ -121,7 +141,9 @@ Behavioral requirements:
 - Ground every substantive claim in the provided repository evidence.
 - Cite concrete file paths for findings and architectural claims whenever possible.
 - Separate confirmed findings from uncertainty; explicitly say when evidence is insufficient.
+- Classify observations clearly: confirmed findings, strengths, costly-by-design tradeoffs, and needs-more-verification concerns should not be mixed together.
 - Avoid falling back to a generic template when the caller asked for something narrower or comparative.
+- This is an audit-only analysis task. Do not recommend making edits "as if already done," do not imply tests/validation ran unless the evidence says they ran, and do not drift into implementation narration.
 - If no explicit audit goal is provided, produce a balanced general codebase audit.`;
 
     const promptSections = [
@@ -131,6 +153,7 @@ Behavioral requirements:
       `\n=== Repository Overview ===\n${overview.summary}`,
       fileSpans ? `\n=== Key File Spans ===\n${fileSpans}` : '\n=== Key File Spans ===\nNone captured',
       focusContext ? `\n${focusContext}` : null,
+      goalEvidence ? `\n=== Goal-Driven Evidence ===\n${goalEvidence}` : null,
       fallbackTree ? `\n=== Complete Project File Tree ===\n${fallbackTree}` : null
     ].filter((part): part is string => Boolean(part));
 
@@ -149,6 +172,8 @@ Requirements:
 - Choose the report structure that best fits the audit goal instead of forcing a fixed template.
 - Prioritize the highest-signal findings for that goal.
 - Include concrete evidence with file paths for each important claim.
+- Use explicit labels for confidence: keep confirmed claims separate from plausible-but-unconfirmed concerns.
+- Call out "costly by design" cases separately from true inefficiencies when the code is intentionally paying cost for product behavior.
 - Call out strengths as well as weaknesses when the goal asks for them or when they materially affect the conclusion.
 - Add a short "Needs More Verification" section for any plausible but unconfirmed concerns.
 - If the goal is broad, organize the audit into the most useful sections you can infer from the evidence.
@@ -213,6 +238,15 @@ Output ONLY the final Markdown document. Be rigorous, precise, and fully grounde
       endLine: 160
     }));
 
+    return this.readSpanItems(workspaceRoot, items);
+  }
+
+  private async readSpanItems(
+    workspaceRoot: string,
+    items: Array<{ path: string; startLine: number; endLine: number }>
+  ): Promise<string> {
+    if (items.length === 0) return '';
+
     if (this.capabilityBroker && this.brokerContext) {
       const brokerResult = await this.capabilityBroker.readSpans(this.brokerContext, {
         workspaceRoot,
@@ -247,7 +281,8 @@ Output ONLY the final Markdown document. Be rigorous, precise, and fully grounde
   }
 
   private async readFocusPathContext(workspaceRoot: string, focusPath: string): Promise<string> {
-    const fullPath = path.resolve(workspaceRoot, focusPath);
+    const fullPath = this.resolveFocusPath(workspaceRoot, focusPath);
+    if (!fullPath) return '[Focus path ignored: it resolves outside the selected workspace root.]';
     try {
       const stats = await fs.stat(fullPath);
       if (stats.isFile()) {
@@ -259,14 +294,145 @@ Output ONLY the final Markdown document. Be rigorous, precise, and fully grounde
         return '';
       }
       if (stats.isDirectory()) {
-        const snapshot = await this.scanDirectory(fullPath, 0, 2);
-        if (snapshot.length === 0) return '';
-        return `=== FOCUS DIRECTORY SNAPSHOT: ${focusPath} ===\n${snapshot.join('\n')}`;
+        const [snapshot, focusFiles] = await Promise.all([
+          this.scanDirectory(fullPath, 0, 2),
+          this.listFocusFiles(workspaceRoot, fullPath)
+        ]);
+        const spans = focusFiles.length > 0 ? await this.readSpans(workspaceRoot, focusFiles) : '';
+        const parts = [];
+        if (snapshot.length > 0) {
+          parts.push(`=== FOCUS DIRECTORY SNAPSHOT: ${focusPath} ===\n${snapshot.join('\n')}`);
+        }
+        if (spans) {
+          parts.push(`=== FOCUS DIRECTORY KEY FILES: ${focusPath} ===\n${spans}`);
+        }
+        return parts.join('\n\n');
       }
     } catch (err: any) {
       return `[Error loading focus path context: ${err.message}]`;
     }
     return '';
+  }
+
+  private async collectGoalEvidence(
+    workspaceRoot: string,
+    focusPath: string | undefined,
+    auditGoal: string | undefined
+  ): Promise<string> {
+    const goalQuery = this.buildGoalEvidenceQuery(auditGoal);
+    if (!goalQuery) return '';
+
+    if (this.capabilityBroker && this.brokerContext) {
+      const brokerResult = await this.capabilityBroker.searchRepo(this.brokerContext, {
+        workspaceRoot,
+        query: goalQuery,
+        ...(focusPath ? { path: focusPath } : {}),
+        maxResults: 6
+      });
+      if (brokerResult.ok && brokerResult.structuredPayload) {
+        const payload = brokerResult.structuredPayload as SearchRepoPayload;
+        const spans = payload.suggestedSpans.length > 0
+          ? await this.readSpanItems(
+              workspaceRoot,
+              payload.suggestedSpans.map((span) => ({
+                path: span.path,
+                startLine: span.startLine,
+                endLine: span.endLine
+              }))
+            )
+          : '';
+        return [brokerResult.summary, spans ? `Suggested evidence reads:\n${spans}` : '']
+          .filter(Boolean)
+          .join('\n\n');
+      }
+      return brokerResult.summary;
+    }
+
+    return '';
+  }
+
+  private buildGoalEvidenceQuery(auditGoal: string | undefined): string | null {
+    const raw = auditGoal?.trim();
+    if (!raw) return null;
+
+    const quotedPhrases = Array.from(raw.matchAll(/"([^"]+)"|'([^']+)'/g))
+      .map((match) => (match[1] || match[2] || '').trim())
+      .filter((phrase) => phrase.length >= 3);
+    if (quotedPhrases.length > 0) return quotedPhrases[0];
+
+    const normalized = raw
+      .toLowerCase()
+      .replace(/\b(audit|review|inspect|analy[sz]e|check|look\s+for|find)\b/g, ' ')
+      .replace(/\b(the|this|that|these|those|codebase|repo|repository|project|code|for|of|in|on|with|and|or|to|now|please)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return null;
+
+    const pathish = normalized.match(/[a-z0-9_./-]{3,}/g) ?? [];
+    const meaningful = pathish.filter((token) => token.length >= 4).slice(0, 5);
+    if (meaningful.length === 0) return null;
+    const cleaned = meaningful.map((token) =>
+      token
+        .replace(/^[^a-z0-9_./-]+/gi, '')
+        .replace(/[.,:;!?]+$/g, '')
+        .replace(/[^a-z0-9_./-]+$/gi, '')
+    );
+    const finalTokens = cleaned.filter((token) => token.length >= 4);
+    if (finalTokens.length === 0) return null;
+    if (finalTokens.length === 1) return finalTokens[0];
+    return finalTokens.slice(0, 3).join(' ');
+  }
+
+  private resolveFocusPath(workspaceRoot: string, focusPath: string): string | null {
+    const resolved = path.resolve(workspaceRoot, focusPath);
+    const relative = path.relative(workspaceRoot, resolved);
+    if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+      return resolved;
+    }
+    return null;
+  }
+
+  private async listFocusFiles(
+    workspaceRoot: string,
+    fullPath: string,
+    maxDepth = 2,
+    maxFiles = 4
+  ): Promise<string[]> {
+    const ignoreDirs = new Set(['node_modules', '.git', '.cache', 'dist', 'out', '.next', 'build']);
+    const out: string[] = [];
+    const visit = async (dir: string, depth: number) => {
+      if (out.length >= maxFiles || depth > maxDepth) return;
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const files = entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name)
+        .filter((name) => FOCUS_TEXT_EXTENSIONS.has(path.extname(name).toLowerCase()) || name === 'package.json')
+        .sort((a, b) => this.focusFileScore(b) - this.focusFileScore(a) || a.localeCompare(b));
+      for (const name of files) {
+        out.push(path.relative(workspaceRoot, path.join(dir, name)).replace(/\\/g, '/'));
+        if (out.length >= maxFiles) return;
+      }
+      const dirs = entries
+        .filter((entry) => entry.isDirectory() && !ignoreDirs.has(entry.name) && !entry.name.startsWith('.'))
+        .map((entry) => entry.name)
+        .sort((a, b) => a.localeCompare(b));
+      for (const name of dirs) {
+        await visit(path.join(dir, name), depth + 1);
+        if (out.length >= maxFiles) return;
+      }
+    };
+    await visit(fullPath, 0);
+    return out;
+  }
+
+  private focusFileScore(name: string): number {
+    if (name === 'package.json') return 100;
+    if (name.toLowerCase() === 'readme.md') return 90;
+    const ext = path.extname(name).toLowerCase();
+    if (ext === '.ts' || ext === '.tsx') return 80;
+    if (ext === '.js' || ext === '.jsx') return 70;
+    if (ext === '.json') return 60;
+    return 40;
   }
 
   private async readOptional(filePath: string, maxChars: number): Promise<string> {

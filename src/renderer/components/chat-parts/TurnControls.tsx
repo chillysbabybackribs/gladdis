@@ -1,4 +1,5 @@
 import type { CodexStatus, KeyStatus, ModelOption, Workspace } from '../../../../shared/types'
+import { MemoryButton } from '../MemoryButton'
 import { ModelPicker } from '../ModelPicker'
 
 /**
@@ -55,6 +56,7 @@ export function TurnControls({
         </svg>
         {folderLabel && <span className="workspace-label">{folderLabel}</span>}
       </button>
+      <MemoryButton workspace={workspace} />
     </div>
   )
 }

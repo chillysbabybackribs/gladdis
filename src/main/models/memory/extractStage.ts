@@ -155,9 +155,7 @@ export function sanitizeCandidates(raw: unknown): ExtractCandidate[] {
             if (!conversationId) return null
             const messageIndex = typeof e.messageIndex === 'number' ? e.messageIndex : undefined
             const turnExcerpt = typeof e.turnExcerpt === 'string' ? e.turnExcerpt.slice(0, 240) : undefined
-            return messageIndex === undefined && turnExcerpt === undefined
-              ? null
-              : { conversationId, messageIndex, turnExcerpt }
+            return { conversationId, messageIndex, turnExcerpt }
           })
           .filter((x): x is NonNullable<typeof x> => x !== null)
       : []

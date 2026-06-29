@@ -180,8 +180,9 @@ function onItemCompleted(turn: ActiveTurn, item: ThreadItem, ctx: NotificationCo
 
 /**
  * The Codex CLI offered a tool/command we refuse to allow (per
- * `findCodexToolPolicyViolation`). Synthesise a UI tool chip + result + error
- * so the user sees what was blocked, and interrupt the turn.
+ * `findCodexToolPolicyViolation`). Synthesise a completed guardrail chip so
+ * the user sees what was blocked, then interrupt the provider turn without
+ * rendering a chat-level error that derails the surrounding task UI.
  */
 function blockPolicyViolation(
   turn: ActiveTurn,
@@ -189,10 +190,11 @@ function blockPolicyViolation(
   violation: { reason: string; guidance: string },
   ctx: NotificationContext
 ): void {
-  const tool = 'blocked_native_browser_tool'
+  const tool = 'gladdis_browser_guardrail'
   const command = (item as any).command
   turn.toolItems.set(item.id, { tool })
   turn.blockedItems.add(item.id)
+  const message = `${violation.reason} ${violation.guidance}`
   if (!turn.silent) {
     ctx.emit({
       requestId: turn.requestId,
@@ -205,16 +207,10 @@ function blockPolicyViolation(
       requestId: turn.requestId,
       type: 'tool_result',
       callId: item.id,
-      ok: false,
-      preview: `${violation.reason} ${violation.guidance}`
-    })
-    ctx.emit({
-      requestId: turn.requestId,
-      type: 'error',
-      message: `${violation.reason} ${violation.guidance}`
+      ok: true,
+      preview: `Blocked unsafe browser command. ${message}`
     })
   }
-  turn.error = new Error(`${violation.reason} ${violation.guidance}`)
   turn.aborted = true
   if (turn.threadId) {
     ctx.server()?.notify('turn/interrupt', { threadId: turn.threadId, turnId: turn.turnId })

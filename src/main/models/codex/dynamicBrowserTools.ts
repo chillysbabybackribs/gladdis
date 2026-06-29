@@ -40,6 +40,7 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
 
 export const CODEX_BROWSER_INSTRUCTIONS =
   'Use gladdis.* tools for web, browser, and repo-intel work on the visible tab: search, deep_search, repo_overview, search_repo, read_spans, research_dossier, verify_change, fetch_page, navigate, browse_task, read_page, grep_page, grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. ' +
+  'Never run external browser commands for viewing or visual checks: google-chrome, chromium, chrome, xdg-open/open URLs, playwright screenshot/open/codegen/test/show-report, puppeteer scripts, or localhost:9222 DevTools probing. These are blocked because they bypass Gladdis and interrupt the turn. ' +
   'Prefer grep_click/grep_type for direct discovery + action; use lower-level drive tools only if needed. ' +
   'For Gladdis debugging, use the current visible app/browser first. do not launch a second Gladdis/dev app. Launch only for startup/fresh-process validation and explain why. ' +
   'Use Codex-native shell/file tools for local code work.'

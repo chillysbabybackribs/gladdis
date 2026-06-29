@@ -848,6 +848,9 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_SYSTEM).toContain('Do not launch a second Gladdis/dev app')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('use the current visible app/browser first')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('do not launch a second Gladdis/dev app')
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('Never run external browser commands')
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('playwright screenshot/open/codegen/test/show-report')
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('localhost:9222 DevTools probing')
   })
 
   it('does not attach or read the active page for ordinary chat', async () => {

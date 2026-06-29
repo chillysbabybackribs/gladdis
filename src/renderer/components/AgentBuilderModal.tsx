@@ -1,12 +1,43 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useEnvironmentStatus } from '../hooks/useEnvironmentStatus'
 import type { ModelOption } from '../../../shared/models'
-import type { SavedAgent } from '../../../shared/types'
+import type { SavedAgent, SavedAgentBlueprint } from '../../../shared/types'
 
 interface AgentBuilderModalProps {
   isOpen: boolean
   agent?: SavedAgent | null
   onClose: () => void
+}
+
+type BlueprintListField =
+  | 'preferredTools'
+  | 'disallowedTools'
+  | 'knownPaths'
+  | 'knownCommands'
+  | 'workflowSteps'
+  | 'verificationSteps'
+  | 'stopConditions'
+  | 'fallbackRules'
+  | 'assumptions'
+  | 'testTasks'
+  | 'evidenceNotes'
+
+type BlueprintSummaryField =
+  | 'taskFamily'
+  | 'optimizerModelId'
+  | 'runtimeModelId'
+  | 'optimizationSummary'
+  | 'goal'
+
+function parseListText(value: string): string[] {
+  return value
+    .split('\n')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
+
+function normalizeListText(value?: string[]): string {
+  return value ? value.join('\n') : ''
 }
 
 function isModelUsable(model: ModelOption, keyStatus: ReturnType<typeof useEnvironmentStatus>['keyStatus'], codexStatus: ReturnType<typeof useEnvironmentStatus>['codexStatus']): boolean {
@@ -62,9 +93,13 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
   const [optimizedPrompt, setOptimizedPrompt] = useState('')
   const [testTask, setTestTask] = useState('')
   const [contextSummary, setContextSummary] = useState('')
+  const [validationNotes, setValidationNotes] = useState<string[]>([])
+  const [optimizationMode, setOptimizationMode] = useState<'quick' | 'deep'>('quick')
   const [optimizing, setOptimizing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [optimizerFallbackNotice, setOptimizerFallbackNotice] = useState('')
+  const [blueprintMetadata, setBlueprintMetadata] = useState<SavedAgentBlueprint>({})
   const editing = !!agent
 
   useEffect(() => {
@@ -74,11 +109,52 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
     setRoughPrompt(agent?.roughPrompt ?? '')
     setOptimizedPrompt(agent?.prompt ?? '')
     setTestTask(agent?.testTask ?? '')
+    setBlueprintMetadata({
+      goal: agent?.goal,
+      optimizerModelId: agent?.optimizerModelId,
+      runtimeModelId: agent?.runtimeModelId,
+      taskFamily: agent?.taskFamily,
+      workspaceBound: agent?.workspaceBound,
+      preferredTools: agent?.preferredTools,
+      disallowedTools: agent?.disallowedTools,
+      knownPaths: agent?.knownPaths,
+      knownCommands: agent?.knownCommands,
+      workflowSteps: agent?.workflowSteps,
+      verificationSteps: agent?.verificationSteps,
+      stopConditions: agent?.stopConditions,
+      fallbackRules: agent?.fallbackRules,
+      assumptions: agent?.assumptions,
+      testTasks: agent?.testTasks,
+      optimizationSummary: agent?.optimizationSummary,
+      evidenceNotes: agent?.evidenceNotes,
+      validationNotes: agent?.validationNotes
+    })
     setContextSummary('')
+    setValidationNotes(agent?.validationNotes ?? [])
+    setOptimizerFallbackNotice('')
     setOptimizing(false)
     setSaving(false)
     setError(null)
   }, [agent, isOpen])
+
+  const setBlueprintListField = (key: BlueprintListField, value: string) => {
+    setBlueprintMetadata((previous) => ({
+      ...previous,
+      [key]: parseListText(value)
+    }))
+  }
+
+  const setBlueprintTextField = (key: BlueprintSummaryField, value: string) => {
+    setBlueprintMetadata((previous) => ({
+      ...previous,
+      [key]: value.trim() ? value : undefined
+    }))
+  }
+
+  const setBlueprintBooleanField = (key: 'workspaceBound', value: boolean) => {
+    setBlueprintMetadata((previous) => ({ ...previous, [key]: value }))
+  }
+
 
   if (!isOpen) return null
 
@@ -88,8 +164,8 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
     const trimmed = roughPrompt.trim()
     if (!trimmed || optimizing) return
 
-    const modelId = selectedModel || availableModels[0]?.id || ''
-    if (!modelId) {
+    const requestedModelId = selectedModel.trim() || availableModels[0]?.id || ''
+    if (!requestedModelId) {
       setOptimizedPrompt(buildLocalDraft(trimmed, workspace.folder))
       setTestTask(`Use this agent to complete: ${trimmed}`)
       setContextSummary(workspace.folder ? `Used active workspace: ${workspace.folder}` : 'No workspace context was available.')
@@ -98,25 +174,35 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
 
     setOptimizing(true)
     setError(null)
+    setOptimizerFallbackNotice('')
+    setValidationNotes([])
     try {
-      if (!selectedModel) setSelectedModel(modelId)
+      if (!selectedModel.trim()) setSelectedModel(requestedModelId)
       const result = await window.gladdis.agents.optimize({
         name: agentName,
-        modelId,
+        modelId: requestedModelId,
         roughPrompt: trimmed,
+        optimizationMode,
         workspaceRoot: workspace.folder,
         existingAgent: agent
       })
       if (!agentName.trim() && result.name) setAgentName(result.name)
-      if (result.modelId && result.modelId !== selectedModel) setSelectedModel(result.modelId)
+      if (result.modelId && result.modelId !== requestedModelId) {
+        setSelectedModel(result.modelId)
+        setOptimizerFallbackNotice(`Optimizer used ${result.modelId} instead of ${requestedModelId}.`)
+      }
       setOptimizedPrompt(result.prompt)
       setTestTask(result.testTask)
+      setBlueprintMetadata((previous) => ({ ...previous, ...result }))
       setContextSummary(result.contextSummary ?? '')
+      setValidationNotes(result.validationNotes ?? [])
     } catch (err) {
       setOptimizedPrompt(buildLocalDraft(trimmed, workspace.folder))
       setTestTask(`Use this agent to complete: ${trimmed}`)
       setContextSummary(workspace.folder ? `Used active workspace: ${workspace.folder}` : 'No workspace context was available.')
       setError(`Used a local draft because optimization failed: ${err instanceof Error ? err.message : String(err)}`)
+      setValidationNotes([])
+      setBlueprintMetadata((previous) => ({ ...previous, validationNotes: [] }))
     } finally {
       setOptimizing(false)
     }
@@ -131,6 +217,24 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
         id: agent?.id,
         name: agentName.trim(),
         modelId: selectedModel,
+        goal: blueprintMetadata.goal ?? roughPrompt.trim(),
+        optimizerModelId: blueprintMetadata.optimizerModelId,
+        runtimeModelId: blueprintMetadata.runtimeModelId,
+        taskFamily: blueprintMetadata.taskFamily,
+        workspaceBound: blueprintMetadata.workspaceBound,
+        preferredTools: blueprintMetadata.preferredTools,
+        disallowedTools: blueprintMetadata.disallowedTools,
+        knownPaths: blueprintMetadata.knownPaths,
+        knownCommands: blueprintMetadata.knownCommands,
+        workflowSteps: blueprintMetadata.workflowSteps,
+        verificationSteps: blueprintMetadata.verificationSteps,
+        stopConditions: blueprintMetadata.stopConditions,
+        fallbackRules: blueprintMetadata.fallbackRules,
+        assumptions: blueprintMetadata.assumptions,
+        testTasks: blueprintMetadata.testTasks,
+        optimizationSummary: blueprintMetadata.optimizationSummary,
+        evidenceNotes: blueprintMetadata.evidenceNotes,
+        validationNotes: blueprintMetadata.validationNotes,
         roughPrompt: roughPrompt.trim(),
         prompt: optimizedPrompt.trim(),
         testTask: testTask.trim()
@@ -187,16 +291,235 @@ export default function AgentBuilderModal({ isOpen, agent = null, onClose }: Age
           </label>
 
           <div style={buttonRowStyle}>
+            <div style={modeToggleStyle} aria-label="Optimization mode">
+              <button
+                type="button"
+                onClick={() => setOptimizationMode('quick')}
+                style={optimizationModeButtonStyle(optimizationMode === 'quick')}
+              >
+                Quick
+              </button>
+              <button
+                type="button"
+                onClick={() => setOptimizationMode('deep')}
+                style={optimizationModeButtonStyle(optimizationMode === 'deep')}
+              >
+                Deep
+              </button>
+            </div>
+            <span style={modeHintStyle}>
+              {optimizationMode === 'deep'
+                ? 'Deep mode runs search, read spans, and dossier synthesis.'
+                : 'Quick mode runs a compact workspace summary only.'}
+            </span>
+          </div>
+
+          <div style={buttonRowStyle}>
             <button
               type="button"
               onClick={handleGenerateDraft}
               style={buttonStyle(!roughPrompt.trim() || optimizing)}
               disabled={!roughPrompt.trim() || optimizing}
             >
-              {optimizing ? 'Optimizing...' : 'Optimize Prompt'}
+              {optimizing
+                ? 'Optimizing...'
+                : optimizationMode === 'deep'
+                  ? 'Deep Optimize'
+                  : 'Optimize'}
             </button>
           </div>
           {contextSummary ? <div style={contextSummaryStyle}>{contextSummary}</div> : null}
+          {validationNotes.length > 0 ? (
+            <div style={validationNoteStyle}>
+              <div>Blueprint validation notes:</div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+                {validationNotes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {optimizerFallbackNotice ? <div style={fallbackNoticeStyle}>{optimizerFallbackNotice}</div> : null}
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Blueprint goal</span>
+            <input
+              value={blueprintMetadata.goal ?? ''}
+              onChange={(event) => setBlueprintTextField('goal', event.target.value)}
+              placeholder="The stable goal for this agent"
+              style={inputStyle}
+            />
+          </label>
+
+          <div style={twoColumnStyle}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Task family</span>
+              <input
+                value={blueprintMetadata.taskFamily ?? ''}
+                onChange={(event) => setBlueprintTextField('taskFamily', event.target.value)}
+                placeholder="frontend-migration"
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Workspace-bound</span>
+              <label style={checkboxLabelStyle}>
+                <input
+                  type="checkbox"
+                  checked={blueprintMetadata.workspaceBound === true}
+                  onChange={(event) => setBlueprintBooleanField('workspaceBound', event.target.checked)}
+                />
+                Restrict this agent to the active workspace
+              </label>
+            </label>
+          </div>
+
+          <div style={twoColumnStyle}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Optimizer model ID</span>
+              <input
+                value={blueprintMetadata.optimizerModelId ?? ''}
+                onChange={(event) => setBlueprintTextField('optimizerModelId', event.target.value)}
+                placeholder="openai-gpt-4o-mini"
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Runtime model ID</span>
+              <input
+                value={blueprintMetadata.runtimeModelId ?? ''}
+                onChange={(event) => setBlueprintTextField('runtimeModelId', event.target.value)}
+                placeholder="openai-gpt-4o-mini"
+                style={inputStyle}
+              />
+            </label>
+          </div>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Preferred tools (one per line)</span>
+            <textarea
+              value={normalizeListText(blueprintMetadata.preferredTools)}
+              onChange={(event) => setBlueprintListField('preferredTools', event.target.value)}
+              placeholder="read_file\nrun_command\nedit_file"
+              style={textareaStyle}
+              rows={4}
+            />
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Disallowed tools (one per line)</span>
+            <textarea
+              value={normalizeListText(blueprintMetadata.disallowedTools)}
+              onChange={(event) => setBlueprintListField('disallowedTools', event.target.value)}
+              placeholder="search_web\nresearch_dossier"
+              style={textareaStyle}
+              rows={4}
+            />
+          </label>
+
+          <div style={twoColumnStyle}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Known paths (one per line)</span>
+              <textarea
+                value={normalizeListText(blueprintMetadata.knownPaths)}
+                onChange={(event) => setBlueprintListField('knownPaths', event.target.value)}
+                placeholder="src/main\nsrc/renderer"
+                style={textareaStyle}
+                rows={4}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Known commands (one per line)</span>
+              <textarea
+                value={normalizeListText(blueprintMetadata.knownCommands)}
+                onChange={(event) => setBlueprintListField('knownCommands', event.target.value)}
+                placeholder="pnpm test\npnpm run build"
+                style={textareaStyle}
+                rows={4}
+              />
+            </label>
+          </div>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Workflow steps</span>
+            <textarea
+              value={normalizeListText(blueprintMetadata.workflowSteps)}
+              onChange={(event) => setBlueprintListField('workflowSteps', event.target.value)}
+              style={textareaStyle}
+              rows={5}
+            />
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Verification steps</span>
+            <textarea
+              value={normalizeListText(blueprintMetadata.verificationSteps)}
+              onChange={(event) => setBlueprintListField('verificationSteps', event.target.value)}
+              style={textareaStyle}
+              rows={5}
+            />
+          </label>
+
+          <div style={twoColumnStyle}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Stop conditions</span>
+              <textarea
+                value={normalizeListText(blueprintMetadata.stopConditions)}
+                onChange={(event) => setBlueprintListField('stopConditions', event.target.value)}
+                style={textareaStyle}
+                rows={4}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Fallback rules</span>
+              <textarea
+                value={normalizeListText(blueprintMetadata.fallbackRules)}
+                onChange={(event) => setBlueprintListField('fallbackRules', event.target.value)}
+                style={textareaStyle}
+                rows={4}
+              />
+            </label>
+          </div>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Assumptions</span>
+            <textarea
+              value={normalizeListText(blueprintMetadata.assumptions)}
+              onChange={(event) => setBlueprintListField('assumptions', event.target.value)}
+              style={textareaStyle}
+              rows={4}
+            />
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Additional test tasks (one per line)</span>
+            <textarea
+              value={normalizeListText(blueprintMetadata.testTasks)}
+              onChange={(event) => setBlueprintListField('testTasks', event.target.value)}
+              style={textareaStyle}
+              rows={4}
+            />
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Optimization summary</span>
+            <textarea
+              value={blueprintMetadata.optimizationSummary ?? ''}
+              onChange={(event) => setBlueprintTextField('optimizationSummary', event.target.value)}
+              style={textareaStyle}
+              rows={4}
+            />
+          </label>
+
+          <label style={fieldStyle}>
+            <span style={labelStyle}>Evidence notes (one per line)</span>
+            <textarea
+              value={normalizeListText(blueprintMetadata.evidenceNotes)}
+              onChange={(event) => setBlueprintListField('evidenceNotes', event.target.value)}
+              style={textareaStyle}
+              rows={4}
+            />
+          </label>
 
           <label style={fieldStyle}>
             <span style={labelStyle}>Editable agent prompt</span>
@@ -291,10 +614,25 @@ const fieldStyle: React.CSSProperties = {
   gap: 8
 }
 
+const twoColumnStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+  gap: 16
+}
+
 const labelStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
   color: 'var(--text-secondary)'
+}
+
+const checkboxLabelStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 10,
+  color: 'var(--text-primary)',
+  fontWeight: 500,
+  fontSize: 13
 }
 
 const inputStyle: React.CSSProperties = {
@@ -342,6 +680,29 @@ const buttonRowStyle: React.CSSProperties = {
   justifyContent: 'flex-start'
 }
 
+const modeToggleStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  borderRadius: 8,
+  border: '1px solid var(--border-subtle)',
+  overflow: 'hidden'
+}
+
+const optimizationModeButtonStyle = (active: boolean): React.CSSProperties => ({
+  padding: '10px 12px',
+  border: 'none',
+  borderRight: '1px solid var(--border-subtle)',
+  background: active ? '#262626' : 'transparent',
+  color: 'var(--text-primary)',
+  cursor: 'pointer',
+  fontSize: 13
+})
+
+const modeHintStyle: React.CSSProperties = {
+  color: 'var(--text-secondary)',
+  fontSize: 12,
+  alignSelf: 'center'
+}
+
 const footerStyle: React.CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
@@ -371,3 +732,22 @@ const primaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
   border: disabled ? '1px solid var(--border-subtle)' : '1px solid #4a4a4a',
   boxShadow: disabled ? 'none' : 'inset 0 1px 0 rgba(255,255,255,0.08)'
 })
+
+const validationNoteStyle: React.CSSProperties = {
+  padding: '9px 11px',
+  borderRadius: 8,
+  border: '1px solid var(--border-subtle)',
+  background: 'rgba(255, 255, 255, 0.04)',
+  color: 'var(--text-secondary)',
+  fontSize: 12,
+  lineHeight: 1.4
+}
+
+const fallbackNoticeStyle: React.CSSProperties = {
+  padding: '9px 11px',
+  borderRadius: 8,
+  border: '1px solid var(--border-subtle)',
+  background: 'rgba(72, 201, 176, 0.08)',
+  color: '#86efac',
+  fontSize: 12
+}

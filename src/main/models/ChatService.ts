@@ -21,7 +21,11 @@ import {
 } from '../../../shared/types'
 import { Dreamer } from './memory/Dreamer'
 import { BrowserTools, type ToolContext } from './browserTools'
-import { selectAgentToolProfile } from './agentTools'
+import {
+  knownToolByName,
+  normalizeToolName,
+  selectAgentToolProfile
+} from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
 import { CapabilityBroker } from './capabilities/CapabilityBroker'
@@ -76,6 +80,45 @@ const MAX_OUTPUT_TOKENS = 32_000
 const ANTHROPIC_MAX_TOKENS = MAX_OUTPUT_TOKENS
 const DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS = 4_096
 const AGENT_OPTIMIZER_MAX_OUTPUT_TOKENS = 2_800
+const QUICK_OPTIMIZER_MODEL_ORDER = [
+  'openai-gpt-4o-mini',
+  'openai-gpt-4-1-mini',
+  'openai-gpt-5.4-mini',
+  'openai-gpt-5.4-nano',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+  'grok-build-0.1',
+  'grok-4.3',
+  'claude-haiku-4-5',
+  'claude-sonnet-4-6',
+  'claude-opus-4-8',
+  'gpt-5.4-mini',
+  'gpt-5.4',
+  'gpt-5.3-codex',
+  'gpt-5.5'
+] as const
+
+const DEEP_OPTIMIZER_MODEL_ORDER = [
+  'claude-opus-4-8',
+  'openai-gpt-5.5',
+  'openai-gpt-5.4-pro',
+  'gemini-2.5-pro',
+  'claude-sonnet-4-6',
+  'grok-4.3',
+  'openai-gpt-5.4',
+  'openai-gpt-5.4-mini',
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
+  'openai-gpt-4.1-mini',
+  'openai-gpt-4o-mini',
+  'grok-build-0.1',
+  'claude-haiku-4-5',
+  'gpt-5.5',
+  'gpt-5.4',
+  'gpt-5.4-mini',
+  'gpt-5.3-codex'
+] as const
 
 // The agent loop is NOT capped by a turn count — it runs until the model stops
 // calling tools (goal reached) or the user hits stop (abort signal). Both loops
@@ -94,6 +137,7 @@ export class ChatService {
   private readonly toolStarts = new Map<string, number>()
   private readonly capabilityBroker: CapabilityBroker
   private readonly repoIntelligence: RepoIntelligenceService
+  private readonly researchDossier: ResearchDossierService
   /** Lazily-created so unit tests that construct ChatService don't trip on memory I/O. */
   private dreamer: Dreamer | null = null
 
@@ -110,14 +154,14 @@ export class ChatService {
     private readonly sendDreamProgress?: (e: DreamProgressEvent) => void
   ) {
     this.repoIntelligence = new RepoIntelligenceService()
-    const researchDossier = new ResearchDossierService(() => this.google(), this.repoIntelligence)
+    this.researchDossier = new ResearchDossierService(() => this.google(), this.repoIntelligence)
     const validation = new ValidationService()
     this.capabilityBroker = new CapabilityBroker(
       {
         repoOverview: (input) => this.repoIntelligence.repoOverview(input),
         searchRepo: (input) => this.repoIntelligence.searchRepo(input),
         readSpans: (input) => this.repoIntelligence.readSpans(input),
-        researchDossier: (input) => researchDossier.researchDossier(input),
+        researchDossier: (input) => this.researchDossier.researchDossier(input),
         verifyChange: (input) => validation.verifyChange(input)
       },
       this.emit,
@@ -394,13 +438,23 @@ export class ChatService {
   async optimizeAgent(input: OptimizeAgentInput): Promise<OptimizeAgentResult> {
     const roughPrompt = input.roughPrompt.trim()
     if (!roughPrompt) throw new Error('Agent goal is required.')
-    const model = this.model(input.modelId)
-    if (!model) throw new Error(`Unknown model ${input.modelId}`)
 
     const workspaceRoot = input.workspaceRoot?.trim() || this.tools.getWorkspaceRoot()
+    const optimizationMode: 'quick' | 'deep' = input.optimizationMode === 'deep' ? 'deep' : 'quick'
+    const model = await this.resolveOptimizerModel(input.modelId, optimizationMode)
     const contextSummary = workspaceRoot
-      ? await this.agentOptimizerWorkspaceSummary(workspaceRoot, roughPrompt)
+      ? await this.agentOptimizerWorkspaceSummary(workspaceRoot, roughPrompt, optimizationMode)
       : 'No workspace folder is selected. Build a portable task expert from the user goal only.'
+    const schemaCompliance = [
+      '- Validate that `prompt`, `testTask`, and `optimizationSummary` are present and non-empty.',
+      '- If a field is unsupported by your confidence level, omit it rather than inventing placeholders.',
+      '- Keep each array field short and specific; trim redundant variants.',
+      '- Return valid JSON only.'
+    ].join('\n')
+    const deepNote =
+      optimizationMode === 'deep'
+        ? 'Run a distillation pass with deep workspace discovery before drafting the final JSON.'
+        : 'Run a lightweight optimization pass focused on stable prompt and command guidance.'
 
     const system = [
       'You are Gladdis Agent Builder, an expert designer of compact, high-leverage AI agents.',
@@ -414,9 +468,12 @@ export class ChatService {
       '- Keep the agent general enough for the intended task family; do not hard-code a single file workflow unless the goal truly requires it.',
       '- Prefer precise action policy over motivational prose.',
       '- Preserve user intent. Do not invent repository files, APIs, product facts, or requirements.',
+      `- Optimize mode: ${optimizationMode}. ${deepNote}`,
+      'Schema checks:',
+      schemaCompliance,
       '',
       'Return only valid JSON with this shape:',
-      '{"name":"short agent name","prompt":"system prompt for the saved agent","testTask":"one concise test task","contextSummary":"one sentence on what context was used","notes":["optional short note"]}'
+      '{"name":"short agent name","goal":"user goal","prompt":"system prompt for the saved agent","testTask":"one concise test task","contextSummary":"one sentence on what context was used","notes":["optional short note"],"validationNotes":["optional note"],"preferredTools":["filesystem","shell"],"disallowedTools":[],"knownPaths":["src/"],"knownCommands":["pnpm test"],"workflowSteps":["1) ..."],"verificationSteps":["check ..."],"stopConditions":["..."],"fallbackRules":["..."],"assumptions":["..."],"testTasks":["additional test task"],"optimizationSummary":"what was learned","evidenceNotes":["..."]}'
     ].join('\n')
 
     const user = JSON.stringify(
@@ -425,9 +482,27 @@ export class ChatService {
         requestedName: input.name?.trim() || null,
         editingExistingAgent: input.existingAgent
           ? {
+              id: input.existingAgent.id,
               name: input.existingAgent.name,
+              goal: input.existingAgent.goal ?? null,
               roughPrompt: input.existingAgent.roughPrompt ?? null,
-              testTask: input.existingAgent.testTask ?? null
+              testTask: input.existingAgent.testTask ?? null,
+              taskFamily: input.existingAgent.taskFamily ?? null,
+              preferredTools: input.existingAgent.preferredTools ?? null,
+              disallowedTools: input.existingAgent.disallowedTools ?? null,
+              knownPaths: input.existingAgent.knownPaths ?? null,
+              knownCommands: input.existingAgent.knownCommands ?? null,
+              workflowSteps: input.existingAgent.workflowSteps ?? null,
+              verificationSteps: input.existingAgent.verificationSteps ?? null,
+              stopConditions: input.existingAgent.stopConditions ?? null,
+              fallbackRules: input.existingAgent.fallbackRules ?? null,
+              assumptions: input.existingAgent.assumptions ?? null,
+              testTasks: input.existingAgent.testTasks ?? null,
+              optimizerModelId: input.existingAgent.optimizerModelId ?? null,
+              runtimeModelId: input.existingAgent.runtimeModelId ?? null,
+              optimizationSummary: input.existingAgent.optimizationSummary ?? null,
+              evidenceNotes: input.existingAgent.evidenceNotes ?? null,
+              validationNotes: input.existingAgent.validationNotes ?? null
             }
           : null,
         selectedModel: {
@@ -435,13 +510,14 @@ export class ChatService {
           label: model.label,
           provider: model.provider
         },
+        optimizationMode,
         workspaceEvidence: contextSummary
       },
       null,
       2
     )
 
-    const raw = await this.complete(input.modelId, system, user, {
+    const raw = await this.complete(model.id, system, user, {
       stage: 'agent_optimizer',
       maxOutputTokens: AGENT_OPTIMIZER_MAX_OUTPUT_TOKENS
     })
@@ -449,13 +525,186 @@ export class ChatService {
     if (!parsed.prompt.trim()) throw new Error('Agent optimizer returned an empty prompt.')
     return {
       name: parsed.name?.trim() || input.name?.trim() || undefined,
-      modelId: input.modelId,
+      modelId: model.id,
       prompt: parsed.prompt.trim(),
       testTask: parsed.testTask?.trim() || `Use this agent to complete: ${roughPrompt}`,
+      goal: parsed.goal?.trim() || roughPrompt,
+      optimizerModelId: parsed.optimizerModelId?.trim() || model.id,
+      runtimeModelId: parsed.runtimeModelId?.trim() || model.id,
+      taskFamily: parsed.taskFamily?.trim(),
+      workspaceBound: parsed.workspaceBound,
+      preferredTools: parsed.preferredTools?.filter(Boolean),
+      disallowedTools: parsed.disallowedTools?.filter(Boolean),
+      knownPaths: parsed.knownPaths?.filter(Boolean),
+      knownCommands: parsed.knownCommands?.filter(Boolean),
+      workflowSteps: parsed.workflowSteps?.filter(Boolean),
+      verificationSteps: parsed.verificationSteps?.filter(Boolean),
+      stopConditions: parsed.stopConditions?.filter(Boolean),
+      fallbackRules: parsed.fallbackRules?.filter(Boolean),
+      assumptions: parsed.assumptions?.filter(Boolean),
+      testTasks: parsed.testTasks?.filter(Boolean),
+      optimizationSummary: parsed.optimizationSummary?.trim(),
+      evidenceNotes: parsed.evidenceNotes?.filter(Boolean),
+      validationNotes: parsed.validationNotes?.filter(Boolean),
       contextSummary: parsed.contextSummary?.trim() || contextSummary.split('\n')[0],
       notes: parsed.notes?.filter((note) => note.trim()).map((note) => note.trim()).slice(0, 4),
       source: 'llm'
     }
+  }
+
+  private async resolveOptimizerModel(
+    preferredModelId: string,
+    optimizationMode: 'quick' | 'deep'
+  ): Promise<ModelOption> {
+    const keyStatus = this.keys.status()
+    const codexAvailable = await this.codexOptimizerAvailable()
+
+    const ranking = optimizationMode === 'quick' ? QUICK_OPTIMIZER_MODEL_ORDER : DEEP_OPTIMIZER_MODEL_ORDER
+    const candidateModelIds = [
+      preferredModelId,
+      ...ranking.filter((id) => id !== preferredModelId)
+    ]
+
+    for (const modelId of candidateModelIds) {
+      const candidate = this.model(modelId)
+      if (!candidate) continue
+      if (candidate.provider === 'codex') {
+        if (codexAvailable) return candidate
+      } else if (keyStatus[candidate.provider]) {
+        return candidate
+      }
+    }
+
+    throw new Error(
+      `No usable optimizer model available for ${optimizationMode} mode. Configure an API key for Anthropic, Google, OpenAI, or xAI, or install and authenticate Codex.`
+    )
+  }
+
+  private async codexOptimizerAvailable(): Promise<boolean> {
+    try {
+      const status = await this.codexStatus()
+      return !!status.installed && !!status.authenticated
+    } catch {
+      return false
+    }
+  }
+
+  private async agentOptimizerWorkspaceSummary(
+    workspaceRoot: string,
+    roughPrompt: string,
+    optimizationMode: 'quick' | 'deep'
+  ): Promise<string> {
+    if (optimizationMode === 'quick') {
+      return this.agentOptimizerWorkspaceSummaryQuick(workspaceRoot, roughPrompt)
+    }
+    try {
+      return await this.agentOptimizerWorkspaceSummaryDeep(workspaceRoot, roughPrompt)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return [
+        await this.agentOptimizerWorkspaceSummaryQuick(workspaceRoot, roughPrompt),
+        'Deep optimize failed; using quick summary as fallback.',
+        `Reason: ${message}`
+      ].join('\n')
+    }
+  }
+
+  private async agentOptimizerWorkspaceSummaryQuick(workspaceRoot: string, roughPrompt: string): Promise<string> {
+    try {
+      const overview = await this.repoIntelligence.repoOverview({
+        workspaceRoot,
+        focus: roughPrompt
+      })
+      return [
+        `Mode: quick`,
+        '--- Workspace summary ---',
+        overview.summary
+      ].join('\n')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return [
+        'Mode: quick',
+        `Workspace overview unavailable: ${message}`,
+        `Focus: ${roughPrompt}`
+      ].join('\n')
+    }
+  }
+
+  private async agentOptimizerWorkspaceSummaryDeep(workspaceRoot: string, roughPrompt: string): Promise<string> {
+    const chunks: string[] = ['Mode: deep', '--- Discovery evidence ---']
+    const overview = await this.repoIntelligence.repoOverview({
+      workspaceRoot,
+      focus: roughPrompt
+    })
+    chunks.push(`Workspace: ${overview.structuredPayload.workspaceRoot}`)
+    if (overview.structuredPayload.packageName) {
+      chunks.push(`Package: ${overview.structuredPayload.packageName}`)
+    }
+    if (overview.structuredPayload.packageManager) {
+      chunks.push(`Package manager: ${overview.structuredPayload.packageManager}`)
+    }
+    if (overview.structuredPayload.scripts.length) {
+      chunks.push(`Scripts: ${overview.structuredPayload.scripts.slice(0, 12).join(', ')}`)
+    }
+    chunks.push('--- Repo overview ---')
+    chunks.push(overview.summary)
+
+    const searchQueries = [
+      roughPrompt,
+      `${roughPrompt} tests`,
+      `${roughPrompt} package.json scripts`
+    ]
+    const searchSummaries: string[] = []
+    const readSpansInputs: Array<{ path: string; startLine: number; endLine: number }> = []
+    for (const query of searchQueries) {
+      try {
+        const result = await this.repoIntelligence.searchRepo({
+          workspaceRoot,
+          query,
+          maxResults: 6
+        })
+        searchSummaries.push(`Query: ${query}\n${result.summary}`)
+        for (const suggestion of result.structuredPayload.suggestedSpans.slice(0, 2)) {
+          readSpansInputs.push({
+            path: suggestion.path,
+            startLine: suggestion.startLine,
+            endLine: suggestion.endLine
+          })
+        }
+      } catch (err) {
+        searchSummaries.push(`Query: ${query} (failed: ${err instanceof Error ? err.message : String(err)})`)
+      }
+    }
+    chunks.push('--- Search evidence ---')
+    chunks.push(searchSummaries.join('\n\n'))
+
+    try {
+      const capped = readSpansInputs.slice(0, 4)
+      if (capped.length > 0) {
+        const spans = await this.repoIntelligence.readSpans({
+          workspaceRoot,
+          items: capped
+        })
+        chunks.push('--- Read spans ---')
+        chunks.push(spans.summary)
+      }
+    } catch (err) {
+      chunks.push(`Read spans unavailable: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    try {
+      const dossier = await this.researchDossier.researchDossier({
+        workspaceRoot,
+        query: roughPrompt,
+        maxResults: 12
+      })
+      chunks.push('--- Research dossier ---')
+      chunks.push(dossier.summary)
+    } catch (err) {
+      chunks.push(`Research dossier unavailable: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    return chunks.join('\n')
   }
 
   async send(req: ChatRequest): Promise<void> {
@@ -673,30 +922,46 @@ export class ChatService {
     return `Workspace: ${folder}`
   }
 
-  private async agentOptimizerWorkspaceSummary(
-    workspaceRoot: string,
-    roughPrompt: string
-  ): Promise<string> {
-    try {
-      const overview = await this.repoIntelligence.repoOverview({
-        workspaceRoot,
-        focus: roughPrompt
-      })
-      return overview.summary
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      return [
-        `Workspace: ${workspaceRoot}`,
-        `Workspace overview unavailable: ${message}`,
-        `Focus: ${roughPrompt}`
-      ].join('\n')
-    }
-  }
-
   private customAgentSystemBlock(req: ChatRequest): string | null {
     const agent = req.agent
     if (!agent?.prompt.trim()) return null
+    const metadata: string[] = []
+    const addList = (label: string, values?: string[]) => {
+      if (!values?.length) return
+      metadata.push(`${label}:`)
+      metadata.push(...values.filter(Boolean).map((value) => `- ${value}`))
+    }
+    const addSection = (label: string, value?: string) => {
+      const clean = value?.trim()
+      if (clean) metadata.push(`${label}: ${clean}`)
+    }
+    const addBoolean = (label: string, value?: boolean) => {
+      if (typeof value === 'boolean') metadata.push(`${label}: ${value ? 'yes' : 'no'}`)
+    }
+
+    addSection('Goal', agent.goal)
+    addSection('Optimizer model', agent.optimizerModelId)
+    addSection('Runtime model', agent.runtimeModelId)
+    addSection('Task family', agent.taskFamily)
+    addBoolean('Workspace-bound', agent.workspaceBound)
+    addList('Preferred tools', agent.preferredTools)
+    addList('Disallowed tools', agent.disallowedTools)
+    addList('Known paths', agent.knownPaths)
+    addList('Known commands', agent.knownCommands)
+    addList('Workflow steps', agent.workflowSteps)
+    addList('Verification steps', agent.verificationSteps)
+    addList('Stop conditions', agent.stopConditions)
+    addList('Fallback rules', agent.fallbackRules)
+    addList('Assumptions', agent.assumptions)
+    addList('Test tasks', agent.testTasks)
+    addSection('Optimization summary', agent.optimizationSummary)
+    addList('Evidence notes', agent.evidenceNotes)
+    addList('Validation notes', agent.validationNotes)
+
+    const sections = metadata.length ? ['## Agent blueprint', ...metadata, '', ''] : []
+
     return [
+      ...sections,
       '## Selected Custom Agent',
       `Name: ${agent.name}`,
       '',
@@ -776,12 +1041,81 @@ export class ChatService {
     // collapses to the conversation profile (1 tool) and the model can only TALK about
     // the work it just promised. When the turn is a bare continuation, inherit the
     // previous user turn's profile so the approved action keeps its tools.
-    if (isBareContinuation(userText)) {
-      const prevUser = [...req.messages].slice(0, -1).reverse().find((m) => m.role === 'user')
-      const prevText = prevUser ? stripActivePagePreamble(prevUser.content) : ''
-      if (prevText) return selectAgentToolProfile(prevText)
+    const baseText = isBareContinuation(userText)
+      ? [...req.messages].slice(0, -1).reverse().find((m) => m.role === 'user')
+        ? stripActivePagePreamble([...req.messages].slice(0, -1).reverse().find((m) => m.role === 'user')!.content)
+        : userText
+      : userText
+    const profile = selectAgentToolProfile(baseText)
+    return this.applyAgentToolPolicy(req, profile)
+  }
+
+  private applyAgentToolPolicy(
+    req: ChatRequest,
+    baseProfile: ReturnType<typeof selectAgentToolProfile>
+  ): ReturnType<typeof selectAgentToolProfile> {
+    const agent = req.agent
+    if (!agent) return baseProfile
+
+    const requested = this.agentBlueprintToolConstraints(agent)
+    if (!requested) return baseProfile
+
+    const withPolicy = [...baseProfile.tools]
+    const used = new Set(withPolicy.map((tool) => tool.name))
+    const keepRequestTools = withPolicy.some((tool) => tool.name === 'request_tools')
+
+    for (const name of requested.toAdd) {
+      if (used.has(name)) continue
+      const tool = knownToolByName(name)
+      if (tool && !used.has(tool.name)) {
+        withPolicy.push(tool)
+        used.add(tool.name)
+      }
     }
-    return selectAgentToolProfile(userText)
+    if (requested.toRemove.length) {
+      for (let i = withPolicy.length - 1; i >= 0; i--) {
+        const tool = withPolicy[i]
+        if (tool && requested.toRemove.includes(tool.name) && tool.name !== 'request_tools') {
+          withPolicy.splice(i, 1)
+        }
+      }
+    }
+    if (!withPolicy.some((tool) => tool.name === 'request_tools') && keepRequestTools) {
+      const requestTools = knownToolByName('request_tools')
+      if (requestTools) withPolicy.push(requestTools)
+    }
+
+    return {
+      ...baseProfile,
+      tools: withPolicy
+    }
+  }
+
+  private agentBlueprintToolConstraints(agent: { preferredTools?: string[]; disallowedTools?: string[] }): {
+    toAdd: string[]
+    toRemove: string[]
+  } | null {
+    const toAdd: string[] = []
+    const toRemove: string[] = []
+
+    const normalize = (values?: string[]): string[] => {
+      const normalized = (values ?? [])
+        .map((value) => normalizeToolName(value))
+        .filter((name): name is string => Boolean(name))
+      return [...new Set(normalized)]
+    }
+    for (const value of normalize(agent.preferredTools)) {
+      if (knownToolByName(value)) {
+        toAdd.push(value)
+      }
+    }
+    for (const value of normalize(agent.disallowedTools)) {
+      if (knownToolByName(value)) {
+        toRemove.push(value)
+      }
+    }
+    if (!toAdd.length && !toRemove.length) return null
+    return { toAdd, toRemove }
   }
 
   private emitContractTrace(
@@ -958,29 +1292,99 @@ function normalizeMaxOutputTokens(value: number): number {
 
 interface ParsedAgentOptimizerResult {
   name?: string
+  goal?: string
+  optimizerModelId?: string
+  runtimeModelId?: string
+  taskFamily?: string
+  workspaceBound?: boolean
+  preferredTools?: string[]
+  disallowedTools?: string[]
+  knownPaths?: string[]
+  knownCommands?: string[]
+  workflowSteps?: string[]
+  verificationSteps?: string[]
+  stopConditions?: string[]
+  fallbackRules?: string[]
+  assumptions?: string[]
+  testTasks?: string[]
+  optimizationSummary?: string
+  evidenceNotes?: string[]
   prompt: string
   testTask?: string
   contextSummary?: string
   notes?: string[]
+  validationNotes?: string[]
+}
+
+function asStringArray(value: unknown, maxLength = 16): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const parsed = value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, maxLength)
+  return parsed.length ? parsed : undefined
 }
 
 function parseAgentOptimizerJson(raw: string): ParsedAgentOptimizerResult {
   const trimmed = raw.trim()
   const jsonText = extractJsonObject(trimmed)
-  const parsed = JSON.parse(jsonText) as Partial<ParsedAgentOptimizerResult>
+  const parsedJson = JSON.parse(jsonText) as unknown
+  if (!parsedJson || typeof parsedJson !== 'object' || Array.isArray(parsedJson)) {
+    throw new Error('Agent optimizer returned non-object JSON.')
+  }
+  const parsed: Partial<ParsedAgentOptimizerResult> = parsedJson
+  const validationNotes: string[] = []
+  if (!Array.isArray(parsed.notes)) {
+    validationNotes.push('notes omitted')
+  }
   if (typeof parsed.prompt !== 'string') {
     throw new Error('Agent optimizer returned JSON without a prompt.')
   }
+  if (!parsed.prompt.trim()) {
+    validationNotes.push('prompt was empty')
+  }
+  const testTask = typeof parsed.testTask === 'string' ? parsed.testTask.trim() : ''
+  if (!testTask) {
+    validationNotes.push('testTask was missing')
+  }
+  const normalizedPrompt = parsed.prompt.trim()
+  const optimizationSummary = typeof parsed.optimizationSummary === 'string' ? parsed.optimizationSummary.trim() : ''
+  if (!optimizationSummary) {
+    validationNotes.push('optimizationSummary was missing')
+  }
+  if (typeof parsed.workspaceBound !== 'undefined' && typeof parsed.workspaceBound !== 'boolean') {
+    validationNotes.push('workspaceBound was not boolean and was ignored')
+  }
+
   return {
     ...(typeof parsed.name === 'string' ? { name: parsed.name } : {}),
-    prompt: parsed.prompt,
-    ...(typeof parsed.testTask === 'string' ? { testTask: parsed.testTask } : {}),
-    ...(typeof parsed.contextSummary === 'string'
-      ? { contextSummary: parsed.contextSummary }
+    prompt: normalizedPrompt,
+    ...(typeof parsed.goal === 'string' ? { goal: parsed.goal } : {}),
+    ...(typeof parsed.optimizerModelId === 'string' ? { optimizerModelId: parsed.optimizerModelId } : {}),
+    ...(typeof parsed.runtimeModelId === 'string' ? { runtimeModelId: parsed.runtimeModelId } : {}),
+    ...(typeof parsed.taskFamily === 'string' ? { taskFamily: parsed.taskFamily } : {}),
+    ...(typeof parsed.workspaceBound === 'boolean' ? { workspaceBound: parsed.workspaceBound } : {}),
+    ...(asStringArray(parsed.preferredTools) ? { preferredTools: asStringArray(parsed.preferredTools) } : {}),
+    ...(asStringArray(parsed.disallowedTools) ? { disallowedTools: asStringArray(parsed.disallowedTools) } : {}),
+    ...(asStringArray(parsed.knownPaths, 20) ? { knownPaths: asStringArray(parsed.knownPaths, 20) } : {}),
+    ...(asStringArray(parsed.knownCommands, 16) ? { knownCommands: asStringArray(parsed.knownCommands, 16) } : {}),
+    ...(asStringArray(parsed.workflowSteps, 12) ? { workflowSteps: asStringArray(parsed.workflowSteps, 12) } : {}),
+    ...(asStringArray(parsed.verificationSteps, 12)
+      ? { verificationSteps: asStringArray(parsed.verificationSteps, 12) }
       : {}),
-    ...(Array.isArray(parsed.notes)
-      ? { notes: parsed.notes.filter((note): note is string => typeof note === 'string') }
-      : {})
+    ...(asStringArray(parsed.stopConditions, 12) ? { stopConditions: asStringArray(parsed.stopConditions, 12) } : {}),
+    ...(asStringArray(parsed.fallbackRules, 12) ? { fallbackRules: asStringArray(parsed.fallbackRules, 12) } : {}),
+    ...(asStringArray(parsed.assumptions, 16) ? { assumptions: asStringArray(parsed.assumptions, 16) } : {}),
+    ...(asStringArray(parsed.testTasks, 12) ? { testTasks: asStringArray(parsed.testTasks, 12) } : {}),
+    ...(optimizationSummary ? { optimizationSummary } : {}),
+    ...(asStringArray(parsed.evidenceNotes, 24) ? { evidenceNotes: asStringArray(parsed.evidenceNotes, 24) } : {}),
+    ...(testTask ? { testTask } : {}),
+    ...(typeof parsed.contextSummary === 'string'
+      ? { contextSummary: parsed.contextSummary.trim() }
+      : {}),
+    ...(asStringArray(parsed.notes, 8) ? { notes: asStringArray(parsed.notes, 8) } : {}),
+    ...(validationNotes.length ? { validationNotes } : {})
   }
 }
 

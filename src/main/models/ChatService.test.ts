@@ -36,6 +36,14 @@ import { CODEX_SYSTEM, buildAgentSystem } from './prompts'
 import { createTurnSupervisor } from './turnSupervisor'
 import { resolveTurnContextPolicy } from './turnContextPolicy'
 
+const BASE_KEYS_STATUS = {
+  anthropic: false,
+  google: false,
+  codex: false,
+  openai: false,
+  grok: false
+}
+
 function makeService(workspaceRoot: string | null = null) {
   const emit = vi.fn()
   const tools = {
@@ -52,6 +60,38 @@ function makeService(workspaceRoot: string | null = null) {
     audit,
     service: new ChatService({} as any, emit, tools, audit, {} as any)
   }
+}
+
+function makeServiceForOptimizer(
+  keyStatus: Partial<typeof BASE_KEYS_STATUS> = {},
+  codexStatus: { installed: boolean; authenticated: boolean } = { installed: false, authenticated: false }
+) {
+  const emit = vi.fn()
+  const tools = {
+    getWorkspaceRoot: () => null,
+    setCapabilityBroker: vi.fn()
+  } as any
+  const audit = { begin: vi.fn(() => ({ addOutput: vi.fn(), finish: vi.fn() })) } as any
+  const service = new ChatService(
+    {
+      status: () => ({
+        ...BASE_KEYS_STATUS,
+        ...keyStatus
+      })
+    } as any,
+    emit,
+    tools,
+    audit,
+    {} as any
+  )
+  vi.spyOn(service, 'codexStatus').mockResolvedValue({
+    installed: codexStatus.installed,
+    authenticated: codexStatus.authenticated,
+    authMethod: null,
+    version: null,
+    detail: null
+  })
+  return { emit, tools, audit, service }
 }
 
 function makeSupervisorHarness(req: {
@@ -71,6 +111,136 @@ describe('ChatService provider hardening', () => {
     expect(toolNames).not.toContain('search_task')
     expect(toolNames).not.toContain('search_web')
     expect(toolNames).not.toContain('check_page')
+  })
+
+  it('uses the preferred model when it is provider-usable for optimization', async () => {
+    const { service } = makeServiceForOptimizer({
+      openai: true
+    })
+    const model = await (service as any).resolveOptimizerModel('openai-gpt-4o-mini', 'deep')
+    expect(model.id).toBe('openai-gpt-4o-mini')
+  })
+
+  it('normalizes optimizer JSON and emits validation notes for missing fields', async () => {
+    const { service } = makeServiceForOptimizer({
+      openai: true
+    })
+    vi.spyOn(service as any, 'complete').mockResolvedValue(
+      JSON.stringify({
+        prompt: 'Use the task family and avoid touching unrelated code.',
+        testTask: '',
+        optimizationSummary: '',
+        workspaceBound: 'yes',
+        preferredTools: ['read_file', ' run_command ', 'unknown-tool'],
+        disallowedTools: ['search_repo', 123],
+        knownPaths: ['src/main', ''],
+        knownCommands: ['pnpm test'],
+        workflowSteps: ['Inspect workspace', 'Apply smallest change'],
+        testTasks: ['Run lint', 'Run tests'],
+        evidenceNotes: ['From repo overview']
+      })
+    )
+
+    const result = await (service as any).optimizeAgent({
+      modelId: 'openai-gpt-4o-mini',
+      roughPrompt: 'Fix build failures',
+      optimizationMode: 'quick'
+    })
+
+    expect(result.prompt).toBe('Use the task family and avoid touching unrelated code.')
+    expect(result.testTask).toBe('Use this agent to complete: Fix build failures')
+    expect(result.testTask).toBeTruthy()
+    expect(result.optimizationSummary).toBeUndefined()
+    expect(result.workspaceBound).toBeUndefined()
+    expect(result.preferredTools).toEqual(['read_file', 'run_command', 'unknown-tool'])
+    expect(result.disallowedTools).toEqual(['search_repo'])
+    expect(result.knownPaths).toEqual(['src/main'])
+    expect(result.validationNotes).toEqual(
+      expect.arrayContaining(['testTask was missing', 'optimizationSummary was missing', 'notes omitted'])
+    )
+    expect(result.validationNotes?.some((note: string) => note.includes('workspaceBound'))).toBe(true)
+  })
+
+  it('falls through with a clear error when optimizer output is non-object JSON', async () => {
+    const { service } = makeServiceForOptimizer({
+      openai: true
+    })
+    vi.spyOn(service as any, 'complete').mockResolvedValue('[1,2,3]')
+
+    await expect(
+      (service as any).optimizeAgent({
+        modelId: 'openai-gpt-4o-mini',
+        roughPrompt: 'Fix build failures',
+        optimizationMode: 'quick'
+      })
+    ).rejects.toThrow('non-object JSON.')
+  })
+
+  it('applies saved preferred/disallowed tool constraints to the active profile', () => {
+    const { service } = makeService()
+    const baseProfile = selectAgentToolProfile('read src/main/models/ChatService.ts and suggest fixes')
+    const constrained = (service as any).applyAgentToolPolicy(
+      {
+        agent: {
+          preferredTools: ['read_page', 'run_command'],
+          disallowedTools: ['run_validation']
+        }
+      },
+      baseProfile
+    )
+    const names = constrained.tools.map((tool: { name: string }) => tool.name)
+
+    expect(names).toContain('read_page')
+    expect(names).not.toContain('run_validation')
+  })
+
+  it('falls back to ranked optimizer models when preferred model is unavailable', async () => {
+    const { service } = makeServiceForOptimizer({
+      openai: true
+    })
+    const model = await (service as any).resolveOptimizerModel('nonexistent-model-id', 'quick')
+    expect(model.id).toBe('openai-gpt-4o-mini')
+  })
+
+  it('uses deep-mode ranking order when preferred model is unavailable', async () => {
+    const { service } = makeServiceForOptimizer({
+      anthropic: true
+    })
+    const model = await (service as any).resolveOptimizerModel('nonexistent-model-id', 'deep')
+    expect(model.id).toBe('claude-opus-4-8')
+  })
+
+  it('respects codex auth before selecting codex optimizer models', async () => {
+    const unauthenticated = makeServiceForOptimizer(
+      {
+        openai: true,
+        google: true,
+        codex: false
+      },
+      { installed: true, authenticated: false }
+    )
+    const unauthenticatedModel = await (unauthenticated.service as any).resolveOptimizerModel('gpt-5.3-codex', 'quick')
+    expect(unauthenticatedModel.id).toBe('openai-gpt-4o-mini')
+
+    const authenticated = makeServiceForOptimizer(
+      {
+        openai: false,
+        google: false,
+        anthropic: false,
+        codex: false,
+        grok: false
+      },
+      { installed: true, authenticated: true }
+    )
+    const model = await (authenticated.service as any).resolveOptimizerModel('gpt-5.3-codex', 'quick')
+    expect(model.id).toBe('gpt-5.3-codex')
+  })
+
+  it('throws when no optimizer model is usable', async () => {
+    const { service } = makeServiceForOptimizer({}, { installed: false, authenticated: false })
+    await expect(
+      (service as any).resolveOptimizerModel('nonexistent-model-id', 'quick')
+    ).rejects.toThrow('No usable optimizer model available')
   })
 
   it('gives all three providers ONE browser surface (Codex sees the same tools)', () => {

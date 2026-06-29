@@ -5,6 +5,7 @@ import type {
   AgentMessageDeltaParams,
   ErrorParams,
   ItemLifecycleParams,
+  JsonValue,
   ServerNotification,
   ServerRequest,
   ThreadItem,
@@ -100,7 +101,13 @@ export function routeNotification(msg: ServerNotification, ctx: NotificationCont
     }
     case 'error': {
       const p = params as ErrorParams
-      turn.error = new Error(p.message || 'Codex error')
+      // The app-server sometimes sends an error notification with no top-level
+      // `message`, only structured fields (code/type/data). Collapsing that to a
+      // bare "Codex error" throws away the real cause, so fall back to whatever
+      // detail the payload carries and always log the raw params for recovery.
+      const detail = codexErrorDetail(p)
+      console.error('[codex] error notification:', JSON.stringify(p))
+      turn.error = new Error(detail)
       if (!turn.aborted && !turn.silent) {
         ctx.emit({
           requestId: turn.requestId,
@@ -114,6 +121,27 @@ export function routeNotification(msg: ServerNotification, ctx: NotificationCont
     default:
       break // ignore the many notifications gladdis doesn't surface
   }
+}
+
+/**
+ * Best human-readable detail from a Codex error notification. Prefers an
+ * explicit message, then common alternate fields, then a compact dump of the
+ * remaining payload — anything but a bare "Codex error" that hides the cause.
+ */
+function codexErrorDetail(p: ErrorParams): string {
+  const direct = firstString(p.message, p.error, p.reason, p.detail, p.description)
+  if (direct) return direct
+  const code = firstString(p.code, p.type)
+  const rest = JSON.stringify(p)
+  if (code) return rest !== '{}' ? `Codex error (${code}): ${rest}` : `Codex error (${code})`
+  return rest !== '{}' ? `Codex error: ${rest}` : 'Codex error'
+}
+
+function firstString(...values: Array<JsonValue | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return null
 }
 
 /** A new ThreadItem began — surface tool-like ones as a running tool chip. */

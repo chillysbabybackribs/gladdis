@@ -165,7 +165,11 @@ export function ChatPanel({
       if (agents.length > 0) persistAgent(null)
       return
     }
-    if (modelIdRef.current !== agent.modelId) persistModel(agent.modelId)
+    const preferredModel = agent.runtimeModelId || agent.modelId
+    if (modelIdRef.current !== preferredModel) persistModel(preferredModel)
+    if (!models.some((model) => model.id === preferredModel) && models.some((model) => model.id === agent.modelId)) {
+      persistModel(agent.modelId)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId, agents])
 
@@ -326,9 +330,7 @@ export function ChatPanel({
       tabId,
       conversationId: convId,
       contextHints: { activePageFollowup },
-      agent: selectedAgent
-        ? { id: selectedAgent.id, name: selectedAgent.name, prompt: selectedAgent.prompt }
-        : undefined
+      agent: selectedAgent ?? undefined
     })
   }
 

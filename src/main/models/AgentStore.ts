@@ -41,12 +41,43 @@ export class AgentStore {
 
   async save(input: SaveAgentInput): Promise<SavedAgent> {
     const now = Date.now()
+    const normalizeString = (value?: string) => {
+      if (!value) return undefined
+      const next = value.trim()
+      return next.length ? next : undefined
+    }
+    const normalizeStringArray = (values?: string[]) => {
+      if (!Array.isArray(values)) return undefined
+      const out = values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter(Boolean)
+      return out.length ? out : undefined
+    }
     const existing = input.id ? this.agents.get(input.id) : null
     const agent: SavedAgent = {
       id: existing?.id ?? input.id ?? randomUUID(),
       name: input.name.trim(),
       modelId: input.modelId.trim(),
       prompt: input.prompt.trim(),
+      goal: normalizeString(input.goal),
+      optimizerModelId: normalizeString(input.optimizerModelId),
+      runtimeModelId: normalizeString(input.runtimeModelId),
+      taskFamily: normalizeString(input.taskFamily),
+      workspaceBound: input.workspaceBound,
+      preferredTools: normalizeStringArray(input.preferredTools),
+      disallowedTools: normalizeStringArray(input.disallowedTools),
+      knownPaths: normalizeStringArray(input.knownPaths),
+      knownCommands: normalizeStringArray(input.knownCommands),
+      workflowSteps: normalizeStringArray(input.workflowSteps),
+      verificationSteps: normalizeStringArray(input.verificationSteps),
+      stopConditions: normalizeStringArray(input.stopConditions),
+      fallbackRules: normalizeStringArray(input.fallbackRules),
+      assumptions: normalizeStringArray(input.assumptions),
+      testTasks: normalizeStringArray(input.testTasks),
+      optimizationSummary: normalizeString(input.optimizationSummary),
+      evidenceNotes: normalizeStringArray(input.evidenceNotes),
+      validationNotes: normalizeStringArray(input.validationNotes),
       roughPrompt: input.roughPrompt?.trim() || undefined,
       testTask: input.testTask?.trim() || undefined,
       createdAt: existing?.createdAt ?? now,

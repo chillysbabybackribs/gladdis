@@ -118,7 +118,12 @@ export interface GladdisApi {
   agents: {
     /** Saved custom agents, newest-updated first. */
     list: () => Promise<SavedAgent[]>
-    /** Turn a rough agent goal into an expert, task-specific agent prompt. */
+    /**
+     * Turn a rough agent goal into a reusable agent blueprint for execution.
+     *
+     * Supports optional quick and deep optimization modes; deep mode performs
+     * richer workspace discovery before distillation.
+     */
     optimize: (input: OptimizeAgentInput) => Promise<OptimizeAgentResult>
     /** Create or update a saved custom agent. */
     save: (input: SaveAgentInput) => Promise<SavedAgent>

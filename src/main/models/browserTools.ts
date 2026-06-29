@@ -20,6 +20,12 @@ import {
 } from './tools/driveTools'
 import { runReadClipboard, runWriteClipboard } from './tools/clipboardTools'
 import {
+  instrumentMemoryTool,
+  memoryListHitCount,
+  memoryReadHitCount,
+  recallHistoryHitCount
+} from './memory/memoryUsageLog'
+import {
   runEditFile,
   runListDir,
   runReadFile,
@@ -362,36 +368,111 @@ export class BrowserTools {
         // ── Tool escalation + memory ────────────────────────────────────────
         case 'request_tools':
           return runRequestTools(args, ctx)
-        case 'recall_history':
-          return runRecallHistory(this.historyDeps(), args, ctx)
+        case 'recall_history': {
+          const root = this.resolveMemoryWorkspaceRoot(ctx)
+          // recall_history can run without a workspace (it reads ChatStore),
+          // but logging requires one. When absent we just skip the log and
+          // dispatch normally — telemetry never blocks behaviour.
+          if (!root) return runRecallHistory(this.historyDeps(), args, ctx)
+          return instrumentMemoryTool(
+            'recall_history',
+            {
+              workspaceRoot: root,
+              conversationId: ctx.conversationId ?? null,
+              tabId: ctx.tabId ?? null,
+              scope: typeof args.scope === 'string' ? args.scope : 'conversation',
+              query: typeof args.query === 'string' ? args.query : undefined
+            },
+            async () => runRecallHistory(this.historyDeps(), args, ctx),
+            (out) => recallHistoryHitCount(out.text)
+          )
+        }
 
         case 'memory_write': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
           if (!root) return { ok: false, text: 'memory_write requires a workspace folder. Open one and retry.' }
-          return (await import('./memoryStore')).memoryWrite(
-            { ...args, conversationId: args.conversationId ?? ctx.conversationId ?? undefined },
-            root
+          return instrumentMemoryTool(
+            'memory_write',
+            {
+              workspaceRoot: root,
+              conversationId: ctx.conversationId ?? null,
+              tabId: ctx.tabId ?? null,
+              scope: typeof args.scope === 'string' ? args.scope : undefined,
+              taskId: typeof args.task_id === 'string' ? args.task_id : null,
+              keys: typeof args.key === 'string' ? [args.key] : undefined
+            },
+            async () =>
+              (await import('./memoryStore')).memoryWrite(
+                { ...args, conversationId: args.conversationId ?? ctx.conversationId ?? undefined },
+                root
+              ),
+            () => 1
           )
         }
         case 'memory_read': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
           if (!root) return { ok: false, text: 'memory_read requires a workspace folder. Open one and retry.' }
-          return (await import('./memoryStore')).memoryRead(args, root)
+          return instrumentMemoryTool(
+            'memory_read',
+            {
+              workspaceRoot: root,
+              conversationId: ctx.conversationId ?? null,
+              tabId: ctx.tabId ?? null,
+              scope: typeof args.scope === 'string' ? args.scope : undefined,
+              taskId: typeof args.task_id === 'string' ? args.task_id : null,
+              keys: Array.isArray(args.keys) ? args.keys.filter((k: unknown) => typeof k === 'string') : undefined
+            },
+            async () => (await import('./memoryStore')).memoryRead(args, root),
+            (out) => memoryReadHitCount(out.text)
+          )
         }
         case 'memory_list': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
           if (!root) return { ok: false, text: 'memory_list requires a workspace folder. Open one and retry.' }
-          return (await import('./memoryStore')).memoryList(args, root)
+          return instrumentMemoryTool(
+            'memory_list',
+            {
+              workspaceRoot: root,
+              conversationId: ctx.conversationId ?? null,
+              tabId: ctx.tabId ?? null,
+              scope: typeof args.scope === 'string' ? args.scope : undefined,
+              taskId: typeof args.task_id === 'string' ? args.task_id : null
+            },
+            async () => (await import('./memoryStore')).memoryList(args, root),
+            (out) => memoryListHitCount(out.text)
+          )
         }
         case 'memory_forget': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
           if (!root) return { ok: false, text: 'memory_forget requires a workspace folder. Open one and retry.' }
-          return (await import('./memoryStore')).memoryForget(args, root)
+          return instrumentMemoryTool(
+            'memory_forget',
+            {
+              workspaceRoot: root,
+              conversationId: ctx.conversationId ?? null,
+              tabId: ctx.tabId ?? null,
+              scope: typeof args.scope === 'string' ? args.scope : undefined,
+              taskId: typeof args.task_id === 'string' ? args.task_id : null,
+              keys: Array.isArray(args.keys) ? args.keys.filter((k: unknown) => typeof k === 'string') : undefined
+            },
+            async () => (await import('./memoryStore')).memoryForget(args, root),
+            () => 1
+          )
         }
         case 'memory_create_task': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
           if (!root) return { ok: false, text: 'memory_create_task requires a workspace folder. Open one and retry.' }
-          return (await import('./memoryStore')).memoryCreateTask(args, root)
+          return instrumentMemoryTool(
+            'memory_create_task',
+            {
+              workspaceRoot: root,
+              conversationId: ctx.conversationId ?? null,
+              tabId: ctx.tabId ?? null,
+              scope: 'task'
+            },
+            async () => (await import('./memoryStore')).memoryCreateTask(args, root),
+            () => 1
+          )
         }
 
         default:

@@ -36,7 +36,6 @@ const CHEAPEST_ORDER: readonly string[] = [
   // Gemini Flash family
   'gemini-3.1-flash-lite',
   'gemini-2.5-flash-lite',
-  'gemini-3-flash-preview',
   'gemini-3.5-flash',
   'gemini-2.5-flash',
   // Grok cheap
@@ -45,6 +44,7 @@ const CHEAPEST_ORDER: readonly string[] = [
   'claude-haiku-4-5',
   'claude-sonnet-4-6',
   // High end as last resort
+  'gemini-3.1-pro-preview',
   'gemini-2.5-pro',
   'openai-gpt-5.4',
   'openai-gpt-5.5',
@@ -57,7 +57,6 @@ const BEST_ORDER: readonly string[] = [
   'openai-gpt-5.5',
   'gemini-3.1-pro-preview',
   'gemini-3.5-flash',
-  'gemini-3-flash-preview',
   'gemini-2.5-pro',
   'openai-gpt-5.4-pro',
   'claude-sonnet-4-6',

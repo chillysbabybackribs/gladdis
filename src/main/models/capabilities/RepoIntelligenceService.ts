@@ -167,6 +167,7 @@ export class RepoIntelligenceService {
 
   async searchRepo(input: SearchRepoInput): Promise<SearchRepoResult> {
     const workspaceRoot = path.resolve(input.workspaceRoot)
+    this.index.queueRefresh(workspaceRoot)
     this.files.setRoot(workspaceRoot)
     const searchPath = typeof input.path === 'string' && input.path.trim() ? input.path.trim() : '.'
     const maxResults = Math.min(20, Math.max(1, input.maxResults ?? 8))
@@ -302,8 +303,10 @@ export class RepoIntelligenceService {
   }
 
   async relatedSpans(input: RelatedSpanInput): Promise<ReadSpanInput[]> {
+    const workspaceRoot = path.resolve(input.workspaceRoot)
+    this.index.queueRefresh(workspaceRoot)
     const related = await this.index.relatedFiles({
-      workspaceRoot: input.workspaceRoot,
+      workspaceRoot,
       paths: input.paths,
       query: input.query,
       maxResults: input.maxResults

@@ -73,6 +73,8 @@ const INDEX_DIR = path.join('.gladdis', 'repo-intel')
 const INDEX_FILE = 'index-v1.json'
 const MAX_INDEXED_FILE_BYTES = 512 * 1024
 const MAX_FILES_PER_BUILD = 5000
+const BACKGROUND_REFRESH_DEBOUNCE_MS = 500
+const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 15_000
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'])
 const IGNORE_DIRS = new Set([
   '.git',
@@ -89,6 +91,8 @@ const IGNORE_DIRS = new Set([
 interface WorkspaceState {
   snapshot?: RepoIndexSnapshot
   warmPromise?: Promise<void>
+  queuedRefresh?: ReturnType<typeof setTimeout>
+  lastRefreshCompletedAt?: number
 }
 
 export class RepoIndexService {
@@ -98,9 +102,14 @@ export class RepoIndexService {
     const root = path.resolve(workspaceRoot)
     const state = this.stateFor(root)
     if (state.warmPromise) return
+    if (state.queuedRefresh) {
+      clearTimeout(state.queuedRefresh)
+      state.queuedRefresh = undefined
+    }
     state.warmPromise = this.rebuild(root)
       .then((snapshot) => {
         state.snapshot = snapshot
+        state.lastRefreshCompletedAt = Date.now()
       })
       .catch((err) => {
         console.warn('[repo-index] warm failed:', err)
@@ -110,10 +119,30 @@ export class RepoIndexService {
       })
   }
 
+  queueRefresh(workspaceRoot: string, debounceMs = BACKGROUND_REFRESH_DEBOUNCE_MS): void {
+    const root = path.resolve(workspaceRoot)
+    const state = this.stateFor(root)
+    const now = Date.now()
+    if (state.warmPromise || state.queuedRefresh) return
+    if (state.lastRefreshCompletedAt && now - state.lastRefreshCompletedAt < BACKGROUND_REFRESH_MIN_INTERVAL_MS) return
+
+    state.queuedRefresh = setTimeout(() => {
+      state.queuedRefresh = undefined
+      this.warm(root)
+    }, Math.max(0, debounceMs))
+    state.queuedRefresh.unref?.()
+  }
+
   async refresh(workspaceRoot: string): Promise<RepoIndexSnapshot> {
     const root = path.resolve(workspaceRoot)
+    const state = this.stateFor(root)
+    if (state.queuedRefresh) {
+      clearTimeout(state.queuedRefresh)
+      state.queuedRefresh = undefined
+    }
     const snapshot = await this.rebuild(root)
-    this.stateFor(root).snapshot = snapshot
+    state.snapshot = snapshot
+    state.lastRefreshCompletedAt = Date.now()
     return snapshot
   }
 
@@ -273,7 +302,7 @@ export class RepoIndexService {
     const persisted = await this.readPersisted(workspaceRoot)
     if (persisted) {
       state.snapshot = persisted
-      this.warm(workspaceRoot)
+      this.queueRefresh(workspaceRoot)
       return persisted
     }
     return null

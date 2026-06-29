@@ -69,6 +69,33 @@ describe('RepoIntelligenceService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 
+  it('quietly warms the repo index behind normal searches', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-search-warms-index-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(path.join(workspace, 'src', 'alpha.ts'), 'export function quietWarmTarget() { return true }\n')
+
+    const service = new RepoIntelligenceService()
+    const result = await service.searchRepo({
+      workspaceRoot: workspace,
+      query: 'quietWarmTarget',
+      maxResults: 5
+    })
+
+    expect(result.structuredPayload.hits).toEqual([
+      expect.objectContaining({ path: 'src/alpha.ts' })
+    ])
+
+    const persisted = await waitForPersistedIndex(workspace)
+    expect(persisted.files).toEqual([
+      expect.objectContaining({
+        path: 'src/alpha.ts',
+        symbols: [expect.objectContaining({ name: 'quietWarmTarget', kind: 'function' })]
+      })
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
   it('uses a warm local repo index for symbol-oriented search hits', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-indexed-search-'))
     await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
@@ -206,3 +233,18 @@ describe('RepoIntelligenceService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 })
+
+async function waitForPersistedIndex(
+  workspaceRoot: string
+): Promise<{ files: Array<{ path: string; symbols: Array<{ name: string; kind: string }> }> }> {
+  const indexPath = path.join(workspaceRoot, '.gladdis', 'repo-intel', 'index-v1.json')
+  const deadline = Date.now() + 2_000
+  while (Date.now() < deadline) {
+    try {
+      return JSON.parse(await fs.readFile(indexPath, 'utf8'))
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+  }
+  throw new Error(`Timed out waiting for ${indexPath}`)
+}

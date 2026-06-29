@@ -12,7 +12,9 @@ export const IPC = {
   TAB_RELOAD: 'tab:reload',
   TAB_REORDER: 'tab:reorder',
   TAB_LIST: 'tab:list',
+  APP_COMMAND: 'app:command',
   LAYOUT_SET_BOUNDS: 'layout:setBounds',
+  LAYOUT_SET_BROWSER_VISIBLE: 'layout:setBrowserVisible',
   CDP_SEND: 'cdp:send',
   CHAT_SEND: 'chat:send',
   CHAT_ABORT: 'chat:abort',
@@ -23,7 +25,11 @@ export const IPC = {
   WORKSPACE_GET: 'workspace:get',
   WORKSPACE_SET_FOLDER: 'workspace:setFolder',
   WORKSPACE_PICK_FOLDER: 'workspace:pickFolder',
+  WORKSPACE_CREATE_FOLDER: 'workspace:createFolder',
   AUDIT_LIST: 'audit:list',
+  AGENTS_LIST: 'agents:list',
+  AGENTS_SAVE: 'agents:save',
+  AGENTS_DELETE: 'agents:delete',
   CHATS_LIST: 'chats:list',
   CHATS_GET: 'chats:get',
   CHATS_SAVE: 'chats:save',
@@ -43,6 +49,14 @@ export const IPC = {
   DREAM_STATUS: 'dream:status',
   /** main → renderer push: stage-by-stage progress while a dream runs. */
   DREAM_PROGRESS: 'dream:progress',
+  // Auto Dream scheduler — Anthropic-calibrated 24h + 5-session dual gate
+  DREAM_AUTO_GET_CONFIG: 'dream:auto:getConfig',
+  DREAM_AUTO_SET_CONFIG: 'dream:auto:setConfig',
+  DREAM_AUTO_STATUS: 'dream:auto:status',
+  DREAM_AUTO_NUDGE: 'dream:auto:nudge', // renderer-side signal: user message just sent
+  DREAM_HISTORY_LIST: 'dream:history:list',
+  /** main → renderer push: one-shot when an auto-dream completes. */
+  DREAM_AUTO_NOTIFICATION: 'dream:auto:notification',
   /** Text-to-speech: renderer sends text, main returns synthesized audio. */
   TTS_SPEAK: 'tts:speak',
   // Real-PTY terminal (xterm.js <-> @lydell/node-pty in main)
@@ -53,8 +67,10 @@ export const IPC = {
   TERMINAL_SET_CWD: 'terminal:setCwd',
   // main -> renderer (send)
   TABS_UPDATED: 'tabs:updated',
+  WORKSPACE_UPDATED: 'workspace:updated',
   CDP_EVENT: 'cdp:event',
   CHAT_STREAM: 'chat:stream',
+  AGENTS_UPDATED: 'agents:updated',
   AUDIT_EVENT: 'audit:event',
   TERMINAL_DATA: 'terminal:data',
   TERMINAL_EXIT: 'terminal:exit'

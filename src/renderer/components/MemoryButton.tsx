@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {
+  DreamAdoptSelection,
+  DreamAutoConfig,
+  DreamAutoNotification,
+  DreamAutoStatus,
   DreamDiff,
+  DreamHistoryEntry,
   DreamPreferenceOrder,
   DreamProgressEvent,
   DreamScope,
@@ -10,6 +15,8 @@ import type {
 } from '../../../shared/types'
 import { DREAM_SCOPES } from '../../../shared/types'
 import { DreamDiffModal } from './DreamDiff'
+import { DreamHistoryModal } from './DreamHistory'
+import { AutoDreamSettingsModal } from './AutoDreamSettings'
 
 interface Props {
   workspace: Workspace
@@ -42,6 +49,8 @@ const DEFAULT_PREFERENCE: DreamPreferenceOrder = 'cheapest'
 
 const SCOPE_STORAGE_KEY = 'gladdis:dream:scope'
 const PREFERENCE_STORAGE_KEY = 'gladdis:dream:preferenceOrder'
+const ADOPTED_MODAL_CLOSE_MS = 2200
+const TOAST_DURATION_MS = 6000
 
 function readScopePref(): DreamScope {
   try {
@@ -80,13 +89,44 @@ export function MemoryButton({ workspace }: Props) {
   const [stageDetail, setStageDetail] = useState<string | null>(null)
   const [diff, setDiff] = useState<DreamDiff | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
   const [modalBusy, setModalBusy] = useState<'adopting' | 'discarding' | null>(null)
   const [scope, setScope] = useState<DreamScope>(() => readScopePref())
   const [preference, setPreference] = useState<DreamPreferenceOrder>(() => readPreferencePref())
+  // Auto-dream surface: enabled flag drives the menu toggle; awaitingReview
+  // drives the badge dot; lastDreamAt drives the "X hours ago" hint; toast
+  // is the most-recent auto-dream completion notification (timed dismissal).
+  const [autoConfig, setAutoConfig] = useState<DreamAutoConfig | null>(null)
+  const [autoStatus, setAutoStatus] = useState<DreamAutoStatus | null>(null)
+  const [awaitingReview, setAwaitingReview] = useState(false)
+  const [toast, setToast] = useState<DreamAutoNotification | null>(null)
+  // Dream history modal: separate piece of UI state so it doesn't conflict
+  // with the diff modal. Both are portaled into the chat panel.
+  const [history, setHistory] = useState<DreamHistoryEntry[] | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const activeRunIdRef = useRef<string | null>(null)
+  const adoptedCloseTimerRef = useRef<number | null>(null)
+  const toastTimerRef = useRef<number | null>(null)
 
   const folder = workspace.folder
+
+  const clearAdoptedCloseTimer = () => {
+    if (adoptedCloseTimerRef.current === null) return
+    window.clearTimeout(adoptedCloseTimerRef.current)
+    adoptedCloseTimerRef.current = null
+  }
+
+  const clearToastTimer = () => {
+    if (toastTimerRef.current === null) return
+    window.clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = null
+  }
+
+  useEffect(() => () => {
+    clearAdoptedCloseTimer()
+    clearToastTimer()
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -96,6 +136,60 @@ export function MemoryButton({ workspace }: Props) {
     window.addEventListener('mousedown', onAway)
     return () => window.removeEventListener('mousedown', onAway)
   }, [open])
+
+  // Load (or reload) auto-dream config + status + awaiting-review state when
+  // the workspace folder changes. Calling getConfig is a no-op on the main
+  // side if the scheduler hasn't seen this folder yet — it lazy-starts.
+  useEffect(() => {
+    if (!folder) {
+      setAutoConfig(null)
+      setAutoStatus(null)
+      setAwaitingReview(false)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        const [cfg, st, last] = await Promise.all([
+          window.gladdis.dream.auto.getConfig(folder),
+          window.gladdis.dream.auto.status(folder),
+          window.gladdis.dream.loadLast(folder)
+        ])
+        if (cancelled) return
+        setAutoConfig(cfg)
+        setAutoStatus(st)
+        setAwaitingReview(!!last && last.awaitingAdopt !== false)
+      } catch {
+        /* renderer-side; silent failure keeps the rest of the chat usable */
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [folder])
+
+  // Subscribe to auto-dream completion notifications. We show a brief toast
+  // and update the badge / status when the scheduler fires. Subscriptions
+  // live for the component's lifetime; toasts auto-dismiss after a few seconds.
+  useEffect(() => {
+    const off = window.gladdis.dream.auto.onNotification((event) => {
+      if (folder && event.workspaceRoot !== folder) return
+      setToast(event)
+      clearToastTimer()
+      toastTimerRef.current = window.setTimeout(() => {
+        setToast(null)
+        toastTimerRef.current = null
+      }, TOAST_DURATION_MS)
+      // Refresh status + awaitingReview so the menu and badge reflect reality
+      // without the user having to reopen the workspace.
+      if (folder) {
+        void window.gladdis.dream.auto.status(folder).then((st) => setAutoStatus(st)).catch(() => {})
+        if (event.awaitingReview) setAwaitingReview(true)
+        if (event.autoAdopted) setAwaitingReview(false)
+      }
+    })
+    return off
+  }, [folder])
 
   // Subscribe to dream progress for the lifetime of the component.
   useEffect(() => {
@@ -142,10 +236,12 @@ export function MemoryButton({ workspace }: Props) {
 
   const runDream = async (chosenScope: DreamScope) => {
     if (!folder || running) return
+    clearAdoptedCloseTimer()
     persistScope(chosenScope)
     setOpen(false)
     setRunning(true)
     setError(null)
+    setSuccess(null)
     setStage('sampling')
     setStageDetail(null)
     try {
@@ -172,23 +268,76 @@ export function MemoryButton({ workspace }: Props) {
 
   const reviewLast = async () => {
     if (!folder) return
+    clearAdoptedCloseTimer()
     setOpen(false)
+    setSuccess(null)
     const last = await window.gladdis.dream.loadLast(folder)
-    if (last) setDiff(last)
-    else setError('No previous dream to review.')
+    if (last) {
+      setDiff(last)
+      // Opening the diff counts as "seen"; the badge stays only until the
+      // user makes a real decision (adopt/discard) so partial reviews don't
+      // accidentally clear it forever.
+    } else {
+      setError('No previous dream to review.')
+      setAwaitingReview(false)
+    }
   }
 
-  const adopt = async () => {
+  const openSettings = () => {
+    if (!folder) return
+    setOpen(false)
+    setSettingsOpen(true)
+  }
+
+  const openHistory = async () => {
+    if (!folder) return
+    setOpen(false)
+    try {
+      const file = await window.gladdis.dream.history.list(folder)
+      setHistory(file.entries)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const openLatestDiffFromHistory = async () => {
+    if (!folder) return
+    setHistory(null)
+    await reviewLast()
+  }
+
+  const toggleAutoEnabled = async (next: boolean) => {
+    if (!folder) return
+    try {
+      const updated = await window.gladdis.dream.auto.setConfig(folder, { enabled: next })
+      setAutoConfig(updated)
+      const st = await window.gladdis.dream.auto.status(folder)
+      setAutoStatus(st)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const adopt = async (selection?: DreamAdoptSelection) => {
     if (!folder || !diff) return
     setModalBusy('adopting')
     setError(null)
+    setSuccess(null)
     try {
-      const result = await window.gladdis.dream.adopt(folder)
+      const result = await window.gladdis.dream.adopt(folder, selection)
       if (!result.ok) {
         setError(result.error ?? 'Adopt failed.')
         return
       }
       setDiff({ ...diff, awaitingAdopt: false })
+      setOpen(false)
+      setSuccess(selection ? 'Memory partially adopted.' : 'Memory adopted.')
+      setAwaitingReview(false)
+      clearAdoptedCloseTimer()
+      adoptedCloseTimerRef.current = window.setTimeout(() => {
+        setDiff(null)
+        adoptedCloseTimerRef.current = null
+      }, ADOPTED_MODAL_CLOSE_MS)
     } finally {
       setModalBusy(null)
     }
@@ -196,11 +345,13 @@ export function MemoryButton({ workspace }: Props) {
 
   const discard = async () => {
     if (!folder || !diff) return
+    clearAdoptedCloseTimer()
     setModalBusy('discarding')
     setError(null)
     try {
       await window.gladdis.dream.discard(folder)
       setDiff(null)
+      setAwaitingReview(false)
     } finally {
       setModalBusy(null)
     }
@@ -218,10 +369,16 @@ export function MemoryButton({ workspace }: Props) {
       ? `${buttonLabel}${stageDetail ? ` — ${stageDetail}` : ''}`
       : 'Curate memory from recent conversations'
 
+  const autoEnabled = autoConfig?.enabled === true
+  const showBadge = awaitingReview && !running
+  const lastAutoLabel = autoStatus?.lastDreamAt
+    ? `Last dream: ${formatRelativeTime(autoStatus.lastDreamAt)}`
+    : 'No dreams yet'
+
   return (
     <div className="memory-btn-root" ref={rootRef}>
       <button
-        className={`memory-btn${running ? ' is-running' : ''}${disabled ? ' is-disabled' : ''}`}
+        className={`memory-btn${running ? ' is-running' : ''}${disabled ? ' is-disabled' : ''}${showBadge ? ' has-badge' : ''}`}
         onClick={() => !disabled && !running && setOpen((v) => !v)}
         disabled={disabled}
         title={title}
@@ -233,11 +390,38 @@ export function MemoryButton({ workspace }: Props) {
         </span>
         <span className="memory-btn-label">{buttonLabel}</span>
         {!running && <span className="memory-btn-caret" aria-hidden="true">▾</span>}
+        {showBadge && (
+          <span
+            className="memory-btn-badge"
+            aria-label="A dream is awaiting your review"
+            title="A dream is awaiting your review"
+          />
+        )}
       </button>
 
       {running && stageDetail && (
         <div className="memory-stage-detail" role="status" aria-live="polite">
           {stageDetail}
+        </div>
+      )}
+
+      {success && !running && (
+        <div className="memory-stage-detail" role="status" aria-live="polite">
+          {success}
+        </div>
+      )}
+
+      {toast && (
+        <div
+          className={`memory-toast${toast.ok ? '' : ' is-error'}`}
+          role="status"
+          aria-live="polite"
+          onClick={() => {
+            setToast(null)
+            clearToastTimer()
+          }}
+        >
+          {toast.message}
         </div>
       )}
 
@@ -271,8 +455,52 @@ export function MemoryButton({ workspace }: Props) {
             ))}
           </div>
           <div className="memory-menu-divider" />
+          <div className="memory-menu-section">
+            Auto-dream
+            <button
+              type="button"
+              className="memory-menu-section-link"
+              onClick={openSettings}
+            >
+              Settings…
+            </button>
+          </div>
+          <label className="memory-auto-toggle">
+            <input
+              type="checkbox"
+              checked={autoEnabled}
+              onChange={(e) => void toggleAutoEnabled(e.target.checked)}
+            />
+            <span className="memory-auto-toggle-label">
+              {autoEnabled ? 'On' : 'Off'}
+              <span className="memory-auto-toggle-hint">
+                {autoEnabled
+                  ? `≥${autoConfig?.minHours ?? 24}h & ≥${autoConfig?.minSessions ?? 5} sessions`
+                  : 'Curate quietly in the background'}
+              </span>
+            </span>
+          </label>
+          {autoEnabled && (
+            <div className="memory-auto-status">
+              <div className="memory-auto-status-row">
+                <span>{lastAutoLabel}</span>
+                <span className="memory-auto-status-meta">
+                  {autoStatus?.sessionsSinceLastDream ?? 0} new sessions
+                </span>
+              </div>
+              {autoStatus?.lastSkipReason && (
+                <div className="memory-auto-status-reason" title={autoStatus.lastSkipReason}>
+                  Last skip: {autoStatus.lastSkipReason}
+                </div>
+              )}
+            </div>
+          )}
+          <div className="memory-menu-divider" />
           <button className="memory-menu-item" role="menuitem" onClick={reviewLast}>
-            Review last dream
+            Review last dream{awaitingReview && <span className="memory-menu-default">new</span>}
+          </button>
+          <button className="memory-menu-item" role="menuitem" onClick={openHistory}>
+            View dream history
           </button>
         </div>
       )}
@@ -291,7 +519,33 @@ export function MemoryButton({ workspace }: Props) {
             busy={modalBusy}
             onAdopt={adopt}
             onDiscard={discard}
-            onClose={() => setDiff(null)}
+            onClose={() => {
+              clearAdoptedCloseTimer()
+              setDiff(null)
+            }}
+          />
+        )}
+
+      {history !== null &&
+        renderModalInChat(
+          rootRef.current,
+          <DreamHistoryModal
+            entries={history}
+            latestAwaitingReview={awaitingReview}
+            onOpenLatest={openLatestDiffFromHistory}
+            onClose={() => setHistory(null)}
+          />
+        )}
+
+      {settingsOpen && folder && autoConfig &&
+        renderModalInChat(
+          rootRef.current,
+          <AutoDreamSettingsModal
+            workspaceRoot={folder}
+            initialConfig={autoConfig}
+            status={autoStatus}
+            onClose={() => setSettingsOpen(false)}
+            onConfigChange={(next) => setAutoConfig(next)}
           />
         )}
     </div>
@@ -311,4 +565,18 @@ function renderModalInChat(buttonRoot: HTMLDivElement | null, modal: React.React
   const target = buttonRoot?.closest('.chat') as HTMLElement | null
   if (!target) return modal
   return createPortal(modal, target)
+}
+
+/**
+ * Compact "5m ago" / "3h ago" / "2d ago" formatter for the auto-dream
+ * status line. Uses ms-level precision so a fresh dream from a second ago
+ * reads "just now" instead of "0m ago".
+ */
+function formatRelativeTime(ms: number): string {
+  const diff = Date.now() - ms
+  if (diff < 0) return 'in the future'
+  if (diff < 30_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`
+  return `${Math.round(diff / 86_400_000)}d ago`
 }

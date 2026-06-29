@@ -1,6 +1,7 @@
 import { ChatMessageBody } from '../ChatMessageBody'
 import { CopyButton } from '../CopyButton'
 import type { Message } from '../chatTypes'
+import { openImageInTab } from '../../lib/openImageInTab'
 
 /**
  * Renders the assistant/user transcript stack inside the chat panel. The
@@ -24,6 +25,7 @@ export function ChatMessageList({
       </div>
     )
   }
+
   return (
     <>
       {messages.map((m, i) => {
@@ -44,7 +46,7 @@ export function ChatMessageList({
                     src={img}
                     alt="attachment"
                     className="chat-msg-thumb"
-                    onClick={() => window.open(img, '_blank')}
+                    onClick={() => void openImageInTab(img, 'Chat attachment')}
                   />
                 ))}
               </div>

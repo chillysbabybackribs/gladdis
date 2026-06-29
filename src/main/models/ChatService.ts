@@ -278,15 +278,18 @@ export class ChatService {
   }
 
   dreamRun(req: DreamRunRequest): Promise<DreamRunResult> {
-    return this.getDreamer().run(req)
+    return this.getDreamer().run(req, 'manual')
   }
 
   dreamLoadLast(workspaceRoot: string): Promise<DreamDiff | null> {
     return this.getDreamer().loadLast(workspaceRoot)
   }
 
-  dreamAdopt(workspaceRoot: string): Promise<DreamAdoptResult> {
-    return this.getDreamer().adopt(workspaceRoot)
+  dreamAdopt(
+    workspaceRoot: string,
+    selection?: import('../../../shared/types').DreamAdoptSelection
+  ): Promise<DreamAdoptResult> {
+    return this.getDreamer().adopt(workspaceRoot, selection)
   }
 
   dreamDiscard(workspaceRoot: string): Promise<DreamDiscardResult> {
@@ -295,6 +298,11 @@ export class ChatService {
 
   dreamStatus(workspaceRoot: string): DreamStatus {
     return this.getDreamer().status(workspaceRoot)
+  }
+
+  /** Public accessor for the lazy Dreamer instance. Used by AutoDreamScheduler. */
+  getDreamerInstance(): Dreamer {
+    return this.getDreamer()
   }
 
   /**
@@ -404,7 +412,7 @@ export class ChatService {
       // stays plain.
       const hasSelectedFolder = !!this.tools.getWorkspaceRoot()
       const agentic =
-        req.mode === 'agent' && (initialProfile.name !== 'conversation' || hasSelectedFolder)
+        req.mode === 'agent' && (!!req.agent || initialProfile.name !== 'conversation' || hasSelectedFolder)
 
       if (model.provider === 'codex') {
         // Codex is self-agentic: it owns its shell/file tools via the app-server
@@ -425,7 +433,7 @@ export class ChatService {
         try {
           const wsBlock = this.workspaceSystemBlock(initialProfile)
           const repoBlock = await this.codexRepoOverviewBlock(req, actionableText)
-          const codexSystem = [CODEX_SYSTEM, wsBlock, repoBlock].filter(Boolean).join('\n\n')
+          const codexSystem = [CODEX_SYSTEM, this.customAgentSystemBlock(req), wsBlock, repoBlock].filter(Boolean).join('\n\n')
           this.logSystemPrompt('codex', 'codex', codexSystem)
           const output = await this.codex().send(
             req,
@@ -536,7 +544,7 @@ export class ChatService {
     browserLlm?: LlmComplete
   ): Promise<void> {
     const profile = this.agentToolProfile(req)
-    const agentSystem = await buildAgentSystem(profile.tools)
+    const agentSystem = await this.buildTurnAgentSystem(req, profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
     await runProviderAgenticTurn({
       provider: 'anthropic',
@@ -592,6 +600,25 @@ export class ChatService {
       return `Workspace: ${folder}\nUse request_tools("filesystem") for repo and shell work.`
     }
     return `Workspace: ${folder}`
+  }
+
+  private customAgentSystemBlock(req: ChatRequest): string | null {
+    const agent = req.agent
+    if (!agent?.prompt.trim()) return null
+    return [
+      '## Selected Custom Agent',
+      `Name: ${agent.name}`,
+      '',
+      agent.prompt.trim()
+    ].join('\n')
+  }
+
+  private async buildTurnAgentSystem(
+    req: ChatRequest,
+    tools: Parameters<typeof buildAgentSystem>[0]
+  ): Promise<string> {
+    const base = await buildAgentSystem(tools)
+    return [base, this.customAgentSystemBlock(req)].filter(Boolean).join('\n\n')
   }
 
   private async codexRepoOverviewBlock(req: ChatRequest, userText: string): Promise<string | null> {
@@ -696,7 +723,7 @@ export class ChatService {
     browserLlm?: LlmComplete
   ): Promise<void> {
     const profile = this.agentToolProfile(req)
-    const agentSystem = await buildAgentSystem(profile.tools)
+    const agentSystem = await this.buildTurnAgentSystem(req, profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
     await runProviderAgenticTurn({
       provider: 'google',
@@ -735,7 +762,7 @@ export class ChatService {
     browserLlm?: LlmComplete
   ): Promise<void> {
     const profile = this.agentToolProfile(req)
-    const agentSystem = await buildAgentSystem(profile.tools)
+    const agentSystem = await this.buildTurnAgentSystem(req, profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
     await runProviderAgenticTurn({
       provider: 'openai',
@@ -774,7 +801,7 @@ export class ChatService {
     browserLlm?: LlmComplete
   ): Promise<void> {
     const profile = this.agentToolProfile(req)
-    const agentSystem = await buildAgentSystem(profile.tools)
+    const agentSystem = await this.buildTurnAgentSystem(req, profile.tools)
     const workspaceBlock = this.workspaceSystemBlock(profile)
     await runProviderAgenticTurn({
       provider: 'grok',

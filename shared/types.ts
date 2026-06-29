@@ -1,6 +1,8 @@
 /** Shared contract across main / preload / renderer. */
 
 export * from './api'
+export * from './agents'
+export * from './appCommand'
 export * from './browser'
 export * from './chat'
 export * from './dream'

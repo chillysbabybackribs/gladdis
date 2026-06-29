@@ -136,9 +136,134 @@ export interface DreamDiff {
   sampledSessionCount: number
 }
 
+/** Who/what initiated the dream. Surfaces in history and progress events. */
+export type DreamRunSource = 'manual' | 'auto'
+
+/**
+ * Per-row selection for partial adoption. Each array is a list of `entryId`
+ * values from the corresponding side of `DreamDiff` (entries / hygiene)
+ * that the user accepts. Omitted arrays mean "accept all" — so a missing
+ * selection is identical to a full adopt.
+ */
+export interface DreamAdoptSelection {
+  acceptedEntryIds?: readonly string[]
+  acceptedHygieneIds?: readonly string[]
+}
+
 export type DreamRunResult =
-  | { ok: true; diff: DreamDiff }
+  | {
+      ok: true
+      diff: DreamDiff
+      /** True iff the auto-adopt path applied the candidate without user review. */
+      autoAdopted?: boolean
+    }
   | { ok: false; error: string; partial?: DreamDiff }
+
+/**
+ * Per-workspace knobs for automated dreaming. Defaults match Anthropic's
+ * Auto Dream calibration (24h + 5 sessions, with a 10-minute scan throttle
+ * and a "not during active chat" gate). Persisted to the workspace's
+ * `.gladdis/dream-auto.json`.
+ */
+export interface DreamAutoConfig {
+  /** Master switch. When false the scheduler is dormant. */
+  enabled: boolean
+  /** Minimum elapsed time since the last successful dream. */
+  minHours: number
+  /** Minimum number of new/updated conversations since the last dream. */
+  minSessions: number
+  /** Don't trigger if a user message arrived in the last N seconds. */
+  activityCooldownSeconds: number
+  /** Hard ceiling on automatic runs per UTC day. Manual runs don't count. */
+  dailyRunCap: number
+  /** "cheapest" or "best" — used when no explicit modelId is forced. */
+  preferenceOrder: DreamPreferenceOrder
+  /**
+   * Adoption strictness for auto-runs:
+   *   • strict     — auto-adopt only when the diff has no replace/reject rows
+   *                  AND no unsupported/partial verifications AND policy is
+   *                  not blocked (the safest case).
+   *   • permissive — auto-adopt whenever `adoption.blocked === false`.
+   *   • off        — never auto-adopt; always surface for manual review.
+   * Hygiene-only changes (archive/demote/reinforce) always auto-adopt when
+   * the strictness is anything other than 'off', because they're reversible
+   * and bounded.
+   */
+  autoAdopt: 'strict' | 'permissive' | 'off'
+}
+
+export const DEFAULT_DREAM_AUTO_CONFIG: DreamAutoConfig = {
+  enabled: false, // opt-in: never run without explicit consent
+  minHours: 24,
+  minSessions: 5,
+  activityCooldownSeconds: 120,
+  dailyRunCap: 4,
+  preferenceOrder: 'cheapest',
+  autoAdopt: 'strict'
+}
+
+/** Persisted shape of `.gladdis/dream-history.json`. */
+export interface DreamHistoryFile {
+  version: 1
+  entries: DreamHistoryEntry[]
+}
+
+/**
+ * One row in the rolling dream-history log. The history is append-only on
+ * the writer side, capped to a fixed length, and written to
+ * `.gladdis/dream-history.json` so the UI can surface a timeline without
+ * the renderer having to re-parse old diff files.
+ */
+export interface DreamHistoryEntry {
+  /** Same id as the corresponding DreamDiff. */
+  id: string
+  /** Epoch ms when the dream completed (or failed). */
+  completedAt: number
+  source: DreamRunSource
+  scope: DreamScope
+  modelId: string
+  modelProvider: Provider
+  ok: boolean
+  /** Present when ok=false. */
+  error?: string
+  /** Present when ok=true. */
+  summary?: DreamDiffSummary
+  /** True iff the run auto-adopted (manual runs are always false here). */
+  autoAdopted: boolean
+  /** True iff the run produced a candidate currently awaiting user review. */
+  awaitingReview: boolean
+}
+
+/** What auto-runs publish to the renderer as a one-shot notification. */
+export interface DreamAutoNotification {
+  runId: string
+  workspaceRoot: string
+  completedAt: number
+  ok: boolean
+  autoAdopted: boolean
+  awaitingReview: boolean
+  /** Lightweight one-line summary the UI can show as a toast. */
+  message: string
+  error?: string
+}
+
+/** Per-workspace counters the scheduler keeps; useful for the UI to render. */
+export interface DreamAutoStatus {
+  enabled: boolean
+  config: DreamAutoConfig
+  /** Last successful auto-dream timestamp (ms), if any. */
+  lastDreamAt?: number
+  /** Last failure timestamp (ms), if any. */
+  lastFailureAt?: number
+  /** Auto-runs initiated today (UTC day). */
+  runsToday: number
+  /** Sessions counted since last dream — derived from ChatStore.list(). */
+  sessionsSinceLastDream: number
+  /** Wallclock until the next gate clears (ms epoch), undefined if blocked. */
+  nextEligibleAt?: number
+  /** Reason the scheduler last skipped a check (debugging UI). */
+  lastSkipReason?: string
+}
 
 export interface DreamAdoptResult {
   ok: boolean

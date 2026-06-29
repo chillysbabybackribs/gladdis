@@ -53,6 +53,9 @@ export function useEnvironmentStatus(): EnvironmentStatus {
         setModels([...nonCodex, ...codexModels])
       }
     })
+
+    const offWorkspace = window.gladdis.workspace.onUpdated(setWorkspace)
+    return () => offWorkspace()
   }, [])
 
   const pickWorkspace = async () => {

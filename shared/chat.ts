@@ -1,4 +1,5 @@
 import type { ModelOption, Provider } from './models'
+import type { ChatAgentSelection } from './agents'
 
 export interface ChatMessage {
   role: 'user' | 'assistant'
@@ -449,6 +450,8 @@ export interface ChatRequest {
   contextHints?: {
     activePageFollowup?: boolean
   }
+  /** Optional saved custom agent selected in the composer for this turn. */
+  agent?: ChatAgentSelection
 }
 
 /** OpenAI TTS voices (audible replies feature). */

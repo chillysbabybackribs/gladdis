@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import type { ToolActivity } from '../chatTypes'
+import { openImageInTab } from '../../lib/openImageInTab'
 
 const TOOL_LABEL: Record<string, string> = {
   execute_in_browser: 'Running script',
@@ -183,6 +184,23 @@ function DiffBlock({ text }: { text: string }) {
   )
 }
 
+function ToolImage({ tool }: { tool: ToolActivity }) {
+  const imageSrc = toolImageSrc(tool)
+  if (!imageSrc) return null
+  const name = baseToolName(tool.tool)
+  const title = `${name} result`
+  return (
+    <button
+      type="button"
+      className="tool-call-output-image-link"
+      title="Open image in tab"
+      onClick={() => void openImageInTab(imageSrc, title)}
+    >
+      <img className="tool-call-output-image" src={imageSrc} alt={title} />
+    </button>
+  )
+}
+
 function ToolOutput({ tool }: { tool: ToolActivity }) {
   const detail = toolDetail(tool)
   const imageSrc = toolImageSrc(tool)
@@ -195,17 +213,7 @@ function ToolOutput({ tool }: { tool: ToolActivity }) {
     <div className="tool-call-output">
       <div className="tool-call-output-box">
         <div className="tool-call-output-title">{title}</div>
-        {imageSrc && (
-          <a
-            className="tool-call-output-image-link"
-            href={imageSrc}
-            target="_blank"
-            rel="noreferrer"
-            title="Open screenshot"
-          >
-            <img className="tool-call-output-image" src={imageSrc} alt={`${name} result`} />
-          </a>
-        )}
+        <ToolImage tool={tool} />
         {detail && (showDiff ? <DiffBlock text={detail} /> : <pre className="tool-call-output-pre">{detail}</pre>)}
       </div>
     </div>
@@ -372,12 +380,21 @@ export const ToolRun = memo(function ToolRun({ tools }: { tools: ToolActivity[] 
               <span className="tool-run-group-duration">{formatMs(totalDuration)}</span>
               <span className="tool-run-group-caret">{isExpanded ? 'Hide' : 'Show'}</span>
             </button>
-            {isExpanded && (
+            {(isExpanded || (group.length === 1 && !!toolImageSrc(group[0]))) && (
               <div className="tool-run-group-body">
                 {group.length === 1 ? (
-                  // The group header already names this single call, so show its
-                  // output directly instead of repeating the title on a sub-row.
-                  <ToolOutput tool={group[0]} />
+                  // Screenshot/image results should surface visibly as soon as they land,
+                  // even if expansion state lags during streaming/hydration.
+                  <>
+                    {!!toolImageSrc(group[0]) && !isExpanded && (
+                      <div className="tool-call-output">
+                        <div className="tool-call-output-box">
+                          <ToolImage tool={group[0]} />
+                        </div>
+                      </div>
+                    )}
+                    {isExpanded && <ToolOutput tool={group[0]} />}
+                  </>
                 ) : (
                   group.map((tool) => <ToolCall key={tool.callId} tool={tool} />)
                 )}

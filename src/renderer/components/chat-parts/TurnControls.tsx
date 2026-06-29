@@ -1,4 +1,5 @@
-import type { CodexStatus, KeyStatus, ModelOption, Workspace } from '../../../../shared/types'
+import type { CodexStatus, KeyStatus, ModelOption, SavedAgent, Workspace } from '../../../../shared/types'
+import { AgentPicker } from '../AgentPicker'
 import { MemoryButton } from '../MemoryButton'
 import { ModelPicker } from '../ModelPicker'
 
@@ -11,6 +12,11 @@ export function TurnControls({
   modelId,
   models,
   onModelChange,
+  agentId,
+  agents,
+  onAgentChange,
+  onAgentEdit,
+  onAgentDelete,
   keyStatus,
   codexStatus,
   workspace,
@@ -19,6 +25,11 @@ export function TurnControls({
   modelId: string
   models: ModelOption[]
   onModelChange: (id: string) => void
+  agentId: string | null
+  agents: SavedAgent[]
+  onAgentChange: (id: string | null) => void
+  onAgentEdit: (agent: SavedAgent) => void
+  onAgentDelete: (id: string) => Promise<void>
   keyStatus: KeyStatus
   codexStatus: CodexStatus | null
   workspace: Workspace
@@ -35,6 +46,13 @@ export function TurnControls({
         models={models}
         keyStatus={keyStatus}
         codexStatus={codexStatus}
+      />
+      <AgentPicker
+        value={agentId}
+        agents={agents}
+        onChange={onAgentChange}
+        onEdit={onAgentEdit}
+        onDelete={onAgentDelete}
       />
       <button
         className={`workspace-btn ${workspace.folder ? 'set' : ''}`}

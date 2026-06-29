@@ -169,6 +169,56 @@ describe('composeDreamDiff', () => {
     ])
   })
 
+  it('surfaces hygiene actions and counts them in the summary', () => {
+    const archived = entry({ id: 'mem_old', text: 'stale claim', confidence: 0.4 })
+    const reinforced = entry({ id: 'mem_strong', text: 'foundational', confidence: 0.85 })
+    const untouched = entry({ id: 'mem_keep', text: 'unchanged' })
+
+    const diff = composeDreamDiff({
+      id: 'drm_test',
+      createdAt: 1,
+      modelId: 'm',
+      modelProvider: 'codex',
+      scope: '7d',
+      workspaceRoot: WORKSPACE,
+      existingEntries: [archived, reinforced, untouched],
+      resultEntries: [
+        { ...archived, freshness: { ...archived.freshness, archivedAt: NOW } },
+        reinforced,
+        untouched
+      ],
+      decisions: [],
+      verifications: [],
+      hygiene: [
+        {
+          entryId: 'mem_old',
+          action: 'archive',
+          reason: 'stale and unused',
+          previousConfidence: 0.4
+        },
+        {
+          entryId: 'mem_strong',
+          action: 'reinforce',
+          previousConfidence: 0.7,
+          newConfidence: 0.85,
+          reason: 'foundational claim'
+        }
+      ],
+      sampledSessionCount: 1
+    })
+
+    expect(diff.summary.archived).toBe(1)
+    expect(diff.summary.reinforced).toBe(1)
+    expect(diff.summary.unchanged).toBe(1)
+    const hygiene = diff.hygiene ?? []
+    expect(hygiene).toHaveLength(2)
+    const archive = hygiene.find((h) => h.action === 'archive')
+    expect(archive?.entryId).toBe('mem_old')
+    expect(archive?.reason).toBe('stale and unused')
+    const reinforce = hygiene.find((h) => h.action === 'reinforce')
+    expect(reinforce?.previousConfidence).toBeCloseTo(0.7, 5)
+  })
+
   it('allows adoption when promotable rows pass confidence, evidence, and verification checks', () => {
     const policy = evaluateDreamAdoption(
       [

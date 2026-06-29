@@ -1,17 +1,23 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   IPC,
+  type AppCommand,
   type CdpCommand,
   type CdpEventPayload,
   type ChatPanelSide,
   type ChatRequest,
   type ChatStreamEvent,
   type Conversation,
+  type DreamAdoptSelection,
+  type DreamAutoConfig,
+  type DreamAutoNotification,
   type DreamProgressEvent,
   type DreamRunRequest,
   type GladdisApi,
   type ModelCallEvent,
   type Provider,
+  type SaveAgentInput,
+  type SavedAgent,
   type TabInfo,
   type TabsUpdatedState,
   type TerminalDataEvent,
@@ -39,10 +45,17 @@ const api: GladdisApi = {
     }
   },
   layout: {
-    setBounds: (bounds: ViewBounds) => ipcRenderer.send(IPC.LAYOUT_SET_BOUNDS, bounds)
+    setBounds: (bounds: ViewBounds) => ipcRenderer.send(IPC.LAYOUT_SET_BOUNDS, bounds),
+    setBrowserVisible: (visible: boolean) =>
+      ipcRenderer.send(IPC.LAYOUT_SET_BROWSER_VISIBLE, visible)
   },
   app: {
-    capture: () => ipcRenderer.invoke(IPC.APP_CAPTURE)
+    capture: () => ipcRenderer.invoke(IPC.APP_CAPTURE),
+    onCommand: (cb: (command: AppCommand) => void) => {
+      const listener = (_e: unknown, command: AppCommand) => cb(command)
+      ipcRenderer.on(IPC.APP_COMMAND, listener)
+      return () => ipcRenderer.removeListener(IPC.APP_COMMAND, listener)
+    }
   },
   cdp: {
     send: (cmd: CdpCommand) => ipcRenderer.invoke(IPC.CDP_SEND, cmd),
@@ -75,7 +88,14 @@ const api: GladdisApi = {
   workspace: {
     get: () => ipcRenderer.invoke(IPC.WORKSPACE_GET),
     setFolder: (folder: string | null) => ipcRenderer.invoke(IPC.WORKSPACE_SET_FOLDER, folder),
-    pickFolder: () => ipcRenderer.invoke(IPC.WORKSPACE_PICK_FOLDER)
+    pickFolder: () => ipcRenderer.invoke(IPC.WORKSPACE_PICK_FOLDER),
+    createFolder: (folder: string) => ipcRenderer.invoke(IPC.WORKSPACE_CREATE_FOLDER, folder),
+    onUpdated: (cb) => {
+      const listener = (_e: unknown, workspace: Awaited<ReturnType<GladdisApi['workspace']['get']>>) =>
+        cb(workspace)
+      ipcRenderer.on(IPC.WORKSPACE_UPDATED, listener)
+      return () => ipcRenderer.removeListener(IPC.WORKSPACE_UPDATED, listener)
+    }
   },
   audit: {
     list: () => ipcRenderer.invoke(IPC.AUDIT_LIST),
@@ -83,6 +103,16 @@ const api: GladdisApi = {
       const listener = (_e: unknown, event: ModelCallEvent) => cb(event)
       ipcRenderer.on(IPC.AUDIT_EVENT, listener)
       return () => ipcRenderer.removeListener(IPC.AUDIT_EVENT, listener)
+    }
+  },
+  agents: {
+    list: () => ipcRenderer.invoke(IPC.AGENTS_LIST),
+    save: (input: SaveAgentInput) => ipcRenderer.invoke(IPC.AGENTS_SAVE, input),
+    delete: (id: string) => ipcRenderer.invoke(IPC.AGENTS_DELETE, id),
+    onUpdated: (cb: (agents: SavedAgent[]) => void) => {
+      const listener = (_e: unknown, agents: SavedAgent[]) => cb(agents)
+      ipcRenderer.on(IPC.AGENTS_UPDATED, listener)
+      return () => ipcRenderer.removeListener(IPC.AGENTS_UPDATED, listener)
     }
   },
   chats: {
@@ -106,13 +136,33 @@ const api: GladdisApi = {
   dream: {
     run: (req: DreamRunRequest) => ipcRenderer.invoke(IPC.DREAM_RUN, req),
     loadLast: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_LOAD_LAST, workspaceRoot),
-    adopt: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_ADOPT, workspaceRoot),
+    adopt: (workspaceRoot: string, selection?: DreamAdoptSelection) =>
+      ipcRenderer.invoke(IPC.DREAM_ADOPT, workspaceRoot, selection),
     discard: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_DISCARD, workspaceRoot),
     status: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_STATUS, workspaceRoot),
     onProgress: (cb: (event: DreamProgressEvent) => void) => {
       const listener = (_e: unknown, event: DreamProgressEvent) => cb(event)
       ipcRenderer.on(IPC.DREAM_PROGRESS, listener)
       return () => ipcRenderer.removeListener(IPC.DREAM_PROGRESS, listener)
+    },
+    auto: {
+      getConfig: (workspaceRoot: string) =>
+        ipcRenderer.invoke(IPC.DREAM_AUTO_GET_CONFIG, workspaceRoot),
+      setConfig: (workspaceRoot: string, patch: Partial<DreamAutoConfig>) =>
+        ipcRenderer.invoke(IPC.DREAM_AUTO_SET_CONFIG, workspaceRoot, patch),
+      status: (workspaceRoot: string) =>
+        ipcRenderer.invoke(IPC.DREAM_AUTO_STATUS, workspaceRoot),
+      nudge: (workspaceRoot: string) =>
+        ipcRenderer.send(IPC.DREAM_AUTO_NUDGE, workspaceRoot),
+      onNotification: (cb: (event: DreamAutoNotification) => void) => {
+        const listener = (_e: unknown, event: DreamAutoNotification) => cb(event)
+        ipcRenderer.on(IPC.DREAM_AUTO_NOTIFICATION, listener)
+        return () => ipcRenderer.removeListener(IPC.DREAM_AUTO_NOTIFICATION, listener)
+      }
+    },
+    history: {
+      list: (workspaceRoot: string) =>
+        ipcRenderer.invoke(IPC.DREAM_HISTORY_LIST, workspaceRoot)
     }
   },
   terminal: {

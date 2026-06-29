@@ -38,12 +38,27 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
     inputSchema: tool.parameters as unknown as JsonValue
   })) as JsonValue[]
 
+// The single source of truth for how Codex is told to do web/browser work.
+// Injected into CODEX_SYSTEM (see prompts.ts) so it actually reaches the model
+// on every turn. Native web search is already disabled via config; the trap
+// this closes is Codex reaching for a browser through its NATIVE SHELL tool
+// (which stays on for code work) during "visual validation" — hence the
+// explicit "even via your shell" line.
 export const CODEX_BROWSER_INSTRUCTIONS =
-  'Use gladdis.* tools for web, browser, and repo-intel work on the visible tab: search, deep_search, repo_overview, search_repo, read_spans, research_dossier, verify_change, fetch_page, navigate, browse_task, read_page, grep_page, grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. ' +
-  'Never run external browser commands for viewing or visual checks: google-chrome, chromium, chrome, xdg-open/open URLs, playwright screenshot/open/codegen/test/show-report, puppeteer scripts, or localhost:9222 DevTools probing. These are blocked because they bypass Gladdis and interrupt the turn. ' +
-  'Prefer grep_click/grep_type for direct discovery + action; use lower-level drive tools only if needed. ' +
-  'For Gladdis debugging, use the current visible app/browser first. do not launch a second Gladdis/dev app. Launch only for startup/fresh-process validation and explain why. ' +
-  'Use Codex-native shell/file tools for local code work.'
+  'For ALL web and browser work — web search, opening a URL, reading a page, screenshots, UI/visual ' +
+  'validation — use the gladdis.* tools that drive the visible Chromium tab the user is watching: ' +
+  'search and deep_search (web search — the user sees results in-tab), fetch_page, navigate, browse_task, ' +
+  'read_page, grep_page, grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. ' +
+  'For repo intel use recall_history, repo_overview, search_repo, read_spans, research_dossier, and verify_change. ' +
+  'Prefer grep_click/grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
+  'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, ' +
+  'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +
+  'or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. ' +
+  'These bypass Gladdis, hide the page from the user, and skip Gladdis\'s superior search. The gladdis.* tools ' +
+  'are always the right tool; a native browser command is always wrong here.\n' +
+  'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev ' +
+  'app. Launch a separate instance only for startup/cold-boot/fresh-process validation, and say why first.\n' +
+  'Use Codex-native shell/file tools for local code, package, and command work — just never for browsing.'
 
 export const CODEX_DISABLED_NATIVE_CONFIG = {
   web_search: 'disabled',

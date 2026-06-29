@@ -60,10 +60,15 @@ const REVIEW_RESPONSE = JSON.stringify({
   overrides: []
 })
 
+const HYGIENE_RESPONSE = JSON.stringify({
+  decisions: []
+})
+
 function fakeComplete(): (modelId: string, system: string, user: string) => Promise<string> {
   return async (_modelId, system) => {
     if (system.includes('fact-checker')) return VERIFY_RESPONSE
     if (system.includes('reviewing a deterministic memory reconciler')) return REVIEW_RESPONSE
+    if (system.includes('curator of a long-lived memory store')) return HYGIENE_RESPONSE
     return EXTRACT_RESPONSE
   }
 }
@@ -132,7 +137,15 @@ describe('Dreamer progress emission', () => {
         firstSeen.set(e.stage, i)
       }
     })
-    const order = ['sampling', 'extracting', 'reconciling', 'reviewing', 'verifying', 'persisting']
+    const order = [
+      'sampling',
+      'extracting',
+      'reconciling',
+      'reviewing',
+      'curating',
+      'verifying',
+      'persisting'
+    ]
     for (let i = 0; i < order.length - 1; i++) {
       const a = firstSeen.get(order[i])
       const b = firstSeen.get(order[i + 1])
@@ -200,6 +213,156 @@ describe('Dreamer progress emission', () => {
 
     const result = await dreamer.run({ workspaceRoot: workspace, scope: '7d' })
     expect(result.ok).toBe(true)
+  })
+
+  describe('evaluateAutoAdopt', () => {
+    const baseDiff: DreamDiff = {
+      id: 'drm_test',
+      createdAt: 0,
+      modelId: 'codex-mini-latest',
+      modelProvider: 'codex',
+      scope: '24h',
+      workspaceRoot: '/tmp/ws',
+      summary: { added: 1, merged: 0, replaced: 0, rejected: 0, unchanged: 0 },
+      verifications: [],
+      entries: [],
+      adoption: { blocked: false, issues: [] },
+      awaitingAdopt: true,
+      candidateFilePath: '/tmp/ws/.gladdis/memory.next.json',
+      sampledSessionCount: 5
+    }
+
+    it('off → never auto-adopts', () => {
+      const r = Dreamer.evaluateAutoAdopt(baseDiff, 'off')
+      expect(r.ok).toBe(false)
+    })
+
+    it('permissive → adopts when adoption.blocked is false', () => {
+      const r = Dreamer.evaluateAutoAdopt(baseDiff, 'permissive')
+      expect(r.ok).toBe(true)
+    })
+
+    it('permissive → refuses when adoption.blocked is true', () => {
+      const r = Dreamer.evaluateAutoAdopt(
+        { ...baseDiff, adoption: { blocked: true, issues: [] } },
+        'permissive'
+      )
+      expect(r.ok).toBe(false)
+    })
+
+    it('strict → refuses if any entry is a replace', () => {
+      const r = Dreamer.evaluateAutoAdopt(
+        {
+          ...baseDiff,
+          entries: [
+            {
+              action: 'replace',
+              entryId: 'mem_a',
+              kind: 'preference',
+              scope: 'workspace',
+              text: 'replaced',
+              confidence: 0.9,
+              evidenceCount: 1
+            }
+          ]
+        },
+        'strict'
+      )
+      expect(r.ok).toBe(false)
+      expect(r.reason).toMatch(/replace/)
+    })
+
+    it('strict → refuses on unsupported verification of a promoted entry', () => {
+      const r = Dreamer.evaluateAutoAdopt(
+        {
+          ...baseDiff,
+          entries: [
+            {
+              action: 'add',
+              entryId: 'mem_a',
+              kind: 'preference',
+              scope: 'workspace',
+              text: 'x',
+              confidence: 0.9,
+              evidenceCount: 1
+            }
+          ],
+          verifications: [{ entryId: 'mem_a', verdict: 'unsupported', reason: 'no evidence' }]
+        },
+        'strict'
+      )
+      expect(r.ok).toBe(false)
+      expect(r.reason).toMatch(/unsupported/)
+    })
+
+    it('strict → refuses on partial verification of a promoted entry', () => {
+      const r = Dreamer.evaluateAutoAdopt(
+        {
+          ...baseDiff,
+          entries: [
+            {
+              action: 'merge',
+              entryId: 'mem_a',
+              kind: 'preference',
+              scope: 'workspace',
+              text: 'x',
+              confidence: 0.85,
+              evidenceCount: 1
+            }
+          ],
+          verifications: [{ entryId: 'mem_a', verdict: 'partial', reason: 'evidence weak' }]
+        },
+        'strict'
+      )
+      expect(r.ok).toBe(false)
+      expect(r.reason).toMatch(/partial/)
+    })
+
+    it('strict → ignores verifications on non-promoted entries', () => {
+      // A 'reject' row was never going to apply, so its verification verdict
+      // shouldn't block auto-adoption of unrelated good rows.
+      const r = Dreamer.evaluateAutoAdopt(
+        {
+          ...baseDiff,
+          entries: [
+            {
+              action: 'reject',
+              entryId: 'mem_a',
+              kind: 'preference',
+              scope: 'workspace',
+              text: 'x',
+              confidence: 0.4,
+              evidenceCount: 0
+            }
+          ],
+          verifications: [{ entryId: 'mem_a', verdict: 'unsupported', reason: 'no evidence' }]
+        },
+        'strict'
+      )
+      expect(r.ok).toBe(true)
+    })
+
+    it('strict → accepts add-only with supported verifications', () => {
+      const r = Dreamer.evaluateAutoAdopt(
+        {
+          ...baseDiff,
+          entries: [
+            {
+              action: 'add',
+              entryId: 'mem_a',
+              kind: 'preference',
+              scope: 'workspace',
+              text: 'x',
+              confidence: 0.9,
+              evidenceCount: 1
+            }
+          ],
+          verifications: [{ entryId: 'mem_a', verdict: 'supported', reason: 'evidence matches' }]
+        },
+        'strict'
+      )
+      expect(r.ok).toBe(true)
+    })
   })
 
   it('refuses to adopt a candidate when review policy is blocked', async () => {

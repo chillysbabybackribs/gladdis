@@ -5,6 +5,8 @@ import { Splitter, DRAWER_MIN } from './Splitter'
 import { TerminalDock, type TerminalDockPos } from './TerminalDock'
 import { TerminalToggle } from './TerminalToggle'
 import { useTerminal } from '../hooks/useTerminal'
+import AgentBuilderModal from './AgentBuilderModal'
+import type { AppCommand, SavedAgent } from '../../../shared/types'
 
 const LEFT_KEY = 'gladdis:drawer:left'
 const RIGHT_KEY = 'gladdis:drawer:right'
@@ -160,6 +162,8 @@ export function Workspace() {
   const [leftZoom, setLeftZoom] = useState(() => loadZoom(LEFT_ZOOM_KEY))
   const [rightZoom, setRightZoom] = useState(() => loadZoom(RIGHT_ZOOM_KEY))
   const [terminalDock, setTerminalDockState] = useState<TerminalDockState>(loadTerminalDock)
+  const [isAgentBuilderOpen, setIsAgentBuilderOpen] = useState(false)
+  const [editingAgent, setEditingAgent] = useState<SavedAgent | null>(null)
   const [terminalHeight, setTerminalHeight] = useState<number>(loadTerminalHeight)
   const [lastDock, setLastDock] = useState<TerminalDockPos>(loadLastDock)
   const terminalHostRef = useRef<HTMLDivElement>(null)
@@ -232,6 +236,42 @@ export function Workspace() {
     setTerminalDock(terminalDock === 'closed' ? lastDock : 'closed')
   }
 
+  const openTerminal = () => {
+    setTerminalDock(terminalDock === 'closed' ? lastDock : terminalDock)
+  }
+
+  const runTerminalCommand = async (command: string) => {
+    openTerminal()
+    const id = await terminalHandle.ensurePty()
+    if (!id) return
+    terminalHandle.focus()
+    window.gladdis.terminal.write(id, `${command}\r`)
+  }
+
+  const editAgent = (agent: SavedAgent) => {
+    setEditingAgent(agent)
+    setIsAgentBuilderOpen(true)
+  }
+
+  useEffect(() => {
+    const off = window.gladdis.app.onCommand((command: AppCommand) => {
+      if (command.type === 'terminal:run') {
+        void runTerminalCommand(command.command)
+        return
+      }
+      if (command.type === 'agents:create') {
+        setEditingAgent(null)
+        setIsAgentBuilderOpen(true)
+      }
+    })
+    return off
+  }, [lastDock, terminalDock, terminalHandle])
+
+  useEffect(() => {
+    window.gladdis.layout.setBrowserVisible(!isAgentBuilderOpen)
+    return () => window.gladdis.layout.setBrowserVisible(true)
+  }, [isAgentBuilderOpen])
+
   const onTerminalHeightChange = (h: number) => {
     setTerminalHeight(h)
     safeSetItem(TERMINAL_HEIGHT_KEY, String(h))
@@ -279,7 +319,7 @@ export function Workspace() {
             {leftDockActive ? (
               <>
                 <div style={{ display: 'none' }}>
-                  <ChatPanel panelId="left" zoom={leftZoom} footerSlot={null} />
+                  <ChatPanel panelId="left" zoom={leftZoom} footerSlot={null} onAgentEdit={editAgent} />
                 </div>
                 <TerminalDock
                   dock="left"
@@ -293,6 +333,7 @@ export function Workspace() {
                 panelId="left"
                 zoom={leftZoom}
                 footerSlot={leftOpen ? leftFooterSlot : null}
+                onAgentEdit={editAgent}
               />
             )}
           </div>
@@ -331,7 +372,7 @@ export function Workspace() {
             {rightDockActive ? (
               <>
                 <div style={{ display: 'none' }}>
-                  <ChatPanel panelId="right" zoom={rightZoom} footerSlot={null} />
+                  <ChatPanel panelId="right" zoom={rightZoom} footerSlot={null} onAgentEdit={editAgent} />
                 </div>
                 <TerminalDock
                   dock="right"
@@ -345,6 +386,7 @@ export function Workspace() {
                 panelId="right"
                 zoom={rightZoom}
                 footerSlot={rightOpen ? rightFooterSlot : null}
+                onAgentEdit={editAgent}
               />
             )}
           </div>
@@ -396,6 +438,14 @@ export function Workspace() {
           </button>
         </div>
       </footer>
+      <AgentBuilderModal
+        isOpen={isAgentBuilderOpen}
+        agent={editingAgent}
+        onClose={() => {
+          setIsAgentBuilderOpen(false)
+          setEditingAgent(null)
+        }}
+      />
     </div>
   )
 }

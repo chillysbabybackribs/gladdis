@@ -12,17 +12,22 @@ import type { ChatStore } from '../ChatStore'
 import type { KeyStore } from '../KeyStore'
 import type {
   DreamAdoptResult,
+  DreamAdoptSelection,
   DreamDiff,
   DreamDiscardResult,
+  DreamHistoryEntry,
   DreamProgressEvent,
   DreamRunRequest,
   DreamRunResult,
+  DreamRunSource,
   DreamScope,
   DreamStage,
   DreamStatus,
   KeyStatus,
   ModelOption
 } from '../../../../shared/types'
+import { appendDreamHistory, patchDreamHistory } from './dreamHistory'
+import { applyPartialAdoption } from './applyPartialAdoption'
 import { loadMemoryFile, saveMemoryFile } from '../memoryStore'
 import { type MemoryFileV2, MEMORY_FILE_VERSION } from './types'
 import { sampleTranscripts } from './transcriptSampler'
@@ -69,7 +74,7 @@ export class Dreamer {
     }
   }
 
-  async run(req: DreamRunRequest): Promise<DreamRunResult> {
+  async run(req: DreamRunRequest, source: DreamRunSource = 'manual'): Promise<DreamRunResult> {
     if (!req.workspaceRoot) {
       return { ok: false, error: 'dream:run requires a workspace folder.' }
     }
@@ -113,6 +118,7 @@ export class Dreamer {
 
     try {
       const result = await this.runPipeline(req, model, runId)
+      await this.recordHistory(req.workspaceRoot, runId, source, model, req.scope, result)
       this.emit({
         type: 'done',
         runId,
@@ -123,10 +129,90 @@ export class Dreamer {
       return result
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
+      await this.recordHistory(
+        req.workspaceRoot,
+        runId,
+        source,
+        model,
+        req.scope,
+        { ok: false, error }
+      ).catch(() => {})
       this.emit({ type: 'done', runId, workspaceRoot: req.workspaceRoot, ok: false, error })
       throw err
     } finally {
       this.inFlight.delete(req.workspaceRoot)
+    }
+  }
+
+  /**
+   * Auto-adopt eligibility for a freshly-computed diff. Pure helper so the
+   * scheduler can ask "would this auto-adopt?" without re-running the dream.
+   *
+   * Rules:
+   *   • 'off'        — never auto-adopt.
+   *   • 'permissive' — auto-adopt iff `adoption.blocked === false`.
+   *   • 'strict'     — adoption.blocked must be false, no `replace` rows,
+   *                    no `reject`-but-promotable rows, no `unsupported`
+   *                    or `partial` verifications. Hygiene-only changes
+   *                    (archive/demote/reinforce) always pass.
+   */
+  static evaluateAutoAdopt(
+    diff: DreamDiff,
+    policy: 'strict' | 'permissive' | 'off'
+  ): { ok: boolean; reason?: string } {
+    if (policy === 'off') return { ok: false, reason: 'auto-adopt disabled' }
+    if (diff.adoption?.blocked) {
+      return { ok: false, reason: 'adoption policy blocked the diff' }
+    }
+    if (policy === 'permissive') return { ok: true }
+
+    const hasReplace = diff.entries.some((e) => e.action === 'replace')
+    if (hasReplace) return { ok: false, reason: 'strict: dream proposed a replace' }
+
+    const verdictByEntryId = new Map(diff.verifications.map((v) => [v.entryId, v.verdict]))
+    const promotingActions = new Set(['add', 'merge', 'replace'])
+    for (const entry of diff.entries) {
+      if (!promotingActions.has(entry.action)) continue
+      const verdict = verdictByEntryId.get(entry.entryId)
+      if (verdict === 'unsupported') {
+        return { ok: false, reason: 'strict: verifier marked an entry unsupported' }
+      }
+      if (verdict === 'partial') {
+        return { ok: false, reason: 'strict: verifier only partially supported an entry' }
+      }
+    }
+
+    return { ok: true }
+  }
+
+  private async recordHistory(
+    workspaceRoot: string,
+    runId: string,
+    source: DreamRunSource,
+    model: ModelOption,
+    scope: DreamScope,
+    result:
+      | { ok: true; diff: DreamDiff; autoAdopted?: boolean }
+      | { ok: false; error: string; partial?: DreamDiff }
+  ): Promise<void> {
+    try {
+      const baseEntry = {
+        id: runId,
+        completedAt: Date.now(),
+        source,
+        scope,
+        modelId: model.id,
+        modelProvider: model.provider,
+        autoAdopted: result.ok ? result.autoAdopted === true : false,
+        awaitingReview: result.ok ? !(result.autoAdopted === true) : false
+      }
+      const entry: DreamHistoryEntry = result.ok
+        ? { ...baseEntry, ok: true, summary: result.diff.summary }
+        : { ...baseEntry, ok: false, error: result.error }
+      await appendDreamHistory(workspaceRoot, entry)
+    } catch (err) {
+      // History is observability; a write failure must not break the run.
+      console.warn('[dream] failed to append history:', err)
     }
   }
 
@@ -326,6 +412,42 @@ export class Dreamer {
     return { ok: true, diff }
   }
 
+  /**
+   * Scheduler entry point: run a dream and, if the diff is auto-adoptable
+   * under the given policy, adopt immediately. The history entry is
+   * back-patched to reflect adoption so the UI shows the right state.
+   *
+   * Two passes through history happen here: `run()` records the run as
+   * `awaitingReview: true`; if we then auto-adopt, we flip that to
+   * `awaitingReview: false` + `autoAdopted: true`. Doing it in two steps
+   * keeps `run()` free of policy concerns and reflects reality if the
+   * adopt step itself fails.
+   */
+  async runAuto(
+    req: DreamRunRequest,
+    policy: 'strict' | 'permissive' | 'off'
+  ): Promise<DreamRunResult & { autoAdoptError?: string; autoAdoptReason?: string }> {
+    const result = await this.run(req, 'auto')
+    if (!result.ok) return result
+    const eligibility = Dreamer.evaluateAutoAdopt(result.diff, policy)
+    if (!eligibility.ok) {
+      return { ...result, autoAdopted: false, autoAdoptReason: eligibility.reason }
+    }
+    const adopted = await this.adopt(req.workspaceRoot)
+    if (!adopted.ok) {
+      return {
+        ...result,
+        autoAdopted: false,
+        autoAdoptError: adopted.error
+      }
+    }
+    await patchDreamHistory(req.workspaceRoot, result.diff.id, {
+      autoAdopted: true,
+      awaitingReview: false
+    }).catch(() => {})
+    return { ...result, autoAdopted: true }
+  }
+
   async loadLast(workspaceRoot: string): Promise<DreamDiff | null> {
     const diffPath = join(workspaceRoot, '.gladdis', DIFF_FILE)
     let raw: string
@@ -345,7 +467,24 @@ export class Dreamer {
     return parsed
   }
 
-  async adopt(workspaceRoot: string): Promise<DreamAdoptResult> {
+  /**
+   * Promote `memory.next.json` → `memory.json`.
+   *
+   * When `selection` is omitted (or both arrays are undefined) every diff row
+   * is applied — this is the legacy full-adopt path. When a selection is
+   * provided, unselected diff rows fall back to live memory so the user can
+   * cherry-pick a subset of changes without throwing the rest away.
+   *
+   * The adoption gate (read from the diff file) is enforced exactly once at
+   * the top: if policy says "blocked" the user can't partial-adopt around it
+   * either. That keeps the trust model intact — a single replace/unsupported
+   * row blocks the whole modal, the user can re-run, or override by editing
+   * the diff if they truly understand the risk.
+   */
+  async adopt(
+    workspaceRoot: string,
+    selection?: DreamAdoptSelection
+  ): Promise<DreamAdoptResult> {
     const dir = join(workspaceRoot, '.gladdis')
     const candidatePath = join(dir, CANDIDATE_FILE)
     const diffPath = join(dir, DIFF_FILE)
@@ -382,14 +521,35 @@ export class Dreamer {
     candidate.workspace.root = workspaceRoot
     candidate.workspace.updatedAt = new Date().toISOString()
 
+    // Partial-adopt path: pull current live memory, then build the final
+    // memory file by applying only the user's selected rows.
+    let finalMemory: MemoryFileV2 = candidate
+    if (selection && (selection.acceptedEntryIds !== undefined || selection.acceptedHygieneIds !== undefined)) {
+      const liveMemory = await loadMemoryFile(workspaceRoot).catch(() => null)
+      const diff = await readDiffFromPath(diffPath)
+      if (!diff) {
+        return {
+          ok: false,
+          error: 'Partial adopt requires a readable diff file (memory.next.diff.json missing or corrupt).'
+        }
+      }
+      finalMemory = applyPartialAdoption(liveMemory, candidate, diff, selection)
+    }
+
     try {
-      await saveMemoryFile(workspaceRoot, candidate)
+      await saveMemoryFile(workspaceRoot, finalMemory)
     } catch (err) {
       return { ok: false, error: `Failed to write memory.json: ${(err as Error).message}` }
     }
     // Remove the candidate after a successful adopt; keep the diff for "View last dream".
     await unlinkSafe(candidatePath)
-    return { ok: true, entryCount: candidate.entries.length }
+    // Reflect adoption in the rolling history so the UI doesn't keep flagging
+    // the entry as "awaiting review" after the user accepts it.
+    const adoptedDiffId = await readDiffId(diffPath)
+    if (adoptedDiffId) {
+      await patchDreamHistory(workspaceRoot, adoptedDiffId, { awaitingReview: false }).catch(() => {})
+    }
+    return { ok: true, entryCount: finalMemory.entries.length }
   }
 
   async discard(workspaceRoot: string): Promise<DreamDiscardResult> {
@@ -446,6 +606,26 @@ async function unlinkSafe(path: string): Promise<void> {
     await unlink(path)
   } catch {
     /* swallow: discarding a non-existent file is fine */
+  }
+}
+
+async function readDiffId(diffPath: string): Promise<string | undefined> {
+  try {
+    const raw = await readFile(diffPath, 'utf8')
+    const parsed = JSON.parse(raw) as { id?: unknown }
+    if (typeof parsed.id === 'string' && parsed.id.length > 0) return parsed.id
+  } catch {
+    /* ignore: diff missing or unreadable */
+  }
+  return undefined
+}
+
+async function readDiffFromPath(diffPath: string): Promise<DreamDiff | null> {
+  try {
+    const raw = await readFile(diffPath, 'utf8')
+    return JSON.parse(raw) as DreamDiff
+  } catch {
+    return null
   }
 }
 

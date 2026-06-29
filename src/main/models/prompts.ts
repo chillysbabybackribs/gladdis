@@ -1,4 +1,5 @@
 import type { ToolDef } from './browserTools'
+import { CODEX_BROWSER_INSTRUCTIONS } from './codex/dynamicBrowserTools'
 
 /**
  * Operating brief for gladdis. Not a persona — orientation and stance, not a
@@ -206,13 +207,7 @@ export const CODEX_SYSTEM =
   'call recall_history, summarize the relevant saved chat context, and stop for the next concrete ' +
   'instruction. Do not edit files, run validations, navigate pages, or continue old work from a bare ' +
   'resume request.\n\n' +
-  'For anything in a browser — viewing, web search, reading a page, screenshots, UI validation — ' +
-  'use the visible Chromium tab the user is watching: search (unified search — hidden SERP + visible ' +
-  'tab live digests), fetch_page, browse_task, read_page, grep_page, and screenshot/screenshot_app. Do not spin ' +
-  'up a separate browser (Playwright, Puppeteer, headless Chrome, OS URL openers, DevTools-port probing).\n\n' +
-  'When debugging Gladdis itself, use the current visible Gladdis browser/tools for browser or UI ' +
-  'behavior. Do not launch a second Gladdis/dev app just to view it. Launch a separate instance only ' +
-  'for startup, cold-boot, or fresh-process validation, and say why before doing so.\n\n' +
+  `${CODEX_BROWSER_INSTRUCTIONS}\n\n` +
   'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
   'or current-site state, ground the answer with read_page or browse_task first.\n\n' +
   'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +

@@ -44,6 +44,7 @@ export class TabManager {
   private order: string[] = []
   private activeId: string | null = null
   private bounds: ViewBounds = { x: 0, y: 0, width: 0, height: 0 }
+  private browserVisible = true
   private seq = 0
   private onPageNavigation?: (tabId: string) => void
 
@@ -88,6 +89,7 @@ export class TabManager {
     const cdp = new CDPSession(wc, id, this.onCdpEvent, [STEALTH_INIT_SCRIPT])
 
     const tab: Tab = { id, view, cdp, favicon: null }
+    view.setVisible(false)
 
     // Push UI updates on any navigation / title / favicon / load change.
     const emit = () => this.onChange()
@@ -228,7 +230,7 @@ export class TabManager {
     }
     this.activeId = id
     if (prev) prev.view.setVisible(false)
-    this.tabs.get(id)?.view.setVisible(true)
+    this.tabs.get(id)?.view.setVisible(this.browserVisible)
     this.applyBounds()
     this.onChange()
   }
@@ -266,6 +268,14 @@ export class TabManager {
   setBounds(bounds: ViewBounds): void {
     this.bounds = bounds
     this.applyBounds()
+  }
+
+  setBrowserVisible(visible: boolean): void {
+    this.browserVisible = visible
+    const tab = this.activeId ? this.tabs.get(this.activeId) : null
+    if (!tab) return
+    tab.view.setVisible(visible)
+    if (visible) this.applyBounds()
   }
 
   private applyBounds(): void {
@@ -385,4 +395,3 @@ export class TabManager {
     await ensureSessionImpl()
   }
 }
-

@@ -1,10 +1,23 @@
-import { app, BaseWindow, WebContentsView, ipcMain, dialog, desktopCapturer, screen } from 'electron'
+import {
+  app,
+  BaseWindow,
+  WebContentsView,
+  ipcMain,
+  dialog,
+  desktopCapturer,
+  screen,
+  Menu,
+  type MenuItemConstructorOptions
+} from 'electron'
 import { attachContextMenu } from './contextMenu'
-import { join } from 'path'
+import { join, resolve } from 'path'
+import { homedir } from 'os'
+import { mkdir } from 'fs/promises'
 import { TabManager } from './TabManager'
 import { KeyStore } from './models/KeyStore'
 import { WorkspaceStore } from './fs/WorkspaceStore'
 import { ChatStore } from './models/ChatStore'
+import { AgentStore } from './models/AgentStore'
 import { ChatService } from './models/ChatService'
 import { PageExtractor } from './extract/PageExtractor'
 import { BrowserTools } from './models/browserTools'
@@ -18,26 +31,33 @@ import installExtension, {
 } from 'electron-devtools-installer'
 import {
   IPC,
+  type AppCommand,
   type CdpCommand,
   type ChatPanelSide,
   type ChatRequest,
   type Conversation,
+  type DreamAutoConfig,
   type DreamRunRequest,
   type Provider,
+  type SaveAgentInput,
   type ViewBounds
 } from '../../shared/types'
+import { AutoDreamScheduler } from './models/memory/AutoDreamScheduler'
+import { loadDreamHistory } from './models/memory/dreamHistory'
 
 let win: BaseWindow
 let uiView: WebContentsView
 let tabs: TabManager
 let keys: KeyStore
 let chats: ChatStore
+let agents: AgentStore
 let chat: ChatService
 let extractor: PageExtractor
 let audit: ModelCallLedger
 let workspace: WorkspaceStore
 let tools: BrowserTools
 let ptyHost: PtyHost
+let autoDream: AutoDreamScheduler
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const trustLocalCertificates = process.env.GLADDIS_TRUST_LOCAL_CERTS === '1'
@@ -53,6 +73,23 @@ const trustedLocalCertHosts = new Set([
   '::1',
   ...extraTrustedHosts
 ])
+
+function applyWorkspaceFolder(folder: string | null) {
+  const previous = workspace.get().folder
+  const ws = workspace.setFolder(folder)
+  tools.setWorkspaceRoot(ws.folder)
+  chat.setCodexFolder(ws.folder)
+  if (previous && previous !== ws.folder) autoDream.stop(previous)
+  if (ws.folder) void autoDream.start(ws.folder)
+  if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.WORKSPACE_UPDATED, ws)
+  return ws
+}
+
+async function createAndUseWorkspaceFolder(folder: string) {
+  const target = resolve(folder.trim())
+  await mkdir(target, { recursive: true })
+  return applyWorkspaceFolder(target)
+}
 
 /**
  * Remote debugging port — exposes the whole CDP surface of gladdis's Chromium
@@ -166,6 +203,9 @@ function createWindow(): void {
 
   keys = new KeyStore()
   chats = new ChatStore()
+  agents = new AgentStore((next) => {
+    if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.AGENTS_UPDATED, next)
+  })
   audit = new ModelCallLedger((event) => {
     if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.AUDIT_EVENT, event)
   })
@@ -198,7 +238,27 @@ function createWindow(): void {
   // because chat must exist first).
   chat.setCodexFolder(workspace.get().folder)
 
+  // Auto-dream scheduler: opt-in, Anthropic-calibrated 24h + 5-session dual
+  // gate. The scheduler reuses the same Dreamer instance ChatService owns,
+  // so manual + auto runs share the inFlight lock automatically.
+  autoDream = new AutoDreamScheduler({
+    dreamer: chat.getDreamerInstance(),
+    chats,
+    getWorkspaceRoot: () => workspace.get().folder,
+    notify: (event) => {
+      if (!uiView.webContents.isDestroyed()) {
+        uiView.webContents.send(IPC.DREAM_AUTO_NOTIFICATION, event)
+      }
+    }
+  })
+  // Start watching whichever workspace was open on launch (no-op if none).
+  void (async () => {
+    const folder = workspace.get().folder
+    if (folder) await autoDream.start(folder)
+  })()
+
   registerIpc()
+  registerApplicationMenu()
 
   // Open the homepage so gladdis always starts with exactly one browser tab.
   tabs.ensureInitialTab()
@@ -255,12 +315,21 @@ function registerIpc(): void {
   })
   ipcMain.handle(IPC.APP_CAPTURE, () => captureAppWindowPng())
   ipcMain.on(IPC.LAYOUT_SET_BOUNDS, (_e, bounds: ViewBounds) => tabs.setBounds(bounds))
+  ipcMain.on(IPC.LAYOUT_SET_BROWSER_VISIBLE, (_e, visible: boolean) =>
+    tabs.setBrowserVisible(visible)
+  )
   ipcMain.handle(IPC.CDP_SEND, (_e, cmd: CdpCommand) =>
     tabs.cdpSend(cmd.tabId, cmd.method, cmd.params)
   )
 
   // Chat / models
-  ipcMain.on(IPC.CHAT_SEND, (_e, req: ChatRequest) => void chat.send(req))
+  ipcMain.on(IPC.CHAT_SEND, (_e, req: ChatRequest) => {
+    // Signal the auto-dream scheduler so it knows the user is active and
+    // delays any scheduled dream until the conversation goes quiet.
+    const folder = workspace.get().folder
+    if (folder) autoDream.nudge(folder)
+    void chat.send(req)
+  })
   ipcMain.on(IPC.CHAT_ABORT, (_e, requestId: string) => chat.abort(requestId))
   ipcMain.handle(IPC.KEYS_STATUS, () => keys.status())
   ipcMain.handle(IPC.KEYS_SET, (_e, provider: Provider, key: string) => keys.set(provider, key))
@@ -271,8 +340,8 @@ function registerIpc(): void {
     synthesizeSpeech(keys, text, voice)
   )
 
-  // Codex (local app-server) status. The Codex working folder is no longer set
-  // here — it follows the single workspace folder (see setWorkspaceFolder below).
+  // Codex (local app-server) status. The Codex working folder follows the
+  // single workspace folder applied through applyWorkspaceFolder.
   ipcMain.handle(IPC.CODEX_STATUS, () => chat.codexStatus())
   ipcMain.handle(IPC.CODEX_MODELS, () => chat.codexModels())
 
@@ -281,14 +350,8 @@ function registerIpc(): void {
   // (where its shell runs, what its pwd reports). Without the Codex half, the
   // header folder set fs-tool paths but Codex's shell still ran in homedir, so
   // `pwd` answered the home dir instead of the chosen folder.
-  const setWorkspaceFolder = (folder: string | null) => {
-    const ws = workspace.setFolder(folder)
-    tools.setWorkspaceRoot(ws.folder)
-    chat.setCodexFolder(ws.folder)
-    return ws
-  }
   ipcMain.handle(IPC.WORKSPACE_GET, () => workspace.get())
-  ipcMain.handle(IPC.WORKSPACE_SET_FOLDER, (_e, folder: string | null) => setWorkspaceFolder(folder))
+  ipcMain.handle(IPC.WORKSPACE_SET_FOLDER, (_e, folder: string | null) => applyWorkspaceFolder(folder))
   ipcMain.handle(IPC.WORKSPACE_PICK_FOLDER, async () => {
     const result = await dialog.showOpenDialog(win, {
       title: 'Choose a folder to work from',
@@ -297,10 +360,18 @@ function registerIpc(): void {
       buttonLabel: 'Use folder'
     })
     if (result.canceled || result.filePaths.length === 0) return workspace.get()
-    return setWorkspaceFolder(result.filePaths[0])
+    return applyWorkspaceFolder(result.filePaths[0])
   })
+  ipcMain.handle(IPC.WORKSPACE_CREATE_FOLDER, (_e, folder: string) =>
+    createAndUseWorkspaceFolder(folder)
+  )
 
   ipcMain.handle(IPC.AUDIT_LIST, () => audit.list())
+
+  // Custom agents are reusable prompt/model presets created from the app menu.
+  ipcMain.handle(IPC.AGENTS_LIST, () => agents.list())
+  ipcMain.handle(IPC.AGENTS_SAVE, (_e, input: SaveAgentInput) => agents.save(input))
+  ipcMain.handle(IPC.AGENTS_DELETE, (_e, id: string) => agents.delete(id))
 
   // Chat history persistence. Both panels persist independently and each
   // restores its own side on launch, so the optional `panel` arg is what
@@ -343,16 +414,52 @@ function registerIpc(): void {
   // pipeline lives in ChatService so it can reuse its provider-agnostic
   // complete() and the live Codex catalog without duplicating those plumbing
   // concerns here.
-  ipcMain.handle(IPC.DREAM_RUN, (_e, req: DreamRunRequest) => chat.dreamRun(req))
+  ipcMain.handle(IPC.DREAM_RUN, async (_e, req: DreamRunRequest) => {
+    const result = await chat.dreamRun(req)
+    // Manual runs reset the scheduler gates — same as if the user had let it
+    // auto-trigger. Only count successful runs so a partial failure doesn't
+    // hide future auto-runs behind the 24h gate.
+    if (result.ok) autoDream.recordManualRun(req.workspaceRoot)
+    return result
+  })
   ipcMain.handle(IPC.DREAM_LOAD_LAST, (_e, workspaceRoot: string) =>
     chat.dreamLoadLast(workspaceRoot)
   )
-  ipcMain.handle(IPC.DREAM_ADOPT, (_e, workspaceRoot: string) => chat.dreamAdopt(workspaceRoot))
+  ipcMain.handle(
+    IPC.DREAM_ADOPT,
+    (
+      _e,
+      workspaceRoot: string,
+      selection?: import('../../shared/types').DreamAdoptSelection
+    ) => chat.dreamAdopt(workspaceRoot, selection)
+  )
   ipcMain.handle(IPC.DREAM_DISCARD, (_e, workspaceRoot: string) =>
     chat.dreamDiscard(workspaceRoot)
   )
   ipcMain.handle(IPC.DREAM_STATUS, (_e, workspaceRoot: string) =>
     chat.dreamStatus(workspaceRoot)
+  )
+
+  // Auto-dream scheduler — config get/set/status, history listing, and a
+  // renderer-side nudge channel (kept separate from CHAT_SEND so the
+  // renderer can also signal activity from non-message UX, e.g. typing).
+  ipcMain.handle(IPC.DREAM_AUTO_GET_CONFIG, (_e, workspaceRoot: string) => {
+    void autoDream.start(workspaceRoot)
+    return autoDream.getConfig(workspaceRoot)
+  })
+  ipcMain.handle(
+    IPC.DREAM_AUTO_SET_CONFIG,
+    (_e, workspaceRoot: string, patch: Partial<DreamAutoConfig>) =>
+      autoDream.setConfig(workspaceRoot, patch)
+  )
+  ipcMain.handle(IPC.DREAM_AUTO_STATUS, (_e, workspaceRoot: string) =>
+    autoDream.status(workspaceRoot)
+  )
+  ipcMain.on(IPC.DREAM_AUTO_NUDGE, (_e, workspaceRoot: string) => {
+    autoDream.nudge(workspaceRoot)
+  })
+  ipcMain.handle(IPC.DREAM_HISTORY_LIST, (_e, workspaceRoot: string) =>
+    loadDreamHistory(workspaceRoot)
   )
 
   // Real PTY terminal — the human's interactive shell, separate from any
@@ -363,6 +470,117 @@ function registerIpc(): void {
     () => workspace.get().folder,
     (channel, payload) => sendIfLive(uiView.webContents, channel, payload)
   )
+}
+
+async function promptCreateWorkspaceFolder(): Promise<void> {
+  const defaultParent = workspace?.get().folder ?? join(homedir(), 'Desktop')
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Create a new workspace folder',
+    defaultPath: join(defaultParent, 'untitled-workspace'),
+    buttonLabel: 'Create Folder',
+    properties: ['createDirectory', 'showOverwriteConfirmation']
+  })
+  if (result.canceled || !result.filePath) return
+
+  const target = resolve(result.filePath)
+  await createAndUseWorkspaceFolder(target)
+}
+
+function sendAppCommand(command: AppCommand): void {
+  if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.APP_COMMAND, command)
+}
+
+function registerApplicationMenu(): void {
+  const hasWorkspace = !!workspace.get().folder
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New Folder...',
+          accelerator: 'CmdOrCtrl+Shift+N',
+          click: () => {
+            void promptCreateWorkspaceFolder().catch((error) => {
+              console.error('[workspace] failed to create folder:', error)
+              void dialog.showErrorBox(
+                'Could not create folder',
+                error instanceof Error ? error.message : String(error)
+              )
+            })
+          }
+        },
+        {
+          label: 'Open Folder...',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => {
+            void dialog
+              .showOpenDialog(win, {
+                title: 'Choose a folder to work from',
+                defaultPath: workspace.get().folder ?? undefined,
+                properties: ['openDirectory', 'createDirectory'],
+                buttonLabel: 'Use folder'
+              })
+              .then((result) => {
+                if (result.canceled || result.filePaths.length === 0) return
+                applyWorkspaceFolder(result.filePaths[0])
+              })
+              .catch((error) => console.error('[workspace] failed to pick folder:', error))
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Start Codex in Terminal',
+          enabled: hasWorkspace,
+          submenu: [
+            {
+              label: 'Standard',
+              accelerator: 'CmdOrCtrl+Alt+C',
+              click: () => sendAppCommand({ type: 'terminal:run', command: 'codex' })
+            },
+            {
+              label: 'Unrestricted (--yolo)',
+              click: () => sendAppCommand({ type: 'terminal:run', command: 'codex --yolo' })
+            }
+          ]
+        },
+        {
+          label: 'Start Claude Code in Terminal',
+          enabled: hasWorkspace,
+          submenu: [
+            {
+              label: 'Standard',
+              accelerator: 'CmdOrCtrl+Alt+L',
+              click: () => sendAppCommand({ type: 'terminal:run', command: 'claude' })
+            },
+            {
+              label: 'Unrestricted (--dangerously-skip-permissions)',
+              click: () =>
+                sendAppCommand({
+                  type: 'terminal:run',
+                  command: 'claude --dangerously-skip-permissions'
+                })
+            }
+          ]
+        },
+        { type: 'separator' },
+        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Agents',
+      submenu: [
+        {
+          label: 'Create an Agent...',
+          click: () => sendAppCommand({ type: 'agents:create' })
+        }
+      ]
+    },
+    { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
+    { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] }
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
 app.whenReady().then(async () => {

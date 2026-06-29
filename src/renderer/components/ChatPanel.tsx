@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import type { ChatMessage, TabInfo } from '../../../shared/types'
+import type { ChatMessage, SavedAgent, TabInfo } from '../../../shared/types'
 import {
   MODELS,
   shouldAttachActivePageContext,
@@ -33,6 +33,7 @@ const newConversationId = () => `conv-${Date.now()}-${convCounter++}`
 export type PanelId = 'left' | 'right'
 
 const modelKey = (panelId: PanelId) => `gladdis:model:${panelId}`
+const agentKey = (panelId: PanelId) => `gladdis:agent:${panelId}`
 const audioKey = (panelId: PanelId) => `gladdis:audio:${panelId}`
 
 const RECENT_TURNS = 8
@@ -44,11 +45,13 @@ function px(n: number): string {
 export function ChatPanel({
   panelId = 'left',
   zoom = 1,
-  footerSlot = null
+  footerSlot = null,
+  onAgentEdit
 }: {
   panelId?: PanelId
   zoom?: number
   footerSlot?: HTMLElement | null
+  onAgentEdit?: (agent: SavedAgent) => void
 } = {}) {
   const [messages, setMessages] = useState<Message[]>([])
   const [convId, setConvId] = useState<string>(() => newConversationId())
@@ -65,6 +68,14 @@ export function ChatPanel({
       return saved && MODELS.some((m) => m.id === saved) ? saved : MODELS[0].id
     } catch {
       return MODELS[0].id
+    }
+  })
+  const [agents, setAgents] = useState<SavedAgent[]>([])
+  const [agentId, setAgentId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(agentKey(panelId))
+    } catch {
+      return null
     }
   })
   const auditRecords = useAuditRecords()
@@ -141,6 +152,23 @@ export function ChatPanel({
     return off
   }, [])
 
+  useEffect(() => {
+    const off = window.gladdis.agents.onUpdated((next) => setAgents(next))
+    void window.gladdis.agents.list().then((next) => setAgents(next))
+    return off
+  }, [])
+
+  useEffect(() => {
+    if (!agentId) return
+    const agent = agents.find((candidate) => candidate.id === agentId)
+    if (!agent) {
+      if (agents.length > 0) persistAgent(null)
+      return
+    }
+    if (modelIdRef.current !== agent.modelId) persistModel(agent.modelId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId, agents])
+
   // Restore each panel's own last-active conversation. lastActive is scoped
   // by panelId in the main process, so the left panel never steals a chat
   // that was last touched on the right (and vice versa) — chats are sticky
@@ -192,6 +220,23 @@ export function ChatPanel({
     }
   }
 
+  const persistAgent = (id: string | null) => {
+    setAgentId(id)
+    try {
+      if (id) localStorage.setItem(agentKey(panelId), id)
+      else localStorage.removeItem(agentKey(panelId))
+    } catch (e) {
+      console.warn('Failed to save agent to localStorage:', e)
+    }
+    const agent = id ? agents.find((candidate) => candidate.id === id) : null
+    if (agent) persistModel(agent.modelId)
+  }
+
+  const deleteAgent = async (id: string) => {
+    await window.gladdis.agents.delete(id)
+    if (id === agentId) persistAgent(null)
+  }
+
   const toggleAudio = () => {
     setAudioOn((on) => {
       const next = !on
@@ -232,6 +277,7 @@ export function ChatPanel({
     }
 
     const activeTab = tabs.find((t) => t.id === activeId) ?? null
+    const selectedAgent = agentId ? agents.find((agent) => agent.id === agentId) ?? null : null
     const userMsg: Message = { role: 'user', text }
     const nextMessages: Message[] = [...messagesRef.current, userMsg]
     const prior: ChatMessage[] = messagesRef.current
@@ -279,7 +325,10 @@ export function ChatPanel({
       mode: 'agent',
       tabId,
       conversationId: convId,
-      contextHints: { activePageFollowup }
+      contextHints: { activePageFollowup },
+      agent: selectedAgent
+        ? { id: selectedAgent.id, name: selectedAgent.name, prompt: selectedAgent.prompt }
+        : undefined
     })
   }
 
@@ -382,6 +431,11 @@ export function ChatPanel({
       modelId={modelId}
       models={models}
       onModelChange={persistModel}
+      agentId={agentId}
+      agents={agents}
+      onAgentChange={persistAgent}
+      onAgentEdit={onAgentEdit ?? (() => {})}
+      onAgentDelete={deleteAgent}
       keyStatus={keyStatus}
       codexStatus={codexStatus}
       workspace={workspace}

@@ -840,17 +840,18 @@ describe('ChatService provider hardening', () => {
     )
   })
 
-  it('tells Codex to use the current Gladdis app/browser instead of launching a second viewer', () => {
+  it('injects the gladdis-browser instruction into the live Codex system prompt', () => {
     expect(CODEX_SYSTEM).not.toContain('[NEED_MORE_CONTEXT]')
     expect(CODEX_SYSTEM).toContain('Resume process:')
     expect(CODEX_SYSTEM).toContain('Do not edit files, run validations, navigate pages, or continue old work')
-    expect(CODEX_SYSTEM).toContain('use the current visible Gladdis browser/tools')
-    expect(CODEX_SYSTEM).toContain('Do not launch a second Gladdis/dev app')
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('use the current visible app/browser first')
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('do not launch a second Gladdis/dev app')
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('Never run external browser commands')
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('playwright screenshot/open/codegen/test/show-report')
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('localhost:9222 DevTools probing')
+    // The browser instruction must be part of the prompt Codex actually receives,
+    // not a dead constant — this is what steers it to the gladdis.* tools and
+    // away from shelling out to a native browser.
+    expect(CODEX_SYSTEM).toContain(CODEX_BROWSER_INSTRUCTIONS)
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('NEVER reach for a browser through your native shell')
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('Do not launch a second Gladdis/dev')
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('playwright (screenshot/open/codegen/test/show-report)')
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('localhost:9222 DevTools')
   })
 
   it('does not attach or read the active page for ordinary chat', async () => {

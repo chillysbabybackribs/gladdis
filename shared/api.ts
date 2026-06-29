@@ -6,6 +6,7 @@ import type {
   TabsUpdatedState,
   ViewBounds
 } from './browser'
+import type { AppCommand } from './appCommand'
 import type {
   ChatPanelSide,
   ChatRequest,
@@ -22,9 +23,18 @@ import type {
   Workspace
 } from './chat'
 import type {
+  SavedAgent,
+  SaveAgentInput,
+} from './agents'
+import type {
   DreamAdoptResult,
+  DreamAdoptSelection,
+  DreamAutoConfig,
+  DreamAutoNotification,
+  DreamAutoStatus,
   DreamDiff,
   DreamDiscardResult,
+  DreamHistoryFile,
   DreamProgressEvent,
   DreamRunRequest,
   DreamRunResult,
@@ -55,9 +65,12 @@ export interface GladdisApi {
   }
   layout: {
     setBounds: (bounds: ViewBounds) => void
+    setBrowserVisible: (visible: boolean) => void
   }
   app: {
     capture: () => Promise<string>
+    /** Native menu and main-process commands routed into the renderer UI. */
+    onCommand: (cb: (command: AppCommand) => void) => () => void
   }
   cdp: {
     send: (cmd: CdpCommand) => Promise<unknown>
@@ -89,12 +102,26 @@ export interface GladdisApi {
     setFolder: (folder: string | null) => Promise<Workspace>
     /** Open a native folder picker; returns the updated workspace. */
     pickFolder: () => Promise<Workspace>
+    /** Create a folder, then use it as the working folder. */
+    createFolder: (folder: string) => Promise<Workspace>
+    /** Live updates when the working folder changes outside this renderer path. */
+    onUpdated: (cb: (workspace: Workspace) => void) => () => void
   }
   audit: {
     /** Recent model calls, newest first. */
     list: () => Promise<ModelCallRecord[]>
     /** Live model call updates from the main-process ledger. */
     onEvent: (cb: (event: ModelCallEvent) => void) => () => void
+  }
+  agents: {
+    /** Saved custom agents, newest-updated first. */
+    list: () => Promise<SavedAgent[]>
+    /** Create or update a saved custom agent. */
+    save: (input: SaveAgentInput) => Promise<SavedAgent>
+    /** Delete a saved custom agent. */
+    delete: (id: string) => Promise<void>
+    /** Live updates when the saved-agent registry changes. */
+    onUpdated: (cb: (agents: SavedAgent[]) => void) => () => void
   }
   chats: {
     /** Conversation headers, newest-updated first; pass a panel to scope by side. */
@@ -137,14 +164,46 @@ export interface GladdisApi {
     run: (req: DreamRunRequest) => Promise<DreamRunResult>
     /** Load the last awaiting-adopt diff for this workspace, if any. */
     loadLast: (workspaceRoot: string) => Promise<DreamDiff | null>
-    /** Atomically promote memory.next.json → memory.json. */
-    adopt: (workspaceRoot: string) => Promise<DreamAdoptResult>
+    /**
+     * Atomically promote memory.next.json → memory.json.
+     *
+     * Pass a `selection` to cherry-pick rows: unselected diff or hygiene rows
+     * fall back to whatever was in live memory before the dream. Omit it to
+     * keep the legacy full-adopt behavior.
+     */
+    adopt: (
+      workspaceRoot: string,
+      selection?: DreamAdoptSelection
+    ) => Promise<DreamAdoptResult>
     /** Remove memory.next.json (and the audit) without changing live memory. */
     discard: (workspaceRoot: string) => Promise<DreamDiscardResult>
     /** Is a dream currently running? At most one per workspace. */
     status: (workspaceRoot: string) => Promise<DreamStatus>
     /** Subscribe to stage-by-stage progress; returns an unsubscribe fn. */
     onProgress: (cb: (event: DreamProgressEvent) => void) => () => void
+    /**
+     * Auto-Dream scheduler — Anthropic-calibrated 24h + 5-session dual gate
+     * with strict auto-adopt. Off by default; users opt in via setConfig.
+     */
+    auto: {
+      /** Read the persisted scheduler config for a workspace. */
+      getConfig: (workspaceRoot: string) => Promise<DreamAutoConfig>
+      /** Update the config and persist; returns the canonical merged value. */
+      setConfig: (
+        workspaceRoot: string,
+        patch: Partial<DreamAutoConfig>
+      ) => Promise<DreamAutoConfig>
+      /** Live scheduler state (gate counters, last skip reason, etc.). */
+      status: (workspaceRoot: string) => Promise<DreamAutoStatus>
+      /** Reset the activity-cooldown timer; called on user activity. */
+      nudge: (workspaceRoot: string) => void
+      /** One-shot when an auto-dream completes; renderer renders as toast. */
+      onNotification: (cb: (event: DreamAutoNotification) => void) => () => void
+    }
+    /** Rolling history of past dream runs (manual + auto), newest first. */
+    history: {
+      list: (workspaceRoot: string) => Promise<DreamHistoryFile>
+    }
   }
   terminal: {
     /** Spawn a new PTY session and return its id (one shell per id). */

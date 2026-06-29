@@ -79,6 +79,12 @@ export interface ReadSpansResult {
   }
 }
 
+export interface RelatedSpanInput {
+  workspaceRoot: string
+  paths: string[]
+  maxResults?: number
+}
+
 const KEY_FILE_CANDIDATES = [
   'package.json',
   'tsconfig.json',
@@ -292,6 +298,19 @@ export class RepoIntelligenceService {
         items: resolved
       }
     }
+  }
+
+  async relatedSpans(input: RelatedSpanInput): Promise<ReadSpanInput[]> {
+    const related = await this.index.relatedFiles({
+      workspaceRoot: input.workspaceRoot,
+      paths: input.paths,
+      maxResults: input.maxResults
+    })
+    return related.map((file) => ({
+      path: file.path,
+      startLine: 1,
+      endLine: 80
+    }))
   }
 
   private async readPackageJson(

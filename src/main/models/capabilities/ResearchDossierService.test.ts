@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
+import { RepoIndexService } from './RepoIndexService'
+import { RepoIntelligenceService } from './RepoIntelligenceService'
 import { ResearchDossierService } from './ResearchDossierService'
 
 describe('ResearchDossierService', () => {
@@ -93,6 +95,51 @@ describe('ResearchDossierService', () => {
     expect(generateContent).toHaveBeenCalledTimes(1)
     expect(searchRepo).toHaveBeenCalledTimes(1)
     expect(readSpans).toHaveBeenCalledTimes(1)
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
+  it('quietly expands dossier reads with indexed import neighbors', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-research-dossier-graph-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(path.join(workspace, 'package.json'), JSON.stringify({ name: 'dossier-graph-demo' }))
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { helperValue } from './helper'",
+        'export class IndexedDossierService {',
+        '  run() {',
+        '    return helperValue',
+        '  }',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(path.join(workspace, 'src', 'helper.ts'), 'export const helperValue = true\n')
+
+    const generateContent = vi.fn(async () => ({ text: '## Graph Dossier' }))
+    const index = new RepoIndexService()
+    await index.refresh(workspace)
+    const service = new ResearchDossierService(
+      () =>
+        ({
+          models: { generateContent }
+        }) as any,
+      new RepoIntelligenceService(index)
+    )
+
+    const result = await service.researchDossier({
+      workspaceRoot: workspace,
+      query: 'IndexedDossierService'
+    })
+    expect(generateContent).toHaveBeenCalled()
+    const [[request]] = generateContent.mock.calls as unknown as Array<[{
+      contents: Array<{ parts: Array<{ text: string }> }>
+    }]>
+    const prompt = request.contents[0].parts[0].text
+
+    expect(result.structuredPayload.suggestedSpans.map((span) => span.path)).toContain('src/helper.ts')
+    expect(prompt).toContain('=== src/helper.ts')
+    expect(prompt).toContain('helperValue')
 
     await fs.rm(workspace, { recursive: true, force: true })
   })

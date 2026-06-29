@@ -79,7 +79,15 @@ export class ResearchDossierService {
       glob: input.glob,
       maxResults: input.maxResults ?? 8
     })
-    const suggestedSpans = search.structuredPayload.suggestedSpans.slice(0, 3)
+    const relatedSpans = await this.relatedSpansCached({
+      workspaceRoot,
+      paths: search.structuredPayload.suggestedSpans.map((span) => span.path),
+      maxResults: 3
+    })
+    const suggestedSpans = mergeSpanSuggestions([
+      ...search.structuredPayload.suggestedSpans.slice(0, 3),
+      ...relatedSpans
+    ], 5)
     const spans =
       suggestedSpans.length > 0
         ? await this.readSpansCached({ workspaceRoot, items: suggestedSpans })
@@ -173,6 +181,24 @@ export class ResearchDossierService {
     return result
   }
 
+  private async relatedSpansCached(input: { workspaceRoot: string; paths: string[]; maxResults: number }): Promise<Array<{ path: string; startLine: number; endLine: number }>> {
+    const service = this.repoIntelligence as RepoIntelligenceService & {
+      relatedSpans?: (args: { workspaceRoot: string; paths: string[]; maxResults?: number }) => Promise<Array<{ path: string; startLine?: number; endLine?: number }>>
+    }
+    if (typeof service.relatedSpans !== 'function' || input.paths.length === 0) return []
+
+    const spans = await service.relatedSpans({
+      workspaceRoot: input.workspaceRoot,
+      paths: input.paths,
+      maxResults: input.maxResults
+    })
+    return spans.map((span) => ({
+      path: span.path,
+      startLine: span.startLine ?? 1,
+      endLine: span.endLine ?? 80
+    }))
+  }
+
   private async readOptional(filePath: string, maxChars: number): Promise<string> {
     try {
       const text = await fs.readFile(filePath, 'utf8')
@@ -209,4 +235,21 @@ export class ResearchDossierService {
     }
     cache.set(key, { value, expiresAt: Date.now() + ResearchDossierService.CACHE_TTL_MS })
   }
+}
+
+function mergeSpanSuggestions(
+  spans: Array<{ path: string; startLine: number; endLine: number }>,
+  limit: number
+): Array<{ path: string; startLine: number; endLine: number }> {
+  const merged = new Map<string, { path: string; startLine: number; endLine: number }>()
+  for (const span of spans) {
+    const existing = merged.get(span.path)
+    if (existing) {
+      existing.startLine = Math.min(existing.startLine, span.startLine)
+      existing.endLine = Math.max(existing.endLine, span.endLine)
+    } else {
+      merged.set(span.path, { ...span })
+    }
+  }
+  return [...merged.values()].slice(0, limit)
 }

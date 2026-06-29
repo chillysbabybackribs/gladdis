@@ -63,4 +63,30 @@ describe('RepoIndexService', () => {
 
     await fs.rm(workspace, { recursive: true, force: true })
   })
+
+  it('returns local import neighbors for indexed files', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-related-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      ["import { helper } from './helper'", 'export class SearchService {', '  value = helper()', '}'].join('\n')
+    )
+    await fs.writeFile(path.join(workspace, 'src', 'helper.ts'), 'export function helper() { return true }\n')
+    await fs.writeFile(path.join(workspace, 'src', 'consumer.ts'), "import { SearchService } from './service'\n")
+
+    const index = new RepoIndexService()
+    await index.refresh(workspace)
+    const related = await index.relatedFiles({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      maxResults: 5
+    })
+
+    expect(related).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'src/helper.ts', reason: 'imported by src/service.ts' }),
+      expect.objectContaining({ path: 'src/consumer.ts', reason: 'imports src/service.ts' })
+    ]))
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
 })

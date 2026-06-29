@@ -41,6 +41,17 @@ export interface RepoIndexSearchHit {
   text: string
 }
 
+export interface RepoIndexRelatedInput {
+  workspaceRoot: string
+  paths: string[]
+  maxResults?: number
+}
+
+export interface RepoIndexRelatedFile {
+  path: string
+  reason: string
+}
+
 const INDEX_VERSION = 1
 const INDEX_DIR = path.join('.gladdis', 'repo-intel')
 const INDEX_FILE = 'index-v1.json'
@@ -148,6 +159,47 @@ export class RepoIndexService {
       .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line)
       .slice(0, maxResults)
       .map(({ score: _score, ...hit }) => hit)
+  }
+
+  async relatedFiles(input: RepoIndexRelatedInput): Promise<RepoIndexRelatedFile[]> {
+    const workspaceRoot = path.resolve(input.workspaceRoot)
+    const snapshot = await this.snapshotIfReady(workspaceRoot)
+    if (!snapshot) return []
+
+    const maxResults = Math.min(20, Math.max(1, input.maxResults ?? 6))
+    const fileSet = new Set(snapshot.files.map((file) => file.path))
+    const seeds = new Set(
+      input.paths
+        .map((filePath) => normalizeRelPath(filePath))
+        .filter((filePath) => filePath && fileSet.has(filePath))
+    )
+    if (seeds.size === 0) return []
+
+    const byPath = new Map(snapshot.files.map((file) => [file.path, file]))
+    const related = new Map<string, RepoIndexRelatedFile>()
+
+    for (const seed of seeds) {
+      const seedFile = byPath.get(seed)
+      if (!seedFile) continue
+      for (const specifier of seedFile.imports) {
+        const resolved = resolveLocalImport(seed, specifier, fileSet)
+        if (!resolved || seeds.has(resolved) || related.has(resolved)) continue
+        related.set(resolved, { path: resolved, reason: `imported by ${seed}` })
+      }
+    }
+
+    for (const file of snapshot.files) {
+      if (seeds.has(file.path) || related.has(file.path)) continue
+      const importsSeed = file.imports.some((specifier) => {
+        const resolved = resolveLocalImport(file.path, specifier, fileSet)
+        return Boolean(resolved && seeds.has(resolved))
+      })
+      if (importsSeed) {
+        related.set(file.path, { path: file.path, reason: `imports ${[...seeds].join(', ')}` })
+      }
+    }
+
+    return [...related.values()].slice(0, maxResults)
   }
 
   private async snapshotIfReady(workspaceRoot: string): Promise<RepoIndexSnapshot | null> {
@@ -340,6 +392,10 @@ function normalizeScope(scope?: string): string | null {
   return clean && clean !== '.' ? clean : null
 }
 
+function normalizeRelPath(filePath: string): string {
+  return filePath.trim().replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/^\/+/, '')
+}
+
 function isInScope(filePath: string, scope: string): boolean {
   return filePath === scope || filePath.startsWith(`${scope}/`)
 }
@@ -347,6 +403,18 @@ function isInScope(filePath: string, scope: string): boolean {
 function matchesGlob(fileName: string, glob: string): boolean {
   const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
   return new RegExp(`^${escaped}$`).test(fileName)
+}
+
+function resolveLocalImport(fromPath: string, specifier: string, fileSet: Set<string>): string | null {
+  if (!specifier.startsWith('.')) return null
+  const fromDir = path.posix.dirname(fromPath)
+  const base = path.posix.normalize(path.posix.join(fromDir, specifier))
+  const candidates = [
+    base,
+    ...[...SOURCE_EXTENSIONS].map((extension) => `${base}${extension}`),
+    ...[...SOURCE_EXTENSIONS].map((extension) => path.posix.join(base, `index${extension}`))
+  ]
+  return candidates.find((candidate) => fileSet.has(candidate)) ?? null
 }
 
 function scoreText(value: string, queryLower: string, base: number): number {

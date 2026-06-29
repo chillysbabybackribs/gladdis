@@ -170,4 +170,46 @@ describe('RepoIndexService', () => {
 
     await fs.rm(workspace, { recursive: true, force: true })
   })
+
+  it('returns focused related spans near symbols matched through import aliases', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-related-spans-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { internalValue as foo } from './helper'",
+        'export function runService() {',
+        '  return foo()',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(
+      path.join(workspace, 'src', 'helper.ts'),
+      [
+        ...Array.from({ length: 34 }, (_, index) => `const filler${index + 1} = ${index + 1}`),
+        'export function internalValue() {',
+        '  return true',
+        '}'
+      ].join('\n')
+    )
+
+    const index = new RepoIndexService()
+    await index.refresh(workspace)
+    const related = await index.relatedFiles({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      query: 'foo',
+      maxResults: 1
+    })
+
+    expect(related).toEqual([
+      expect.objectContaining({
+        path: 'src/helper.ts',
+        startLine: 27,
+        endLine: 53
+      })
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
 })

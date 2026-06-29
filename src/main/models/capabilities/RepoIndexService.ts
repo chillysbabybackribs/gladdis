@@ -57,6 +57,8 @@ export interface RepoIndexRelatedInput {
 export interface RepoIndexRelatedFile {
   path: string
   reason: string
+  startLine?: number
+  endLine?: number
 }
 
 const INDEX_VERSION = 1
@@ -206,10 +208,12 @@ export class RepoIndexService {
         if (!resolved || seeds.has(resolved)) continue
         const candidate = byPath.get(resolved)
         if (!candidate) continue
+        const span = selectRelatedSpan(candidate, queryLower, importBindingsForSpecifier(seedFile, specifier))
         upsertRelated(related, {
           path: resolved,
           reason: `imported by ${seed}`,
-          score: 70 + scoreImportBindings(seedFile, specifier, queryLower) + scoreRelatedFile(candidate, queryLower)
+          score: 70 + scoreImportBindings(seedFile, specifier, queryLower) + scoreRelatedFile(candidate, queryLower),
+          ...span
         })
       }
     }
@@ -221,15 +225,19 @@ export class RepoIndexService {
         return Boolean(resolved && seeds.has(resolved))
       })
       if (importsSeed) {
+        const terms: string[] = []
         const seedImportScore = file.imports.reduce((score, specifier) => {
           const resolved = resolveLocalImport(file.path, specifier, fileSet)
           if (!resolved || !seeds.has(resolved)) return score
+          terms.push(...importBindingsForSpecifier(file, specifier))
           return Math.max(score, scoreImportBindings(file, specifier, queryLower))
         }, 0)
+        const span = selectRelatedSpan(file, queryLower, terms)
         upsertRelated(related, {
           path: file.path,
           reason: `imports ${[...seeds].join(', ')}`,
-          score: 50 + seedImportScore + scoreRelatedFile(file, queryLower)
+          score: 50 + seedImportScore + scoreRelatedFile(file, queryLower),
+          ...span
         })
       }
     }
@@ -500,6 +508,8 @@ function upsertRelated(
   const existing = related.get(candidate.path)
   if (!existing || candidate.score > existing.score) {
     related.set(candidate.path, candidate)
+  } else if (existing && candidate.score === existing.score && existing.startLine == null && candidate.startLine != null) {
+    related.set(candidate.path, { ...existing, startLine: candidate.startLine, endLine: candidate.endLine })
   }
 }
 
@@ -523,15 +533,58 @@ function scoreRelatedFile(file: RepoIndexFile, queryLower: string): number {
 
 function scoreImportBindings(file: RepoIndexFile, specifier: string, queryLower: string): number {
   if (!queryLower) return 0
-  const entry = file.importBindings?.find((candidate) => candidate.specifier === specifier)
-  if (!entry) return 0
+  const bindings = importBindingsForSpecifier(file, specifier)
+  if (bindings.length === 0) return 0
   let score = 0
-  for (const binding of entry.bindings) {
+  for (const binding of bindings) {
     if (binding.toLowerCase().includes(queryLower)) {
       score = Math.max(score, scoreText(binding, queryLower, 55))
     }
   }
   return score
+}
+
+function importBindingsForSpecifier(file: RepoIndexFile, specifier: string): string[] {
+  return file.importBindings?.find((candidate) => candidate.specifier === specifier)?.bindings ?? []
+}
+
+function selectRelatedSpan(
+  file: RepoIndexFile,
+  queryLower: string,
+  relatedTerms: string[]
+): Pick<RepoIndexRelatedFile, 'startLine' | 'endLine'> {
+  const terms = new Set(
+    [
+      queryLower,
+      ...relatedTerms.map((term) => term.toLowerCase())
+    ].filter((term) => term && term !== '*' && term !== 'default')
+  )
+  let best: { symbol: RepoIndexSymbol; score: number } | null = null
+
+  for (const symbol of file.symbols) {
+    const symbolLower = symbol.name.toLowerCase()
+    for (const term of terms) {
+      const score = scoreSymbolTerm(symbolLower, term)
+      if (score === 0) continue
+      if (!best || score > best.score || (score === best.score && symbol.line < best.symbol.line)) {
+        best = { symbol, score }
+      }
+    }
+  }
+
+  if (!best) return {}
+  return {
+    startLine: Math.max(1, best.symbol.line - 8),
+    endLine: best.symbol.endLine + 16
+  }
+}
+
+function scoreSymbolTerm(symbolLower: string, term: string): number {
+  if (symbolLower === term) return 100
+  if (symbolLower.startsWith(term)) return 80
+  if (symbolLower.includes(term)) return 60
+  if (term.includes(symbolLower)) return 40
+  return 0
 }
 
 function scoreText(value: string, queryLower: string, base: number): number {

@@ -310,8 +310,8 @@ export class RepoIntelligenceService {
     })
     return related.map((file) => ({
       path: file.path,
-      startLine: 1,
-      endLine: 80
+      startLine: file.startLine ?? 1,
+      endLine: file.endLine ?? 80
     }))
   }
 

@@ -162,4 +162,47 @@ describe('RepoIntelligenceService', () => {
 
     await fs.rm(workspace, { recursive: true, force: true })
   })
+
+  it('uses index-selected windows for related spans', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-related-spans-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { targetHelper as helperAlias } from './helper'",
+        'export function runService() {',
+        '  return helperAlias()',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(
+      path.join(workspace, 'src', 'helper.ts'),
+      [
+        ...Array.from({ length: 19 }, (_, index) => `const filler${index + 1} = ${index + 1}`),
+        'export function targetHelper() {',
+        '  return true',
+        '}'
+      ].join('\n')
+    )
+
+    const index = new RepoIndexService()
+    await index.refresh(workspace)
+    const service = new RepoIntelligenceService(index)
+    const related = await service.relatedSpans({
+      workspaceRoot: workspace,
+      paths: ['src/service.ts'],
+      query: 'helperAlias',
+      maxResults: 1
+    })
+
+    expect(related).toEqual([
+      {
+        path: 'src/helper.ts',
+        startLine: 12,
+        endLine: 38
+      }
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
 })

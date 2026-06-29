@@ -68,6 +68,31 @@ describe('RepoIntelligenceService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 
+  it('scopes repo search to the provided relative path', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-search-scope-'))
+    await fs.mkdir(path.join(workspace, 'src', 'main'), { recursive: true })
+    await fs.mkdir(path.join(workspace, 'src', 'renderer'), { recursive: true })
+    await fs.writeFile(path.join(workspace, 'src', 'main', 'focus.ts'), 'export const scopedNeedle = true\n')
+    await fs.writeFile(path.join(workspace, 'src', 'renderer', 'outside.ts'), 'export const scopedNeedle = true\n')
+
+    const service = new RepoIntelligenceService()
+    const result = await service.searchRepo({
+      workspaceRoot: workspace,
+      query: 'scopedNeedle',
+      path: 'src/main',
+      glob: '*.ts',
+      maxResults: 5
+    })
+
+    expect(result.summary).toContain('Path: src/main')
+    expect(result.structuredPayload.path).toBe('src/main')
+    expect(result.structuredPayload.hits).toEqual([
+      expect.objectContaining({ path: 'src/main/focus.ts' })
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
   it('reads bounded file spans for targeted repo inspection', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-read-spans-'))
     await fs.mkdir(path.join(workspace, 'src'), { recursive: true })

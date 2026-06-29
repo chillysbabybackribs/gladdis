@@ -29,6 +29,10 @@ export const REPO_TOOLS: ToolDef[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'String or regex-like search query for the workspace.' },
+        path: {
+          type: 'string',
+          description: 'Optional subfolder or file path to scope the search, relative to the selected workspace root.'
+        },
         glob: {
           type: 'string',
           description: 'Optional file glob to narrow the search, e.g. "*.ts" or "src/**/*.tsx".'

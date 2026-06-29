@@ -66,6 +66,29 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('SearchThing.ts:1')
   })
 
+  it('scopes search_repo to the selected folder path when provided', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-search-repo-scope-tool-'))
+    await writeFile(join(dir, 'inside.ts'), 'export const scopedSearchRepoNeedle = true\n')
+    await writeFile(join(dir, 'outside.ts'), 'export const scopedSearchRepoNeedle = true\n')
+    await execFileAsync('mkdir', ['-p', join(dir, 'nested')])
+    await execFileAsync('mv', [join(dir, 'inside.ts'), join(dir, 'nested', 'inside.ts')])
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
+
+    const result = await tools.run(
+      'search_repo',
+      { query: 'scopedSearchRepoNeedle', path: 'nested', glob: '*.ts', max_results: 5 },
+      { tabId: 'tab-1', requestId: 'req-2b', conversationId: 'conv-2b', taskId: 'task-2b' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Path: nested')
+    expect(result.text).toContain('nested/inside.ts:1')
+    expect(result.text).not.toContain('outside.ts:1')
+  })
+
   it('routes read_spans through the capability broker and returns bounded code windows', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gladdis-read-spans-tool-'))
     await writeFile(join(dir, 'example.ts'), ['alpha', 'beta', 'gamma', 'delta'].join('\n'))

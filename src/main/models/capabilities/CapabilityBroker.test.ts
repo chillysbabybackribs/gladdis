@@ -91,6 +91,40 @@ describe('CapabilityBroker', () => {
     ).toEqual(['search_repo:task-2:1', 'search_repo:task-2:1', 'search_repo:task-2:1'])
   })
 
+  it('treats scoped search_repo calls as distinct cache entries', async () => {
+    const emitted: ChatStreamEvent[] = []
+    const searchRepo = async ({ path }: { path?: string }) => ({
+      summary: `Search path: ${path ?? '.'}`,
+      structuredPayload: { totalHits: 1, path: path ?? '.' }
+    })
+    const broker = new CapabilityBroker(
+      {
+        repoOverview: async () => ({
+          summary: 'unused',
+          structuredPayload: {}
+        }),
+        searchRepo
+      } as any,
+      (event) => emitted.push(event)
+    )
+
+    const ctx = { requestId: 'req-2b', assistantMessageId: 'msg-2b', taskId: 'task-2b' }
+    const baseArgs = { workspaceRoot: '/tmp/demo', query: 'chat', glob: '*.ts', maxResults: 5 }
+
+    const first = await broker.searchRepo(ctx, { ...baseArgs, path: 'src/main' })
+    const second = await broker.searchRepo(ctx, { ...baseArgs, path: 'src/main' })
+    const third = await broker.searchRepo(ctx, { ...baseArgs, path: 'src/renderer' })
+
+    expect(first.cacheStatus).toBe('miss')
+    expect(second.cacheStatus).toBe('hit')
+    expect(third.cacheStatus).toBe('miss')
+    expect(
+      emitted
+        .filter((event): event is Extract<ChatStreamEvent, { type: 'capability_activity' }> => event.type === 'capability_activity' && event.event === 'capability_cache_hit')
+        .map((event) => event.callId)
+    ).toEqual(['search_repo:task-2b:2'])
+  })
+
   it('emits the read_spans lifecycle without caching', async () => {
     const emitted: ChatStreamEvent[] = []
     const broker = new CapabilityBroker(

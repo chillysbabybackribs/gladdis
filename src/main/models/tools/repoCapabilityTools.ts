@@ -57,6 +57,7 @@ export async function runSearchRepo(
   const result = await deps.capabilityBroker!.searchRepo(brokerCtx('search_repo', ctx), {
     workspaceRoot: wired.workspaceRoot,
     query,
+    path: typeof args.path === 'string' ? args.path : undefined,
     glob: typeof args.glob === 'string' ? args.glob : undefined,
     maxResults: Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : undefined
   })

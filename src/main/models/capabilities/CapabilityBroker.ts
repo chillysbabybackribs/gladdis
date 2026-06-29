@@ -24,6 +24,7 @@ export interface RepoOverviewArgs {
 export interface SearchRepoArgs {
   workspaceRoot: string
   query: string
+  path?: string
   glob?: string
   maxResults?: number
 }
@@ -414,6 +415,7 @@ export class CapabilityBroker {
     return JSON.stringify({
       workspaceRoot: args.workspaceRoot,
       query: args.query,
+      path: args.path?.trim() || null,
       glob: args.glob ?? null,
       maxResults: args.maxResults ?? null
     })

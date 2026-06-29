@@ -24,6 +24,7 @@ export interface RepoOverviewResult {
 export interface SearchRepoInput {
   workspaceRoot: string
   query: string
+  path?: string
   glob?: string
   maxResults?: number
 }
@@ -33,6 +34,7 @@ export interface SearchRepoResult {
   structuredPayload: {
     workspaceRoot: string
     query: string
+    path?: string
     glob?: string
     totalHits: number
     hits: Array<{
@@ -155,9 +157,10 @@ export class RepoIntelligenceService {
   async searchRepo(input: SearchRepoInput): Promise<SearchRepoResult> {
     const workspaceRoot = path.resolve(input.workspaceRoot)
     this.files.setRoot(workspaceRoot)
+    const searchPath = typeof input.path === 'string' && input.path.trim() ? input.path.trim() : '.'
     const result = await this.files.search(
       input.query,
-      '.',
+      searchPath,
       input.glob,
       1,
       Math.min(20, Math.max(1, input.maxResults ?? 8))
@@ -188,11 +191,12 @@ export class RepoIntelligenceService {
     return {
       summary:
         hits.length > 0
-          ? `Search query: ${input.query}\nHits:\n${preview}${nextReads}`
-          : `Search query: ${input.query}\nHits: none`,
+          ? `Search query: ${input.query}\nPath: ${searchPath}\nHits:\n${preview}${nextReads}`
+          : `Search query: ${input.query}\nPath: ${searchPath}\nHits: none`,
       structuredPayload: {
         workspaceRoot,
         query: input.query,
+        ...(searchPath !== '.' ? { path: searchPath } : {}),
         ...(input.glob ? { glob: input.glob } : {}),
         totalHits: hits.length,
         hits,

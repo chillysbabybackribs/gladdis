@@ -20,12 +20,19 @@ describe('Codex tool policy', () => {
     expect(nativeBrowserCommandReason('xdg-open http://127.0.0.1:5174/')?.kind).toBe(
       'native-browser-tool'
     )
+    expect(nativeBrowserCommandReason('bash -lc "google-chrome-stable --headless http://127.0.0.1:5174"')?.kind).toBe(
+      'native-browser-tool'
+    )
   })
 
   it('allows normal repo/dev-server shell work', () => {
+    const browserWarning = 'External Chrome' + '/Chromium commands bypass Gladdis'
     expect(nativeBrowserCommandReason('npm run build')).toBeNull()
     expect(nativeBrowserCommandReason('npm run dev -- --port 5174')).toBeNull()
     expect(nativeBrowserCommandReason('curl -I http://127.0.0.1:5174/')).toBeNull()
     expect(nativeBrowserCommandReason('rg -n "playwright" package.json src')).toBeNull()
+    expect(nativeBrowserCommandReason(`rg -n "${browserWarning}" src`)).toBeNull()
+    expect(nativeBrowserCommandReason('rg -n "chromium" src/main/models/codex/toolPolicy.ts')).toBeNull()
+    expect(nativeBrowserCommandReason('bash -lc "rg -n chromium src/main/models/codex/toolPolicy.ts"')).toBeNull()
   })
 })

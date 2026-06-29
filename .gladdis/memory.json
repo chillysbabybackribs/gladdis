@@ -2,7 +2,7 @@
   "version": 2,
   "workspace": {
     "root": "/home/dp/Desktop/myworkspace/Gladdis",
-    "updatedAt": "2026-06-29T19:36:38.930Z"
+    "updatedAt": "2026-06-29T22:32:23.483Z"
   },
   "entries": [
     {
@@ -518,6 +518,117 @@
         "ui-fix-pattern",
         "dreamed"
       ]
+    },
+    {
+      "id": "mem_mqzsmg1m_fsqbxh",
+      "kind": "project-fact",
+      "scope": "workspace",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "key": "agents_review_summary",
+      "value": {
+        "task": "Review current Agents header dropdown and create agent feature with optimize testing",
+        "current_workflow": {
+          "step_1": "User opens create agent modal",
+          "step_2": "User names the agent",
+          "step_3": "User writes brief description of agent type",
+          "step_4": "User selects optimization level: 'quick' or 'deep'",
+          "step_5": "System creates optimized agent based on selected mode",
+          "goal": "Test and calibrate quality levels between quick and deep optimize"
+        },
+        "ui_components": {
+          "header": "AgentPicker.tsx - shows current agents in dropdown",
+          "modal": "AgentBuilderModal.tsx - 666 lines, handles entire create/edit flow",
+          "optimize_button": "Two modes: 'Quick' and 'Deep' toggle in modal"
+        },
+        "quick_mode_behavior": {
+          "description": "Quick mode runs a compact workspace summary only",
+          "process": "agentOptimizerWorkspaceSummaryQuick()",
+          "steps": [
+            "1. Calls repoIntelligence.repoOverview() with workspace root and rough prompt focus",
+            "2. Returns quick summary in format: 'Mode: quick' + overview summary",
+            "3. Fallback: if overview fails, returns focus text only"
+          ],
+          "token_efficiency": "Most lightweight - minimal API calls"
+        },
+        "deep_mode_behavior": {
+          "description": "Deep mode runs search, read spans, and dossier synthesis",
+          "process": "agentOptimizerWorkspaceSummaryDeep()",
+          "steps": [
+            "1. repoIntelligence.repoOverview() - get workspace overview",
+            "2. Extract structured data: package name, package manager, scripts",
+            "3. Run 3 search queries: (roughPrompt, roughPrompt+tests, roughPrompt+package.json)",
+            "4. Collect top 6 results per query, suggest spans for reading",
+            "5. Read up to 4 suggested code spans (2 per query max)",
+            "6. researchDossier.researchDossier() - synthesis pass with up to 12 results",
+            "7. Combine all evidence into detailed context summary"
+          ],
+          "token_efficiency": "Much heavier - runs multiple searches, reads files, synthesizes"
+        },
+        "what_optimizer_does_with_evidence": {
+          "system_prompt": "Gladdis Agent Builder - expert designer of compact, high-leverage agents",
+          "input_to_llm": "JSON containing: roughGoal, requestedName, existingAgent (if editing), selectedModel, optimizationMode, workspaceEvidence",
+          "llm_task": "Convert rough goal into saved agent definition with optimized system prompt",
+          "output_schema": {
+            "name": "short agent name",
+            "goal": "user goal",
+            "prompt": "system prompt for saved agent",
+            "testTask": "one concise test task",
+            "contextSummary": "one sentence on context used",
+            "notes": "optional notes array",
+            "validationNotes": "optional validation notes",
+            "preferredTools": "list of tools agent should prefer",
+            "disallowedTools": "list of tools agent should avoid",
+            "knownPaths": "important paths in workspace",
+            "knownCommands": "important commands to use",
+            "workflowSteps": "numbered workflow steps",
+            "verificationSteps": "how to verify success",
+            "stopConditions": "when to stop",
+            "fallbackRules": "fallback strategies",
+            "assumptions": "key assumptions about task",
+            "testTasks": "additional test tasks",
+            "optimizationSummary": "what was learned",
+            "evidenceNotes": "notes on evidence used"
+          },
+          "design_priorities": [
+            "Optimize for direct task completion at highest practical quality",
+            "Minimize token use by front-loading durable context, constraints, exact targets, decision rules",
+            "Do not rediscover info already in workspace evidence or user goal",
+            "Treat exact paths, component names, commands, schemas, APIs as valuable context",
+            "Keep agent general enough for task family; don't hard-code unless needed",
+            "Preserve user intent - don't invent facts or requirements"
+          ]
+        },
+        "current_quality_testing": {
+          "what_varies": "Amount and depth of workspace evidence fed to optimizer",
+          "quick": "Only repoOverview() - basic structure and focus",
+          "deep": "Overview + 3 search queries + file read spans + research dossier",
+          "goal": "Understand where quality levels currently are and find sweet spot",
+          "hypothetical_measurement": "Agent prompt quality, specificity, tool selection, workflow correctness"
+        },
+        "key_files": {
+          "ui_modal": "src/renderer/components/AgentBuilderModal.tsx",
+          "backend_optimization": "src/main/models/ChatService.ts (optimizeAgent method, lines 438-550+)",
+          "workspace_quick": "ChatService.agentOptimizerWorkspaceSummaryQuick() - line ~600",
+          "workspace_deep": "ChatService.agentOptimizerWorkspaceSummaryDeep() - line ~610",
+          "types": "shared/agents.ts - OptimizeAgentInput, OptimizeAgentResult, SavedAgentBlueprint"
+        },
+        "fallback_behavior": {
+          "deep_mode_fallback": "If deep fails, automatically falls back to quick + error message",
+          "complete_failure": "If no workspace selected, uses portable prompt with goal only"
+        }
+      },
+      "text": "agents_review_summary: {\"task\":\"Review current Agents header dropdown and create agent feature with optimize testing\",\"current_workflow\":{\"step_1\":\"User opens create agent modal\",\"step_2\":\"User names the agent\",\"step_3\":\"User writes brief description of agent type\",\"step_4\":\"User selects optimization level: 'quick' or 'deep'\",\"step_5\":\"System creates optimized agent based on selected mode\",\"goal\":\"Test and calibrate quality levels between quick and deep optimize\"},\"ui_components\":{\"header\":\"AgentPicker.tsx - shows current agents in dropdown\",\"modal\":\"AgentBuilderModal.tsx - 666 lines, handles entire create/edit flow\",\"optimize_button\":\"Two modes: 'Quick' and 'Deep' toggle in modal\"},\"quick_mode_behavior\":{\"description\":\"Quick mode runs a compact workspace summary only\",\"process\":\"agentOptimizerWorkspaceSummaryQuick()\",\"steps\":[\"1. Calls repoIntelligence.repoOverview() with workspace root and rough prompt focus\",\"2. Returns quick summary in format: 'Mode: quick' + overview summary\",\"3. Fallback: if overview fails, returns focus text only\"],\"token_efficiency\":\"Most lightweight - minimal API calls\"},\"deep_mode_behavior\":{\"description\":\"Deep mode runs search, read spans, and dossier synthesis\",\"process\":\"agentOptimizerWorkspaceSummaryDeep()\",\"steps\":[\"1. repoIntelligence.repoOverview() - get workspace overview\",\"2. Extract structured data: package name, package manager, scripts\",\"3. Run 3 search queries: (roughPrompt, roughPrompt+tests, roughPrompt+package.json)\",\"4. Collect top 6 results per query, suggest spans for reading\",\"5. Read up to 4 suggested code spans (2 per query max)\",\"6. researchDossier.researchDossier() - synthesis pass with up to 12 results\",\"7. Combine all evidence into detailed context summary\"],\"token_efficiency\":\"Much heavier - runs multiple searches, reads files, synthesizes\"},\"what_optimizer_does_with_evidence\":{\"system_prompt\":\"Gladdis Agent Builder - expert designer of compact, high-leverage agents\",\"input_to_llm\":\"JSON containing: roughGoal, requestedName, existingAgent (if editing), selectedModel, optimizationMode, workspaceEvidence\",\"llm_task\":\"Convert rough goal into saved agent definition with optimized system prompt\",\"output_schema\":{\"name\":\"short agent name\",\"goal\":\"user goal\",\"prompt\":\"system prompt for saved agent\",\"testTask\":\"one concise test task\",\"contextSummary\":\"one sentence on context used\",\"notes\":\"optional notes array\",\"validationNotes\":\"optional validation notes\",\"preferredTools\":\"list of tools agent should prefer\",\"disallowedTools\":\"list of tools agent should avoid\",\"knownPaths\":\"important paths in workspace\",\"knownCommands\":\"important commands to use\",\"workflowSteps\":\"numbered workflow steps\",\"verificationSteps\":\"how to verify success\",\"stopConditions\":\"when to stop\",\"fallbackRules\":\"fallback strategies\",\"assumptions\":\"key assumptions about task\",\"testTasks\":\"additional test tasks\",\"optimizationSummary\":\"what was learned\",\"evidenceNotes\":\"notes on evidence used\"},\"design_priorities\":[\"Optimize for direct task completion at highest practical quality\",\"Minimize token use by front-loading durable context, constraints, exact targets, decision rules\",\"Do not rediscover info already in workspace evidence or user goal\",\"Treat exact paths, component names, commands, schemas, APIs as valuable context\",\"Keep agent general enough for task family; don't hard-code unless needed\",\"Preserve user intent - don't invent facts or requirements\"]},\"current_quality_testing\":{\"what_varies\":\"Amount and depth of workspace evidence fed to optimizer\",\"quick\":\"Only repoOverview() - basic structure and focus\",\"deep\":\"Overview + 3 search queries + file read spans + research dossier\",\"goal\":\"Understand where quality levels currently are and find sweet spot\",\"hypothetical_measurement\":\"Agent prompt quality, specificity, tool selection, workflow correctness\"},\"key_files\":{\"ui_modal\":\"src/renderer/components/AgentBuilderModal.tsx\",\"backend_optimization\":\"src/main/models/ChatService.ts (optimizeAgent method, lines 438-550+)\",\"workspace_quick\":\"ChatService.agentOptimizerWorkspaceSummaryQuick() - line ~600\",\"workspace_deep\":\"ChatService.agentOptimizerWorkspaceSummaryDeep() - line ~610\",\"types\":\"shared/agents.ts - OptimizeAgentInput, OptimizeAgentResult, SavedAgentBlueprint\"},\"fallback_behavior\":{\"deep_mode_fallback\":\"If deep fails, automatically falls back to quick + error message\",\"complete_failure\":\"If no workspace selected, uses portable prompt with goal only\"}}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782772296408-5"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-29T22:32:23.482Z",
+        "lastReinforcedAt": "2026-06-29T22:32:23.482Z"
+      },
+      "tags": []
     }
   ],
   "tasks": {

@@ -102,7 +102,14 @@ export async function runSearchFiles(deps: FsToolsDeps, args: Record<string, any
     optNum(args.max_results) ?? undefined,
     search.regex
   )
-  const body = r.hits.map((h) => {
+  // Render only the top-ranked hits in full. A broad query can return dozens of
+  // hits, each carrying a snippet + read_file suggestion — rendering all of them is
+  // the single fattest item a search-heavy turn drops into the model's context. Hits
+  // are already score-ranked, so the top slice is the useful part; the rest are
+  // reported as a count so the model narrows its query instead of assuming it saw all.
+  const RENDERED_HITS = 15
+  const shown = r.hits.slice(0, RENDERED_HITS)
+  const body = shown.map((h) => {
     if (h.kind === 'path') {
       return (
         `${h.path} [path hit]\n` +
@@ -116,9 +123,13 @@ export async function runSearchFiles(deps: FsToolsDeps, args: Record<string, any
       h.snippet
     )
   }).join('\n\n')
+  const overflow = r.hits.length - shown.length
+  const header =
+    `${r.hits.length} hit(s)${r.truncated ? ' (truncated)' : ''}` +
+    (overflow > 0 ? ` — showing top ${shown.length}; narrow the query to see the other ${overflow}` : '')
   return {
     ok: true,
-    text: cap(`${r.hits.length} hit(s)${r.truncated ? ' (truncated)' : ''}\n${body}`)
+    text: cap(`${header}\n${body}`)
   }
 }
 

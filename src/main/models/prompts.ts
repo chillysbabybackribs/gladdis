@@ -1,5 +1,5 @@
 import type { ToolDef } from './browserTools'
-import { CODEX_BROWSER_INSTRUCTIONS } from './codex/dynamicBrowserTools'
+import { CODEX_BROWSER_INSTRUCTIONS, GLADDIS_WEB_TOOLS_RULE } from './codex/dynamicBrowserTools'
 
 /**
  * Operating brief for gladdis. Not a persona — orientation and stance, not a
@@ -36,6 +36,7 @@ const REASONING_METHOD =
 
 const BROWSER_OVERVIEW =
   '## Browser tools\n' +
+  `${GLADDIS_WEB_TOOLS_RULE}\n\n` +
   'All browser actions act on the VISIBLE tab the user is watching — they see the page change. ' +
   'Use your own judgment about which tool fits; there is no fixed script.\n\n' +
   '  • search → finds web results, then opens the best hit in the visible tab.\n' +
@@ -43,7 +44,6 @@ const BROWSER_OVERVIEW =
   '  • browse_task → multi-step deterministic flows (logins, checkouts, multi-page processes).\n' +
   '  • screenshot/screenshot_app → visual confirmation only.\n\n' +
   'Start with grep_* or read_page before interactions. Prefer grep_page for precise coordinates, then act, then re-read. ' +
-  'Use search only when URL intent is unknown or user asks for web search. ' +
   'Prefer finishing the user goal over literal wording and ask one clarifying option if still ambiguous.'
 
 const BROWSER_INTERACTION_GUIDANCE =

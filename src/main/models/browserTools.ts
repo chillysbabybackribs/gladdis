@@ -338,8 +338,35 @@ export class BrowserTools {
           return runGrepType(this.driveDeps(), args, { tabId: ctx.tabId })
 
         // ── Filesystem ──────────────────────────────────────────────────────
-        case 'read_file':
-          return runReadFile(this.fsDeps(), args)
+        case 'read_file': {
+          // Dedup identical re-reads within one task. The model re-reads the same
+          // path+range across turns (e.g. re-opening a file it already pulled in),
+          // and each re-read re-sends the full contents at full price. If this exact
+          // read already happened this task, point it back at the prior result rather
+          // than shipping the file again. Reuses the existing per-task dedup scope.
+          const num = (v: unknown): string => {
+            const n = typeof v === 'number' ? v : Number(v)
+            return Number.isFinite(n) ? String(n) : ''
+          }
+          const readKey =
+            `read_file:${String(args.path ?? '')}:${num(args.start_line)}:` +
+            `${num(args.end_line)}:${args.full === true ? 'full' : ''}`
+          const priorRead = this.taskScope(ctx).get(readKey)
+          if (priorRead) {
+            return {
+              ok: true,
+              text:
+                `Already read ${String(args.path ?? '')} earlier in this task — its contents are above ` +
+                `(${priorRead}). Re-use that; call recall_history if it was trimmed. ` +
+                `Read again only if the file may have changed since.`
+            }
+          }
+          const outcome = await runReadFile(this.fsDeps(), args)
+          if (outcome.ok) {
+            this.rememberDone(ctx, readKey, `read at iteration ${ctx.iteration ?? '?'}`)
+          }
+          return outcome
+        }
         case 'write_file':
           return runWriteFile(this.fsDeps(), args)
         case 'edit_file':

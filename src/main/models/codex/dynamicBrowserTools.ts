@@ -38,6 +38,22 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
     inputSchema: tool.parameters as unknown as JsonValue
   })) as JsonValue[]
 
+// The single source of truth — for EVERY provider, not just Codex — for the hard
+// rule that web/search work goes through Gladdis's own tools, never the model's
+// built-in/native web search or grounding. Direct providers (Gemini, OpenAI,
+// Anthropic, Grok) get this via prompts.ts (BROWSER_OVERVIEW); Codex composes it
+// with its own shell-specific lines below. Worded as a binding rule because a
+// soft "prefer" nudge let Gemini fall back to its native search.
+export const GLADDIS_WEB_TOOLS_RULE =
+  'WEB SEARCH RULE — binding, not a preference: every web/search action goes through Gladdis\'s own ' +
+  'tools, which drive the visible Chromium tab the user is watching. Use search and deep_search for web ' +
+  'search (the user sees the results in-tab), and fetch_page to read a known URL. ' +
+  'You do NOT have a working built-in/native web search or grounding here: it is disabled and its results ' +
+  'do not reach the user. Treat any urge to "search the web" or answer a current/dated/online question ' +
+  'from your own knowledge as a signal to call search instead. Never answer a question that needs live web ' +
+  'facts from memory, and never claim you cannot search — the search tool is always available for that. ' +
+  'Gladdis\'s search is the only web search that exists for this turn.'
+
 // The single source of truth for how Codex is told to do web/browser work.
 // Injected into CODEX_SYSTEM (see prompts.ts) so it actually reaches the model
 // on every turn. Native web search is already disabled via config; the trap
@@ -45,11 +61,10 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
 // (which stays on for code work) during "visual validation" — hence the
 // explicit "even via your shell" line.
 export const CODEX_BROWSER_INSTRUCTIONS =
-  'For ALL web and browser work — web search, opening a URL, reading a page, screenshots, UI/visual ' +
-  'validation — use the gladdis.* tools that drive the visible Chromium tab the user is watching: ' +
-  'search and deep_search (web search — the user sees results in-tab), fetch_page, navigate, browse_task, ' +
-  'read_page, grep_page, grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. ' +
-  'For repo intel use recall_history, repo_overview, search_repo, read_spans, research_dossier, and verify_change. ' +
+  `${GLADDIS_WEB_TOOLS_RULE}\n` +
+  'For browser work beyond search use the gladdis.* tools too: navigate, browse_task, read_page, grep_page, ' +
+  'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
+  'recall_history, repo_overview, search_repo, read_spans, research_dossier, and verify_change. ' +
   'Prefer grep_click/grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
   'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, ' +
   'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +

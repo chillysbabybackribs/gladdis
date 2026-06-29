@@ -29,9 +29,10 @@ export interface ModelOption {
  * the field) once the provider has shipped the model.
  */
 export const MODELS: ModelOption[] = [
-  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', availability: 'speculative' },
-  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic', availability: 'speculative' },
-  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic', availability: 'speculative' },
+  { id: 'claude-fable-5', label: 'Claude Fable 5', provider: 'anthropic', availability: 'verified' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic', availability: 'verified' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', availability: 'verified' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview-customtools', label: 'Gemini 3.1 Pro Preview Custom Tools', provider: 'google', availability: 'verified' },

@@ -1286,7 +1286,7 @@ describe('ChatService provider hardening', () => {
     ])
   })
 
-  it('trims older Google tool results with a recallable tool_call_id', () => {
+  it('trims older Google tool results with a recallable tool_call_id', async () => {
     const records = [
       {
         name: 'read_page',
@@ -1300,7 +1300,7 @@ describe('ChatService provider hardening', () => {
       }
     ]
 
-    stubOldGoogleResults(records, 1)
+    await stubOldGoogleResults(records, 1)
 
     expect(records[0].response.result).toContain('[trimmed] (id read_page-0-0)')
     expect(records[0].response.result).toContain('tool_call_id "read_page-0-0"')

@@ -27,7 +27,7 @@ async function getOrCreateGeminiCache(args: {
   workspaceBlock: string | null
   tools?: any[]
 }): Promise<string | undefined> {
-  if (!args.workspaceBlock || args.workspaceBlock.length < 50000) {
+  if (!args.workspaceBlock) {
     return undefined
   }
 
@@ -43,7 +43,12 @@ async function getOrCreateGeminiCache(args: {
   }
 
   try {
-    // 1. Count tokens first to verify minimum threshold of 32,768 tokens
+    // 1. Count tokens to verify the API's real minimum-cacheable size. Gemini's
+    // documented floor is 2,048 tokens (2.0/2.5) and 4,096 (3.x); use 4,096 so the
+    // cache create never fails on a Gemini-3 model. The old 32,768 floor was ~8x too
+    // high and starved small-many-files reviews (the workspaceBlock rarely reaches it)
+    // of any caching at all.
+    const MIN_CACHEABLE_TOKENS = 4096
     const countResponse = await args.ai.models.countTokens({
       model: args.modelId,
       contents: [{ role: 'user', parts: [{ text: args.workspaceBlock }] }],
@@ -53,7 +58,7 @@ async function getOrCreateGeminiCache(args: {
     })
 
     const totalTokens = countResponse.totalTokens ?? 0
-    if (totalTokens < 32768) {
+    if (totalTokens < MIN_CACHEABLE_TOKENS) {
       return undefined
     }
 
@@ -288,14 +293,14 @@ export async function runGoogleToolLoop(args: {
   const responseObjs: GoogleToolResponseRecord[] = []
   const validation = createToolValidationState()
 
-  // Resolve or create Gemini context cache for large workspace blocks
-  const cachedContentName = await getOrCreateGeminiCache({
-    ai: args.ai,
-    modelId: args.modelId,
-    agentSystem: args.agentSystem,
-    workspaceBlock: args.workspaceBlock,
-    tools: [{ functionDeclarations }]
-  })
+  // Gemini explicit context caching is disabled: getOrCreateGeminiCache uses
+  // `systemInstruction` on countTokens/caches.create, which the Gemini *Developer* API
+  // rejects ("only supported in Gemini Enterprise Agent Platform mode"), so the path
+  // always threw, was caught, and returned undefined — i.e. it never cached anything and
+  // only spammed the log. Left as a no-op until real Developer-API caching is wired
+  // (contents-only, no systemInstruction). The token win is the aged-result summarizer below.
+  const cachedContentName: string | undefined = undefined
+  void getOrCreateGeminiCache
 
   for (let turn = 0; !args.signal.aborted; turn++) {
     args.ctx.iteration = turn + 1
@@ -312,6 +317,46 @@ export async function runGoogleToolLoop(args: {
       stage: `chat:browser:${turn}`,
       input: { system: args.agentSystem, tools: functionDeclarations, contents }
     })
+    // TEMP token-bloat probe — remove after one diagnostic run.
+    {
+      const partChars = (parts: any[]): number =>
+        (parts ?? []).reduce((sum: number, p: any) => {
+          if (p?.text) return sum + p.text.length
+          if (p?.functionCall) return sum + JSON.stringify(p.functionCall).length
+          if (p?.functionResponse) return sum + JSON.stringify(p.functionResponse).length
+          if (p?.inlineData?.data) return sum + p.inlineData.data.length
+          return sum + JSON.stringify(p ?? '').length
+        }, 0)
+      let priorUser = 0
+      let modelOutputs = 0
+      let verbatimResults = 0
+      let stubResults = 0
+      for (const c of contents as any[]) {
+        const sz = partChars(c.parts)
+        if (c.role === 'model') {
+          modelOutputs += sz
+        } else if (c.role === 'user') {
+          const isToolResult = (c.parts ?? []).some((p: any) => p.functionResponse)
+          if (!isToolResult) {
+            priorUser += sz
+          } else {
+            const stubbed = (c.parts ?? []).some(
+              (p: any) => typeof p?.functionResponse?.response?.result === 'string' &&
+                p.functionResponse.response.result.startsWith(STUB_PREFIX)
+            )
+            if (stubbed) stubResults += sz
+            else verbatimResults += sz
+          }
+        }
+      }
+      const total = priorUser + modelOutputs + verbatimResults + stubResults
+      const k = (n: number) => (n / 1000).toFixed(1) + 'k'
+      console.log(
+        `[token-probe] turn=${turn} contents=${(contents as any[]).length} totalChars=${k(total)} ` +
+        `priorUser=${k(priorUser)} modelOutputs=${k(modelOutputs)} ` +
+        `verbatimResults=${k(verbatimResults)} stubResults=${k(stubResults)}`
+      )
+    }
     let resp: any
     try {
       const config: any = {
@@ -367,7 +412,11 @@ export async function runGoogleToolLoop(args: {
       return
     }
 
-    stubOldGoogleResults(responseObjs, args.keepResults)
+    await stubOldGoogleResults(responseObjs, args.keepResults, {
+      ai: args.ai,
+      audit: args.audit,
+      modelId: 'gemini-2.5-flash-lite'
+    })
 
     const responseParts: any[] = []
     for (const [callIndex, c] of calls.entries()) {
@@ -405,16 +454,85 @@ export async function runGoogleToolLoop(args: {
   }
 }
 
-/** Same idea for the Google functionResponse result strings. */
-export function stubOldGoogleResults(objs: GoogleToolResponseRecord[], keep: number): void {
+/** Only summarize aged results big enough that compression actually saves tokens. */
+const SUMMARIZE_MIN_CHARS = 2_000
+/** Cap the summarizer's own output so a stub never re-bloats the payload. */
+const SUMMARY_MAX_OUTPUT_TOKENS = 256
+
+/** One-time map: callId -> generated summary, so a result is summarized at most once. */
+const summaryCache = new Map<string, string>()
+
+function bareStub(rec: GoogleToolResponseRecord): string {
+  return (
+    `${STUB_PREFIX} (id ${rec.callId}) — earlier ${rec.name} result trimmed to save tokens. ` +
+    `Call recall_history with tool_call_id "${rec.callId}" to read it in full.`
+  )
+}
+
+/**
+ * Summarize the full tool-result text with a cheap model (Gemini Flash-Lite) so the
+ * aged stub keeps WHAT the model learned, not just a "trimmed" placeholder. Falls back
+ * to the bare stub on any failure — summarization is best-effort, never load-bearing.
+ */
+async function summarizeAgedResult(
+  rec: GoogleToolResponseRecord,
+  fullText: string,
+  summarizer: {
+    ai: GoogleGenAI
+    audit: ModelAudit
+    modelId: string
+  }
+): Promise<string> {
+  const cached = summaryCache.get(rec.callId)
+  if (cached) return cached
+  try {
+    const summary = await completeGoogle({
+      ai: summarizer.ai,
+      audit: summarizer.audit,
+      modelId: summarizer.modelId,
+      system:
+        'You compress a tool result so a coding agent keeps the key facts without the full text. ' +
+        'Output 1-4 tight lines: what the result contained (files/symbols/values/answer). No preamble.',
+      user: fullText,
+      maxOutputTokens: SUMMARY_MAX_OUTPUT_TOKENS,
+      stage: 'summarize-aged-result'
+    })
+    const trimmed = summary.trim()
+    if (!trimmed) return bareStub(rec)
+    const stub =
+      `${STUB_PREFIX} (id ${rec.callId}) — earlier ${rec.name} result, summarized to save tokens:\n` +
+      `${trimmed}\n` +
+      `Call recall_history with tool_call_id "${rec.callId}" to read it in full.`
+    summaryCache.set(rec.callId, stub)
+    return stub
+  } catch (err) {
+    console.warn('[summarize-aged-result] falling back to bare stub:', err)
+    return bareStub(rec)
+  }
+}
+
+/**
+ * Trim tool results that have aged past the verbatim window. Large results are replaced
+ * with a model-generated summary (cheap model) instead of a bare placeholder, so the
+ * agent retains the knowledge; small results just get the bare stub. `summarizer`
+ * is optional — without it (or on any failure) we fall back to the original bare stub.
+ */
+export async function stubOldGoogleResults(
+  objs: GoogleToolResponseRecord[],
+  keep: number,
+  summarizer?: { ai: GoogleGenAI; audit: ModelAudit; modelId: string }
+): Promise<void> {
   const cutoff = objs.length - keep
   for (let i = 0; i < cutoff; i++) {
     const rec = objs[i]
     const r = rec.response
     if (r.result.startsWith(STUB_PREFIX)) continue
-    r.result =
-      `${STUB_PREFIX} (id ${rec.callId}) — earlier ${rec.name} result trimmed to save tokens. ` +
-      `Call recall_history with tool_call_id "${rec.callId}" to read it in full.`
+    const fullText = r.result
+    if (summarizer && fullText.length >= SUMMARIZE_MIN_CHARS) {
+      r.result = await summarizeAgedResult(rec, fullText, summarizer)
+    } else {
+      r.result = bareStub(rec)
+    }
   }
 }
 

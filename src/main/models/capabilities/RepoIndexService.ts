@@ -1,5 +1,5 @@
 import * as fs from 'fs/promises'
-import type { Dirent } from 'fs'
+import type { Dirent, Stats } from 'fs'
 import * as path from 'path'
 import ts from 'typescript'
 
@@ -24,6 +24,7 @@ export interface RepoIndexFile {
   path: string
   hash: string
   bytes: number
+  mtimeMs?: number
   imports: string[]
   importBindings: RepoIndexImport[]
   reExports: RepoIndexReExport[]
@@ -280,14 +281,21 @@ export class RepoIndexService {
 
   private async rebuild(workspaceRoot: string): Promise<RepoIndexSnapshot> {
     const files = await listSourceFiles(workspaceRoot)
+    const previous = await this.readPersisted(workspaceRoot)
+    const previousByPath = new Map(previous?.files.map((file) => [file.path, file]) ?? [])
     const indexed: RepoIndexFile[] = []
     for (const relPath of files.slice(0, MAX_FILES_PER_BUILD)) {
       const absPath = path.join(workspaceRoot, relPath)
       try {
         const stat = await fs.stat(absPath)
         if (!stat.isFile() || stat.size > MAX_INDEXED_FILE_BYTES) continue
+        const previousFile = previousByPath.get(relPath)
+        if (previousFile && canReuseIndexedFile(previousFile, stat)) {
+          indexed.push(previousFile)
+          continue
+        }
         const content = await fs.readFile(absPath, 'utf8')
-        indexed.push(indexFile(relPath, content, stat.size))
+        indexed.push(indexFile(relPath, content, stat.size, stat.mtimeMs))
       } catch {
         // Files can disappear during background indexing; skip and keep moving.
       }
@@ -359,7 +367,7 @@ async function listSourceFiles(workspaceRoot: string): Promise<string[]> {
   return results
 }
 
-function indexFile(relPath: string, content: string, bytes: number): RepoIndexFile {
+function indexFile(relPath: string, content: string, bytes: number, mtimeMs: number): RepoIndexFile {
   const source = ts.createSourceFile(relPath, content, ts.ScriptTarget.Latest, true, scriptKindForPath(relPath))
   const imports = new Set<string>()
   const importBindings = new Map<string, Set<string>>()
@@ -395,6 +403,7 @@ function indexFile(relPath: string, content: string, bytes: number): RepoIndexFi
     path: relPath,
     hash: hashText(content),
     bytes,
+    mtimeMs,
     imports: [...imports].sort(),
     importBindings: [...importBindings.entries()]
       .map(([specifier, bindings]) => ({ specifier, bindings: [...bindings].sort() }))
@@ -405,6 +414,18 @@ function indexFile(relPath: string, content: string, bytes: number): RepoIndexFi
     exports: [...exports].sort(),
     symbols: symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name))
   }
+}
+
+function canReuseIndexedFile(file: RepoIndexFile, stat: Stats): boolean {
+  return (
+    file.bytes === stat.size &&
+    file.mtimeMs === stat.mtimeMs &&
+    Array.isArray(file.imports) &&
+    Array.isArray(file.importBindings) &&
+    Array.isArray(file.reExports) &&
+    Array.isArray(file.exports) &&
+    Array.isArray(file.symbols)
+  )
 }
 
 function addImportBindings(bindingsBySpecifier: Map<string, Set<string>>, specifier: string, bindings: string[]): void {

@@ -65,6 +65,52 @@ describe('RepoIndexService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 
+  it('reuses unchanged persisted file entries during refresh', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-reuse-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(path.join(workspace, 'src', 'stable.ts'), 'export function stableValue() { return true }\n')
+
+    const indexPath = path.join(workspace, '.gladdis', 'repo-intel', 'index-v1.json')
+    await new RepoIndexService().refresh(workspace)
+    const persisted = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+    persisted.files[0].symbols = [{ name: 'ReusedSentinel', kind: 'function', line: 9, endLine: 10 }]
+    await fs.writeFile(indexPath, JSON.stringify(persisted), 'utf8')
+
+    const snapshot = await new RepoIndexService().refresh(workspace)
+
+    expect(snapshot.files).toEqual([
+      expect.objectContaining({
+        path: 'src/stable.ts',
+        symbols: [expect.objectContaining({ name: 'ReusedSentinel', line: 9 })]
+      })
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
+  it('reindexes files when size or mtime changes', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-refresh-changed-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(path.join(workspace, 'src', 'changing.ts'), 'export function firstValue() { return true }\n')
+
+    const indexPath = path.join(workspace, '.gladdis', 'repo-intel', 'index-v1.json')
+    await new RepoIndexService().refresh(workspace)
+    const persisted = JSON.parse(await fs.readFile(indexPath, 'utf8'))
+    persisted.files[0].symbols = [{ name: 'StaleSentinel', kind: 'function', line: 1, endLine: 1 }]
+    await fs.writeFile(indexPath, JSON.stringify(persisted), 'utf8')
+
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await fs.writeFile(path.join(workspace, 'src', 'changing.ts'), 'export function secondValue() { return true }\n')
+
+    const snapshot = await new RepoIndexService().refresh(workspace)
+
+    expect(snapshot.files[0].symbols).toEqual([
+      expect.objectContaining({ name: 'secondValue', kind: 'function', line: 1 })
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
   it('returns local import neighbors for indexed files', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-related-'))
     await fs.mkdir(path.join(workspace, 'src'), { recursive: true })

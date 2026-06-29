@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { FileTools } from '../../fs/FileTools'
+import { RepoIndexService } from './RepoIndexService'
 
 export interface RepoOverviewInput {
   workspaceRoot: string
@@ -111,8 +112,11 @@ const IGNORE_DIRS = new Set([
 export class RepoIntelligenceService {
   private readonly files = new FileTools()
 
+  constructor(private readonly index = new RepoIndexService()) {}
+
   async repoOverview(input: RepoOverviewInput): Promise<RepoOverviewResult> {
     const workspaceRoot = path.resolve(input.workspaceRoot)
+    this.index.warm(workspaceRoot)
     const packageJson = await this.readPackageJson(workspaceRoot)
     const topDirectories = await this.readTopDirectories(workspaceRoot)
     const keyFiles = await this.findExisting(workspaceRoot, KEY_FILE_CANDIDATES)
@@ -158,12 +162,57 @@ export class RepoIntelligenceService {
     const workspaceRoot = path.resolve(input.workspaceRoot)
     this.files.setRoot(workspaceRoot)
     const searchPath = typeof input.path === 'string' && input.path.trim() ? input.path.trim() : '.'
+    const maxResults = Math.min(20, Math.max(1, input.maxResults ?? 8))
+    const indexedHits = await this.index.search({
+      workspaceRoot,
+      query: input.query,
+      path: input.path,
+      glob: input.glob,
+      maxResults
+    })
+    if (indexedHits.length > 0) {
+      const hits = indexedHits.map((hit) => ({
+        path: hit.path,
+        kind: hit.kind,
+        line: hit.line,
+        text: hit.text
+      }))
+      const suggestedSpans = hits
+        .filter((hit) => hit.line > 0)
+        .slice(0, 3)
+        .map((hit) => ({
+          path: hit.path,
+          startLine: Math.max(1, hit.line - 8),
+          endLine: hit.line + 16
+        }))
+      const preview = hits
+        .slice(0, 8)
+        .map((hit) => `${hit.path}:${hit.line}${hit.text ? ` - ${hit.text}` : ''}`)
+        .join('\n')
+      const nextReads =
+        suggestedSpans.length > 0
+          ? `\nSuggested next read_spans call:\n${JSON.stringify({ items: suggestedSpans })}`
+          : ''
+
+      return {
+        summary: `Search query: ${input.query}\nPath: ${searchPath}\nIndex hits:\n${preview}${nextReads}`,
+        structuredPayload: {
+          workspaceRoot,
+          query: input.query,
+          ...(searchPath !== '.' ? { path: searchPath } : {}),
+          ...(input.glob ? { glob: input.glob } : {}),
+          totalHits: hits.length,
+          hits,
+          suggestedSpans
+        }
+      }
+    }
     const result = await this.files.search(
       input.query,
       searchPath,
       input.glob,
       1,
-      Math.min(20, Math.max(1, input.maxResults ?? 8))
+      maxResults
     )
     const hits = result.hits.map((hit) => ({
       path: path.relative(workspaceRoot, hit.path) || path.basename(hit.path),

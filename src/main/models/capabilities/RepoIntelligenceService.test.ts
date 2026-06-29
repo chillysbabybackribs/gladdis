@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import * as fs from 'fs/promises'
 import * as os from 'os'
 import * as path from 'path'
+import { RepoIndexService } from './RepoIndexService'
 import { RepoIntelligenceService } from './RepoIntelligenceService'
 
 describe('RepoIntelligenceService', () => {
@@ -64,6 +65,47 @@ describe('RepoIntelligenceService', () => {
     expect(result.structuredPayload.totalHits).toBeGreaterThan(0)
     expect(result.structuredPayload.hits.some((hit) => hit.path === 'src/alpha.ts')).toBe(true)
     expect(result.structuredPayload.suggestedSpans.length).toBeGreaterThan(0)
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
+  it('uses a warm local repo index for symbol-oriented search hits', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-indexed-search-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'indexed.ts'),
+      [
+        "import { helper } from './helper'",
+        'export class IndexedSearchTarget {',
+        '  run() { return helper() }',
+        '}'
+      ].join('\n')
+    )
+    const index = new RepoIndexService()
+    await index.refresh(workspace)
+
+    const service = new RepoIntelligenceService(index)
+    const result = await service.searchRepo({
+      workspaceRoot: workspace,
+      query: 'IndexedSearchTarget',
+      glob: '*.ts',
+      maxResults: 5
+    })
+
+    expect(result.summary).toContain('Index hits:')
+    expect(result.summary).toContain('src/indexed.ts:2 - class IndexedSearchTarget')
+    expect(result.structuredPayload.hits).toEqual([
+      expect.objectContaining({
+        path: 'src/indexed.ts',
+        kind: 'symbol',
+        line: 2
+      }),
+      expect.objectContaining({
+        path: 'src/indexed.ts',
+        kind: 'export',
+        line: 2
+      })
+    ])
 
     await fs.rm(workspace, { recursive: true, force: true })
   })

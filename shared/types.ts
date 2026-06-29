@@ -3,6 +3,7 @@
 export * from './api'
 export * from './browser'
 export * from './chat'
+export * from './dream'
 export * from './extraction'
 export * from './ipc'
 export * from './models'

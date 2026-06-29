@@ -8,8 +8,15 @@ import {
   type ChatStreamEvent,
   type CodexStatus,
   type CodexWorkspace,
+  type DreamAdoptResult,
+  type DreamDiff,
+  type DreamDiscardResult,
+  type DreamRunRequest,
+  type DreamRunResult,
+  type DreamStatus,
   type ModelOption,
 } from '../../../shared/types'
+import { Dreamer } from './memory/Dreamer'
 import { BrowserTools, type ToolContext } from './browserTools'
 import { selectAgentToolProfile } from './agentTools'
 import { ChatStore } from './ChatStore'
@@ -82,6 +89,8 @@ export class ChatService {
   private dynamicModels = new Map<string, ModelOption>()
   private readonly toolStarts = new Map<string, number>()
   private readonly capabilityBroker: CapabilityBroker
+  /** Lazily-created so unit tests that construct ChatService don't trip on memory I/O. */
+  private dreamer: Dreamer | null = null
 
   constructor(
     private readonly keys: KeyStore,
@@ -242,6 +251,43 @@ export class ChatService {
         grokKey: () => this.grokKey()
       }
     })
+  }
+
+  /**
+   * Memory-Dreaming entry points. The Dreamer is lazy because constructing it
+   * just to satisfy the IPC layer at startup would pull in transcripts and
+   * memory I/O before the user opens a workspace.
+   */
+  private getDreamer(): Dreamer {
+    if (!this.dreamer) {
+      this.dreamer = new Dreamer({
+        chats: this.chats,
+        complete: (modelId, system, user) => this.complete(modelId, system, user, { stage: 'dream' }),
+        getKeyStatus: () => this.keys.status(),
+        getDynamicCodexModels: () => this.codexModels().catch(() => [] as ModelOption[])
+      })
+    }
+    return this.dreamer
+  }
+
+  dreamRun(req: DreamRunRequest): Promise<DreamRunResult> {
+    return this.getDreamer().run(req)
+  }
+
+  dreamLoadLast(workspaceRoot: string): Promise<DreamDiff | null> {
+    return this.getDreamer().loadLast(workspaceRoot)
+  }
+
+  dreamAdopt(workspaceRoot: string): Promise<DreamAdoptResult> {
+    return this.getDreamer().adopt(workspaceRoot)
+  }
+
+  dreamDiscard(workspaceRoot: string): Promise<DreamDiscardResult> {
+    return this.getDreamer().discard(workspaceRoot)
+  }
+
+  dreamStatus(workspaceRoot: string): DreamStatus {
+    return this.getDreamer().status(workspaceRoot)
   }
 
   /**
@@ -574,6 +620,11 @@ export class ChatService {
       // Carried per-request so concurrent chats can run browser turns under
       // different models without racing a shared field (was BrowserTools.setLlm).
       llm,
+      // Single centralized fallback: prefer the user-selected folder, drop back
+      // to the process cwd only when none is set. This is the only place that
+      // should ever default workspaceRoot — memoryStore and any future dreamer
+      // require it strictly.
+      workspaceRoot: this.tools.getWorkspaceRoot() ?? process.cwd(),
       onProgress: (event) => {
         this.emit({
           requestId: req.requestId,

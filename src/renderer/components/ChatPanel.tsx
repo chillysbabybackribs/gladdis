@@ -7,6 +7,7 @@ import {
   shouldContinueActivePageContext
 } from '../../../shared/types'
 import { Composer, type ComposerSubmit } from './Composer'
+import { TokenCounter } from './TokenCounter'
 import { ChatSettingsModal } from './ChatSettingsModal'
 import { useTts, useTtsSettings } from '../hooks/useTts'
 import { useStreamConsumer } from '../hooks/useStreamConsumer'
@@ -437,6 +438,7 @@ export function ChatPanel({
           speed={speed}
           onSpeedChange={persistSpeed}
           turnControls={turnControls}
+          tokenCounter={<TokenCounter records={auditRecords} conversationId={convId} />}
           onNewChat={newChat}
           newDisabled={messages.length === 0 && !streaming}
         />

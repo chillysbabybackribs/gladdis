@@ -93,7 +93,7 @@ import type { LlmComplete } from '../../pipeline/Planner'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
 import { resolveTurnTools } from '../agentTools'
 
-type FinishUsage = { inputTokens?: number; outputTokens?: number }
+type FinishUsage = { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
 type ActiveAuditCall = {
   addOutput: (chunk: unknown) => void
   finish: (result?: { output?: unknown; status?: 'ok' | 'error'; error?: unknown; usage?: FinishUsage }) => void
@@ -136,7 +136,15 @@ export function usageFromGoogle(value: any): FinishUsage | undefined {
       : typeof usage.outputTokenCount === 'number'
         ? usage.outputTokenCount
         : undefined
-  return inputTokens == null && outputTokens == null ? undefined : { inputTokens, outputTokens }
+  const cachedInputTokens =
+    typeof usage.cachedContentTokenCount === 'number'
+      ? usage.cachedContentTokenCount
+      : typeof usage.cached_content_token_count === 'number'
+        ? usage.cached_content_token_count
+        : undefined
+  return inputTokens == null && outputTokens == null && cachedInputTokens == null
+    ? undefined
+    : { inputTokens, outputTokens, cachedInputTokens }
 }
 
 export async function titleGoogle(args: {

@@ -31,6 +31,8 @@ interface Props {
   onSpeedChange?: (s: number) => void
   /** Per-turn context controls, such as model and working folder. */
   turnControls?: ReactNode
+  /** Live token meter for the active model, shown in the footer bar. */
+  tokenCounter?: ReactNode
   /** Start a fresh conversation (the + button, bottom-left). */
   onNewChat?: () => void
   /** Disable the + when there's nothing to start fresh from. */
@@ -108,6 +110,7 @@ export function Composer({
   speed,
   onSpeedChange,
   turnControls,
+  tokenCounter,
   onNewChat,
   newDisabled
 }: Props) {
@@ -297,6 +300,7 @@ export function Composer({
             )}
           </div>
           <div className="composer-bar-right">
+            {tokenCounter}
             {onToggleAudio && (
               <div className="composer-audio-group" ref={audioMenuRef}>
                 <button

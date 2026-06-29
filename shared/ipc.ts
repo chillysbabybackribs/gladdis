@@ -35,6 +35,12 @@ export const IPC = {
   EXTRACT_RUN: 'extract:run',
   EXTRACT_OVERLAY: 'extract:overlay',
   BROWSER_EXEC: 'browser:exec',
+  // Memory "Dreaming" — manual-trigger background memory curator
+  DREAM_RUN: 'dream:run',
+  DREAM_LOAD_LAST: 'dream:loadLast',
+  DREAM_ADOPT: 'dream:adopt',
+  DREAM_DISCARD: 'dream:discard',
+  DREAM_STATUS: 'dream:status',
   /** Text-to-speech: renderer sends text, main returns synthesized audio. */
   TTS_SPEAK: 'tts:speak',
   // Real-PTY terminal (xterm.js <-> @lydell/node-pty in main)

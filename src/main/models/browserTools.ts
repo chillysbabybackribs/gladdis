@@ -87,6 +87,13 @@ export interface ToolContext {
    * or browser tools asks for them and continues — it never narrates "I can't".
    */
   grantedTools?: Set<string>
+  /**
+   * Absolute path of the workspace folder for this turn. Required for memory_*
+   * tools; ChatService.toolContext() sources it from the user-selected
+   * workspace and falls back to process.cwd() only once, centrally. Memory
+   * scoping is per-workspace, so this is the single source of truth.
+   */
+  workspaceRoot?: string
 }
 
 /**
@@ -142,6 +149,17 @@ export class BrowserTools {
 
   getWorkspaceRoot(): string | null {
     return this.files.getRoot()
+  }
+
+  /**
+   * The workspace root a memory_* call should bind to. Prefers the turn's
+   * ToolContext (set by ChatService from the selected folder, with a single
+   * centralized fallback to process.cwd()), then the file-tools selection.
+   * Returns null only when no source is available at all — callers should
+   * surface that as an actionable error instead of silently using cwd.
+   */
+  private resolveMemoryWorkspaceRoot(ctx: ToolContext): string | null {
+    return ctx.workspaceRoot ?? this.files.getRoot() ?? null
   }
 
   /**
@@ -347,16 +365,34 @@ export class BrowserTools {
         case 'recall_history':
           return runRecallHistory(this.historyDeps(), args, ctx)
 
-        case 'memory_write':
-          return (await import('./memoryStore')).memoryWrite(args)
-        case 'memory_read':
-          return (await import('./memoryStore')).memoryRead(args)
-        case 'memory_list':
-          return (await import('./memoryStore')).memoryList(args)
-        case 'memory_forget':
-          return (await import('./memoryStore')).memoryForget(args)
-        case 'memory_create_task':
-          return (await import('./memoryStore')).memoryCreateTask(args)
+        case 'memory_write': {
+          const root = this.resolveMemoryWorkspaceRoot(ctx)
+          if (!root) return { ok: false, text: 'memory_write requires a workspace folder. Open one and retry.' }
+          return (await import('./memoryStore')).memoryWrite(
+            { ...args, conversationId: args.conversationId ?? ctx.conversationId ?? undefined },
+            root
+          )
+        }
+        case 'memory_read': {
+          const root = this.resolveMemoryWorkspaceRoot(ctx)
+          if (!root) return { ok: false, text: 'memory_read requires a workspace folder. Open one and retry.' }
+          return (await import('./memoryStore')).memoryRead(args, root)
+        }
+        case 'memory_list': {
+          const root = this.resolveMemoryWorkspaceRoot(ctx)
+          if (!root) return { ok: false, text: 'memory_list requires a workspace folder. Open one and retry.' }
+          return (await import('./memoryStore')).memoryList(args, root)
+        }
+        case 'memory_forget': {
+          const root = this.resolveMemoryWorkspaceRoot(ctx)
+          if (!root) return { ok: false, text: 'memory_forget requires a workspace folder. Open one and retry.' }
+          return (await import('./memoryStore')).memoryForget(args, root)
+        }
+        case 'memory_create_task': {
+          const root = this.resolveMemoryWorkspaceRoot(ctx)
+          if (!root) return { ok: false, text: 'memory_create_task requires a workspace folder. Open one and retry.' }
+          return (await import('./memoryStore')).memoryCreateTask(args, root)
+        }
 
         default:
           return { ok: false, text: `Unknown tool: ${name}` }

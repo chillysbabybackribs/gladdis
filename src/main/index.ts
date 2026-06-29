@@ -22,6 +22,7 @@ import {
   type ChatPanelSide,
   type ChatRequest,
   type Conversation,
+  type DreamRunRequest,
   type Provider,
   type ViewBounds
 } from '../../shared/types'
@@ -304,6 +305,22 @@ function registerIpc(): void {
   // Exec bridge: run JS inside a tab's page context, structured result back.
   ipcMain.handle(IPC.BROWSER_EXEC, (_e, tabId: string, jsCode: string) =>
     tabs.executeJavaScript(tabId, jsCode)
+  )
+
+  // Memory "Dreaming" — the manual-trigger background memory curator. The
+  // pipeline lives in ChatService so it can reuse its provider-agnostic
+  // complete() and the live Codex catalog without duplicating those plumbing
+  // concerns here.
+  ipcMain.handle(IPC.DREAM_RUN, (_e, req: DreamRunRequest) => chat.dreamRun(req))
+  ipcMain.handle(IPC.DREAM_LOAD_LAST, (_e, workspaceRoot: string) =>
+    chat.dreamLoadLast(workspaceRoot)
+  )
+  ipcMain.handle(IPC.DREAM_ADOPT, (_e, workspaceRoot: string) => chat.dreamAdopt(workspaceRoot))
+  ipcMain.handle(IPC.DREAM_DISCARD, (_e, workspaceRoot: string) =>
+    chat.dreamDiscard(workspaceRoot)
+  )
+  ipcMain.handle(IPC.DREAM_STATUS, (_e, workspaceRoot: string) =>
+    chat.dreamStatus(workspaceRoot)
   )
 
   // Real PTY terminal — the human's interactive shell, separate from any

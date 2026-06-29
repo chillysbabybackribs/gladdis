@@ -10,7 +10,7 @@ import {
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 
-type FinishUsage = { inputTokens?: number; outputTokens?: number }
+type FinishUsage = { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
 type ActiveAuditCall = {
   addOutput: (chunk: unknown) => void
   finish: (result?: { output?: unknown; status?: 'ok' | 'error'; error?: unknown; usage?: FinishUsage }) => void
@@ -46,7 +46,19 @@ export function usageFromAnthropic(usage: any): FinishUsage | undefined {
       : typeof usage.outputTokens === 'number'
         ? usage.outputTokens
         : undefined
-  return inputTokens == null && outputTokens == null ? undefined : { inputTokens, outputTokens }
+  // Cached input = tokens read from the prompt cache plus tokens written to it
+  // this turn (both are part of the input the model processed).
+  const cacheRead =
+    usage.cache_read_input_tokens ?? usage.cacheReadInputTokens ?? undefined
+  const cacheCreation =
+    usage.cache_creation_input_tokens ?? usage.cacheCreationInputTokens ?? undefined
+  const cachedInputTokens =
+    typeof cacheRead === 'number' || typeof cacheCreation === 'number'
+      ? (cacheRead ?? 0) + (cacheCreation ?? 0)
+      : undefined
+  return inputTokens == null && outputTokens == null && cachedInputTokens == null
+    ? undefined
+    : { inputTokens, outputTokens, cachedInputTokens }
 }
 
 export async function titleAnthropic(args: {

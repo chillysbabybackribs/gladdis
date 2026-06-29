@@ -1,7 +1,7 @@
 {
   "version": 1,
   "workspace": {
-    "updatedAt": "2026-06-22T09:59:41.201Z",
+    "updatedAt": "2026-06-23T01:41:44.374Z",
     "notes": {
       "projectName": {
         "value": "Gladdis"
@@ -45,6 +45,11 @@
       "label": "test-auth-flow",
       "createdAt": "2026-06-21T21:05:33.106Z",
       "updatedAt": "2026-06-21T21:05:33.106Z"
+    },
+    "task-mqpzazhy": {
+      "label": "Create software.dev agent harness checklist for PR + local dev tasks",
+      "createdAt": "2026-06-23T01:41:44.374Z",
+      "updatedAt": "2026-06-23T01:41:44.374Z"
     }
   }
 }

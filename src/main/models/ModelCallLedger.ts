@@ -1,5 +1,5 @@
 import { app } from 'electron'
-import { appendFile, mkdirSync } from 'fs'
+import { appendFile, mkdirSync, readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import type {
   ModelCallEvent,
@@ -46,10 +46,38 @@ export class ModelCallLedger {
   private readonly order: string[] = []
   private readonly file = join(app.getPath('userData'), 'gladdis-model-calls.jsonl')
 
-  constructor(private readonly emit: (event: ModelCallEvent) => void) {}
+  constructor(private readonly emit: (event: ModelCallEvent) => void) {
+    this.loadFromDisk()
+  }
 
   list(): ModelCallRecord[] {
     return [...this.records.values()].sort((a, b) => b.startedAt - a.startedAt)
+  }
+
+  /**
+   * Repopulate the in-memory store from the persisted ledger on startup, so the
+   * per-conversation token meter survives restarts. Only the last
+   * MAX_MEMORY_RECORDS lines are kept (the same cap the live store enforces),
+   * so this stays bounded no matter how large the append-only file grows. Best
+   * effort: a missing file or a malformed line is skipped, never fatal.
+   */
+  private loadFromDisk(): void {
+    let lines: string[]
+    try {
+      // Drop blank lines (notably the trailing newline) before tailing, so the
+      // last MAX_MEMORY_RECORDS slice is full records, not padded with empties.
+      lines = readFileSync(this.file, 'utf8').split('\n').filter(Boolean)
+    } catch {
+      return // no file yet (first run) — nothing to restore
+    }
+    for (const line of lines.slice(-MAX_MEMORY_RECORDS)) {
+      try {
+        const record = JSON.parse(line) as ModelCallRecord
+        if (record?.id) this.store(record)
+      } catch {
+        // skip a torn/partial trailing line; the rest still load
+      }
+    }
   }
 
   begin(call: BeginModelCall): ActiveModelCall {

@@ -7,6 +7,7 @@ import {
   type ChatRequest,
   type ChatStreamEvent,
   type Conversation,
+  type DreamRunRequest,
   type GladdisApi,
   type ModelCallEvent,
   type Provider,
@@ -100,6 +101,13 @@ const api: GladdisApi = {
   },
   browser: {
     exec: (tabId: string, jsCode: string) => ipcRenderer.invoke(IPC.BROWSER_EXEC, tabId, jsCode)
+  },
+  dream: {
+    run: (req: DreamRunRequest) => ipcRenderer.invoke(IPC.DREAM_RUN, req),
+    loadLast: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_LOAD_LAST, workspaceRoot),
+    adopt: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_ADOPT, workspaceRoot),
+    discard: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_DISCARD, workspaceRoot),
+    status: (workspaceRoot: string) => ipcRenderer.invoke(IPC.DREAM_STATUS, workspaceRoot)
   },
   terminal: {
     create: (opts: TerminalSpawnOpts) => ipcRenderer.invoke(IPC.TERMINAL_CREATE, opts),

@@ -21,6 +21,14 @@ import type {
   TtsResult,
   Workspace
 } from './chat'
+import type {
+  DreamAdoptResult,
+  DreamDiff,
+  DreamDiscardResult,
+  DreamRunRequest,
+  DreamRunResult,
+  DreamStatus
+} from './dream'
 import type { PageCapture } from './extraction'
 import type { ModelOption } from './models'
 import type {
@@ -118,6 +126,22 @@ export interface GladdisApi {
   browser: {
     /** Run JS inside a tab's page context. */
     exec: (tabId: string, jsCode: string) => Promise<ExecResult>
+  }
+  dream: {
+    /**
+     * Run the memory-dreaming pipeline against the current workspace. Produces
+     * a candidate `memory.next.json` and returns its structured diff; the
+     * candidate is not promoted until adopt() is called.
+     */
+    run: (req: DreamRunRequest) => Promise<DreamRunResult>
+    /** Load the last awaiting-adopt diff for this workspace, if any. */
+    loadLast: (workspaceRoot: string) => Promise<DreamDiff | null>
+    /** Atomically promote memory.next.json → memory.json. */
+    adopt: (workspaceRoot: string) => Promise<DreamAdoptResult>
+    /** Remove memory.next.json (and the audit) without changing live memory. */
+    discard: (workspaceRoot: string) => Promise<DreamDiscardResult>
+    /** Is a dream currently running? At most one per workspace. */
+    status: (workspaceRoot: string) => Promise<DreamStatus>
   }
   terminal: {
     /** Spawn a new PTY session and return its id (one shell per id). */

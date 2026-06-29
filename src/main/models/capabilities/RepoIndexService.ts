@@ -20,6 +20,12 @@ export interface RepoIndexReExport {
   exports: string[]
 }
 
+export interface RepoIndexReference {
+  name: string
+  kind: 'call' | 'identifier'
+  line: number
+}
+
 export interface RepoIndexFile {
   path: string
   hash: string
@@ -30,6 +36,7 @@ export interface RepoIndexFile {
   reExports: RepoIndexReExport[]
   exports: string[]
   symbols: RepoIndexSymbol[]
+  references: RepoIndexReference[]
 }
 
 export interface RepoIndexSnapshot {
@@ -49,7 +56,7 @@ export interface RepoIndexSearchInput {
 
 export interface RepoIndexSearchHit {
   path: string
-  kind: 'symbol' | 'export' | 'import' | 'path'
+  kind: 'symbol' | 'export' | 'import' | 'reference' | 'path'
   line: number
   text: string
 }
@@ -73,6 +80,7 @@ const INDEX_DIR = path.join('.gladdis', 'repo-intel')
 const INDEX_FILE = 'index-v1.json'
 const MAX_INDEXED_FILE_BYTES = 512 * 1024
 const MAX_FILES_PER_BUILD = 5000
+const MAX_REFERENCES_PER_FILE = 400
 const MAX_WATCHED_DIRS = 1000
 const MAX_WATCH_DEPTH = 6
 const BACKGROUND_REFRESH_DEBOUNCE_MS = 500
@@ -250,6 +258,16 @@ export class RepoIndexService {
             score: scoreText(binding, queryLower, 55)
           })
         }
+      }
+      for (const reference of file.references ?? []) {
+        if (!reference.name.toLowerCase().includes(queryLower)) continue
+        hits.push({
+          path: file.path,
+          kind: 'reference',
+          line: reference.line,
+          text: `${reference.kind} ${reference.name}`,
+          score: scoreText(reference.name, queryLower, reference.kind === 'call' ? 60 : 50)
+        })
       }
     }
 
@@ -510,6 +528,8 @@ function indexFile(relPath: string, content: string, bytes: number, mtimeMs: num
   const reExports = new Map<string, Set<string>>()
   const exports = new Set<string>()
   const symbols: RepoIndexSymbol[] = []
+  const references: RepoIndexReference[] = []
+  const referenceKeys = new Set<string>()
 
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -531,6 +551,11 @@ function indexFile(relPath: string, content: string, bytes: number, mtimeMs: num
     }
 
     if (ts.isExportAssignment(node)) exports.add('default')
+    const callName = callNameFromNode(node)
+    if (callName) addReference(references, referenceKeys, callName, 'call', node, source)
+    if (ts.isIdentifier(node) && isUsageIdentifier(node)) {
+      addReference(references, referenceKeys, node.text, 'identifier', node, source)
+    }
     ts.forEachChild(node, visit)
   }
   visit(source)
@@ -548,7 +573,8 @@ function indexFile(relPath: string, content: string, bytes: number, mtimeMs: num
       .map(([specifier, exportsForSpecifier]) => ({ specifier, exports: [...exportsForSpecifier].sort() }))
       .sort((a, b) => a.specifier.localeCompare(b.specifier)),
     exports: [...exports].sort(),
-    symbols: symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name))
+    symbols: symbols.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name)),
+    references: references.sort((a, b) => a.line - b.line || a.name.localeCompare(b.name) || a.kind.localeCompare(b.kind))
   }
 }
 
@@ -560,8 +586,67 @@ function canReuseIndexedFile(file: RepoIndexFile, stat: Stats): boolean {
     Array.isArray(file.importBindings) &&
     Array.isArray(file.reExports) &&
     Array.isArray(file.exports) &&
-    Array.isArray(file.symbols)
+    Array.isArray(file.symbols) &&
+    Array.isArray(file.references)
   )
+}
+
+function addReference(
+  references: RepoIndexReference[],
+  referenceKeys: Set<string>,
+  name: string,
+  kind: RepoIndexReference['kind'],
+  node: ts.Node,
+  source: ts.SourceFile
+): void {
+  if (!name || references.length >= MAX_REFERENCES_PER_FILE) return
+  const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
+  const key = `${kind}:${name}:${line}`
+  if (referenceKeys.has(key)) return
+  referenceKeys.add(key)
+  references.push({ name, kind, line })
+}
+
+function callNameFromNode(node: ts.Node): string | null {
+  if (!ts.isCallExpression(node)) return null
+  const expression = node.expression
+  if (ts.isIdentifier(expression)) return expression.text
+  if (ts.isPropertyAccessExpression(expression)) return expression.name.text
+  return null
+}
+
+function isUsageIdentifier(node: ts.Identifier): boolean {
+  const parent = node.parent
+  if (!parent) return true
+  if (isDeclarationName(node, parent)) return false
+  if (ts.isImportClause(parent) || ts.isNamespaceImport(parent) || ts.isImportSpecifier(parent)) return false
+  if (ts.isExportSpecifier(parent) || ts.isNamespaceExport(parent)) return false
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return false
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return false
+  if (ts.isShorthandPropertyAssignment(parent)) return true
+  if (ts.isBindingElement(parent)) return false
+  if (ts.isJsxAttribute(parent) && parent.name === node) return false
+  if (ts.isPropertySignature(parent) && parent.name === node) return false
+  if (ts.isMethodSignature(parent) && parent.name === node) return false
+  return true
+}
+
+function isDeclarationName(node: ts.Identifier, parent: ts.Node): boolean {
+  if (
+    (ts.isFunctionDeclaration(parent) ||
+      ts.isClassDeclaration(parent) ||
+      ts.isInterfaceDeclaration(parent) ||
+      ts.isTypeAliasDeclaration(parent) ||
+      ts.isEnumDeclaration(parent) ||
+      ts.isVariableDeclaration(parent) ||
+      ts.isParameter(parent) ||
+      ts.isMethodDeclaration(parent) ||
+      ts.isPropertyDeclaration(parent)) &&
+    parent.name === node
+  ) {
+    return true
+  }
+  return false
 }
 
 function addImportBindings(bindingsBySpecifier: Map<string, Set<string>>, specifier: string, bindings: string[]): void {
@@ -718,6 +803,11 @@ function scoreRelatedFile(file: RepoIndexFile, queryLower: string): number {
       score = Math.max(score, scoreText(symbol.name, queryLower, 45))
     }
   }
+  for (const reference of file.references ?? []) {
+    if (reference.name.toLowerCase().includes(queryLower)) {
+      score = Math.max(score, scoreText(reference.name, queryLower, reference.kind === 'call' ? 50 : 35))
+    }
+  }
   return score
 }
 
@@ -806,6 +896,7 @@ function selectRelatedSpan(
     ].filter((term) => term && term !== '*' && term !== 'default')
   )
   let best: { symbol: RepoIndexSymbol; score: number } | null = null
+  let bestReference: { reference: RepoIndexReference; score: number } | null = null
 
   for (const symbol of file.symbols) {
     const symbolLower = symbol.name.toLowerCase()
@@ -815,6 +906,25 @@ function selectRelatedSpan(
       if (!best || score > best.score || (score === best.score && symbol.line < best.symbol.line)) {
         best = { symbol, score }
       }
+    }
+  }
+
+  for (const reference of file.references ?? []) {
+    const referenceLower = reference.name.toLowerCase()
+    for (const term of terms) {
+      const termScore = scoreSymbolTerm(referenceLower, term)
+      if (termScore === 0) continue
+      const score = termScore + (reference.kind === 'call' ? 15 : 0)
+      if (!bestReference || score > bestReference.score || (score === bestReference.score && reference.line < bestReference.reference.line)) {
+        bestReference = { reference, score }
+      }
+    }
+  }
+
+  if (bestReference && (!best || bestReference.score >= best.score)) {
+    return {
+      startLine: Math.max(1, bestReference.reference.line - 8),
+      endLine: bestReference.reference.line + 16
     }
   }
 

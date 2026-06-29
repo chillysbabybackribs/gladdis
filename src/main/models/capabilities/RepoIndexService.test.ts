@@ -242,6 +242,48 @@ describe('RepoIndexService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 
+  it('indexes local references and calls for imported aliases', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-references-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'service.ts'),
+      [
+        "import { helper as runHelper } from './helper'",
+        'export function runService() {',
+        '  const value = runHelper()',
+        '  return value',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(path.join(workspace, 'src', 'helper.ts'), 'export function helper() { return true }\n')
+
+    const index = new RepoIndexService()
+    const snapshot = await index.refresh(workspace)
+    const serviceFile = snapshot.files.find((file) => file.path === 'src/service.ts')
+
+    expect(serviceFile?.references).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'runHelper', kind: 'call', line: 3 }),
+      expect.objectContaining({ name: 'value', kind: 'identifier', line: 4 })
+    ]))
+
+    const hits = await index.search({
+      workspaceRoot: workspace,
+      query: 'runHelper',
+      maxResults: 3
+    })
+
+    expect(hits).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'src/service.ts',
+        kind: 'reference',
+        line: 3,
+        text: 'call runHelper'
+      })
+    ]))
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
   it('returns focused related spans near symbols matched through import aliases', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-related-spans-'))
     await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
@@ -278,6 +320,42 @@ describe('RepoIndexService', () => {
         path: 'src/helper.ts',
         startLine: 27,
         endLine: 53
+      })
+    ])
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
+  it('focuses reverse related spans near the callsite that uses the imported symbol', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-index-related-callsite-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(path.join(workspace, 'src', 'helper.ts'), 'export function helper() { return true }\n')
+    await fs.writeFile(
+      path.join(workspace, 'src', 'consumer.ts'),
+      [
+        "import { helper as runHelper } from './helper'",
+        ...Array.from({ length: 28 }, (_, index) => `const filler${index + 1} = ${index + 1}`),
+        'export function consumeHelper() {',
+        '  return runHelper()',
+        '}'
+      ].join('\n')
+    )
+
+    const index = new RepoIndexService()
+    await index.refresh(workspace)
+    const related = await index.relatedFiles({
+      workspaceRoot: workspace,
+      paths: ['src/helper.ts'],
+      query: 'runHelper',
+      maxResults: 1
+    })
+
+    expect(related).toEqual([
+      expect.objectContaining({
+        path: 'src/consumer.ts',
+        reason: 'imports src/helper.ts',
+        startLine: 23,
+        endLine: 47
       })
     ])
 

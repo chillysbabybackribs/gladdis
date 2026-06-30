@@ -172,7 +172,7 @@ export async function executeGrepInTab(
   tabs: TabManager,
   tabId: string,
   query: string,
-  type: 'auto' | 'text' | 'regex' | 'selector' = 'auto',
+  type: 'text' | 'regex' | 'selector' = 'text',
   caseSensitive: boolean = false,
   contextLines: number = 2
 ): Promise<{ success: boolean; result?: any[]; totalMatches?: number; error?: string }> {
@@ -366,31 +366,16 @@ export async function executeGrepInTab(
     let textResults = [];
     let selectorResults = [];
 
-    // A multi-word string is almost always prose to grep for, not a descendant
-    // selector — so spaces no longer route to selector search. Selector shape is
-    // signalled by structural tokens (#id, .class, [attr], >, xpath).
-    const isXPath = query.startsWith('/') || query.startsWith('(') || query.startsWith('./');
-    const looksLikeSelector = isXPath || query.startsWith('.') || query.startsWith('#') || query.includes('[') || query.includes('>');
-
-    if (type === 'selector' || (type === 'auto' && looksLikeSelector)) {
+    if (type === 'selector') {
       selectorResults = findSelectorMatches(query);
     }
 
-    // Fall back to text search when no real selector match was found — an error
-    // object (invalid selector) must NOT suppress the fallback, or a phrase the
-    // router guessed wrong would dead-end on "Invalid selector".
-    const realSelectorMatches = selectorResults.filter(r => r.type !== 'error').length;
-    if (type === 'text' || type === 'regex' || (type === 'auto' && realSelectorMatches === 0)) {
+    if (type === 'text' || type === 'regex') {
       const isRegex = (type === 'regex');
       textResults = findTextMatches(query, isRegex, caseSensitive, contextLines);
     }
 
-    // If text search produced matches, a selector-parse error is just router
-    // noise — drop it so the lean text result isn't polluted by a false failure.
-    const cleanedSelectorResults = textResults.length > 0
-      ? selectorResults.filter(r => r.type !== 'error')
-      : selectorResults;
-    const combined = [...cleanedSelectorResults, ...textResults];
+    const combined = [...selectorResults, ...textResults];
     // Return the pre-slice total so the caller can honestly report truncation
     // instead of a flat 50 that hides "there were far more".
     return { matches: combined.slice(0, 50), totalMatches: combined.length };
@@ -417,7 +402,10 @@ export async function runGrepPage(
     return { ok: false, text: 'grep_page: query must be a non-empty string.' }
   }
 
-  const type = args.type || 'auto'
+  const type = args.type || 'text'
+  if (type !== 'text' && type !== 'regex' && type !== 'selector') {
+    return { ok: false, text: 'grep_page: type must be "text", "regex", or "selector".' }
+  }
   const contextLines = typeof args.contextLines === 'number' ? args.contextLines : 2
   const caseSensitive = !!args.caseSensitive
 

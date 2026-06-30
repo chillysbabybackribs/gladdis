@@ -51,7 +51,7 @@ const BROWSER_OVERVIEW =
 const BROWSER_INTERACTION_GUIDANCE =
   '## Browser interaction\n' +
   '  • grep_page → primary tool to find text/elements on a page; grep the words near the answer ' +
-  '(text/regex) and read the returned context — cheaper than read_page. Avoid broad tag selectors (a/div/img), they dump the page.\n' +
+  '(type text/regex) and read the returned context, or use type selector for a specific CSS selector/XPath target. Avoid broad tag selectors (a/div/img), they dump the page.\n' +
   '  • grep_click → discover and click in one step.\n' +
   '  • grep_type → discover, focus, and type in one step.\n' +
   '  • read_page → high-level digest (structure + actions); use for orientation, not targeting.\n' +

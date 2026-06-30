@@ -771,7 +771,7 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('second exact turn')
   })
 
-  it('routes grep_page through the capability broker and returns hybrid results', async () => {
+  it('routes grep_page through the capability broker and returns grep results', async () => {
     const executeJavaScript = vi.fn(async () => ({
       success: true,
       result: [
@@ -800,7 +800,7 @@ describe('BrowserTools', () => {
 
     const result = await tools.run(
       'grep_page',
-      { query: 'Upgrade', type: 'auto' },
+      { query: 'Upgrade', type: 'text' },
       { tabId: 'tab-1' }
     )
 
@@ -810,6 +810,30 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('div#root > button.btn-pricing')
     expect(result.text).toContain('Upgrade Now')
     expect(result.text).toContain('Save 50% on annual billing.')
+  })
+
+  it('defaults grep_page to text search when no type is provided', async () => {
+    const executeJavaScript = vi.fn(async (..._args: any[]) => ({
+      success: true,
+      result: { matches: [], totalMatches: 0 }
+    }))
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    await tools.run('grep_page', { query: 'pricing details' }, { tabId: 'tab-1' })
+
+    const jsPayload = executeJavaScript.mock.calls[0][1]
+    expect(jsPayload).toContain('const type = "text";')
+  })
+
+  it('rejects unclear grep_page search modes', async () => {
+    const executeJavaScript = vi.fn()
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    const result = await tools.run('grep_page', { query: 'Upgrade', type: 'auto' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('type must be "text", "regex", or "selector"')
+    expect(executeJavaScript).not.toHaveBeenCalled()
   })
 
   it('steers off a single broad word when a text grep floods and truncates', async () => {

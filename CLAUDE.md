@@ -42,9 +42,10 @@ elements with a stable CSS `selector`, visibility, and **live bounding-box
 `coordinates`** (center x/y + width/height/top/left, from
 `getBoundingClientRect`). Selector/XPath matches include element identity such as
 `tagName`, `outerHTML`, and `innerText`; text/regex matches return grep-style
-line context around the text hit. Three auto-routed modes: text/regex (with
-`-C` context), CSS selector, and XPath. The model asks for exactly the element it
-needs and gets that and nothing more.
+line context around the text hit. `grep_page` has two explicit uses: page-text
+search with `type: "text"`/`type: "regex"`, or DOM target lookup with
+`type: "selector"` for CSS selectors and XPath. The model asks for exactly the
+element it needs and gets that and nothing more.
 
 `grep_click` / `grep_type` are the **same engine one step further**: they run
 the same in-page grep (`executeGrepInTab`), filter to `visible && coordinates`,

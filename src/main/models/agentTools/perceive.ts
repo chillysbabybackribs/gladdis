@@ -57,7 +57,8 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
       'and far cheaper than read_page or a screenshot. This is the primary tool for ' +
       '"find/locate X on this page" and for answering "what does the page say about X", ' +
       'especially on long, text-heavy pages. ' +
-      'For TEXT, search a full sentence or a distinctive phrase taken from what the user ' +
+      'Use type "text" or "regex" when you want page words and surrounding context. ' +
+      'Search a full sentence or a distinctive phrase taken from what the user ' +
       'actually wants to know (type "text"/"regex") — NOT a single common word. A bare ' +
       'keyword like "Germany" or "price" floods with dozens of noise hits and answers ' +
       'nothing; a phrase like "Germany surrendered on 8 May 1945" lands the exact passage. ' +
@@ -65,7 +66,8 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
       'surrounding section, so the answer comes back without reading the rest. (A distinctive ' +
       'single word — a rare proper noun, error code, or identifier — is fine; it is common ' +
       'words that are the problem.) ' +
-      'Use a specific CSS selector or XPath only when you are targeting a known element to act on. ' +
+      'Use type "selector" only for a specific CSS selector or XPath when you are targeting ' +
+      'a known DOM element to inspect or act on. ' +
       'AVOID broad tag selectors like "a", "div", "img", "script" — every match returns full ' +
       'outerHTML + selector + coordinates, so a broad selector dumps the page and defeats the ' +
       'token savings; narrow the query instead.',
@@ -78,8 +80,8 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
         },
         type: {
           type: 'string',
-          enum: ['text', 'regex', 'selector', 'auto'],
-          description: "Search type: 'text', 'regex', 'selector', or 'auto' (default)."
+          enum: ['text', 'regex', 'selector'],
+          description: 'Search type. Use "text" for literal page text and context, "regex" for text patterns, or "selector" for CSS selectors/XPath. Defaults to "text".'
         },
         contextLines: {
           type: 'number',

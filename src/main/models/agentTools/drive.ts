@@ -147,8 +147,8 @@ export const DRIVE_TOOLS: ToolDef[] = [
         },
         type: {
           type: 'string',
-          enum: ['auto', 'text', 'regex', 'selector'],
-          description: 'Search mode. "auto" detects if query looks like a CSS selector/XPath, else searches by text.'
+          enum: ['text', 'regex', 'selector'],
+          description: 'Search mode. Use "text" for literal page text, "regex" for text patterns, or "selector" for CSS selectors/XPath. Defaults to "text".'
         },
         caseSensitive: {
           type: 'boolean',
@@ -200,8 +200,8 @@ export const DRIVE_TOOLS: ToolDef[] = [
         },
         type: {
           type: 'string',
-          enum: ['auto', 'text', 'regex', 'selector'],
-          description: 'Search mode. "auto" detects if query looks like a CSS selector/XPath, else searches by text.'
+          enum: ['text', 'regex', 'selector'],
+          description: 'Search mode. Use "text" for literal page text, "regex" for text patterns, or "selector" for CSS selectors/XPath. Defaults to "text".'
         },
         caseSensitive: {
           type: 'boolean',

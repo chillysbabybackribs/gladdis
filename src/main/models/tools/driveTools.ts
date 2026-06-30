@@ -180,7 +180,10 @@ export async function runGrepClick(
     return { ok: false, text: 'grep_click: query must be a non-empty string.' }
   }
 
-  const type = args.type || 'auto'
+  const type = args.type || 'text'
+  if (type !== 'text' && type !== 'regex' && type !== 'selector') {
+    return { ok: false, text: 'grep_click: type must be "text", "regex", or "selector".' }
+  }
   const caseSensitive = !!args.caseSensitive
 
   try {
@@ -235,7 +238,10 @@ export async function runGrepType(
   }
   const text = String(args.text ?? '')
 
-  const type = args.type || 'auto'
+  const type = args.type || 'text'
+  if (type !== 'text' && type !== 'regex' && type !== 'selector') {
+    return { ok: false, text: 'grep_type: type must be "text", "regex", or "selector".' }
+  }
   const caseSensitive = !!args.caseSensitive
 
   try {

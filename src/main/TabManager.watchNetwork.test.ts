@@ -244,6 +244,21 @@ describe('TabManager.watchNetwork sequencing', () => {
     expect(result.filter).toEqual(expect.objectContaining({ resourceTypes: ['fetch'] }))
   })
 
+  it('does not pay the full quiet window when navigation had no matching network activity', async () => {
+    const { manager } = createHarness()
+
+    const startedAt = Date.now()
+    await manager.navigateWithNetworkCapture('tab-1', 'https://example.com/quiet', {
+      resourceTypes: ['fetch'],
+      maxBodies: 1,
+      maxBodyChars: 1000,
+      quietWindowMs: 400
+    })
+    const elapsedMs = Date.now() - startedAt
+
+    expect(elapsedMs).toBeLessThan(300)
+  })
+
   it('arms the next browser action before it runs and captures its traffic', async () => {
     const timeline: string[] = []
     const { manager, debuggerInstance, sentCommands } = createHarness({

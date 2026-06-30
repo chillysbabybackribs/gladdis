@@ -26,8 +26,10 @@ const VISIBLE_NAVIGATION_CAPTURE = {
   maxBodies: 2,
   maxBodyChars: 3_000,
   timeoutMs: 10_000,
-  quietWindowMs: 900
+  quietWindowMs: 350
 }
+
+const BACKGROUND_PROBE_SPA_GRACE_MS = 250
 
 export interface RankedSearchResult extends HiddenSearchResult {
   originQuery: string
@@ -223,7 +225,7 @@ async function probeInBackground(
   const tabId = deps.tabs.create('about:blank', { background: true }).id
   try {
     await deps.tabs.navigate(tabId, hit.url, { wait: true, timeoutMs: 12_000 })
-    await sleep(600)
+    await sleep(BACKGROUND_PROBE_SPA_GRACE_MS)
 
     const wall = await detectPageWall(deps.tabs, tabId)
     if (wall) {

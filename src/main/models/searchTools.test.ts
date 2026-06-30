@@ -123,7 +123,7 @@ describe('unified search tool', () => {
     expect(navigateWithNetworkCapture).toHaveBeenCalledWith(
       'tab-1',
       'https://example.com/a',
-      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 900 })
+      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 350 })
     )
     expect(extractor.run).toHaveBeenCalledWith('tab-1')
     expect(out.ok).toBe(true)
@@ -154,7 +154,7 @@ describe('unified search tool', () => {
     expect(navigateWithNetworkCapture).toHaveBeenCalledWith(
       'tab-1',
       'https://electronjs.org/docs/latest/',
-      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 900 })
+      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 350 })
     )
     expect(extractor.run).toHaveBeenCalledWith('tab-1')
     expect(out.ok).toBe(true)

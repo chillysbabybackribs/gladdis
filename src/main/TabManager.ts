@@ -24,6 +24,10 @@ import {
 } from './network/watchNetworkRecorder'
 import type { CdpEventPayload, ExecResult, TabInfo, ViewBounds } from '../../shared/types'
 
+const NETWORK_CAPTURE_POLL_MS = 50
+const NETWORK_CAPTURE_IDLE_FALLBACK_MS = 150
+const NAVIGATION_CAPTURE_MAX_EXTRA_WAIT_MS = 1_500
+
 interface Tab {
   id: string
   view: WebContentsView
@@ -56,6 +60,27 @@ export function isUsableTabId(id: string | null | undefined): id is string {
 }
 
 export { BROWSER_PARTITION } from './tabs/constants'
+
+async function waitForNetworkCaptureQuiet(
+  recorder: Pick<ReturnType<typeof createWatchNetworkRecorder>, 'getSnapshot'>,
+  opts: { quietWindowMs: number; idleFallbackMs?: number; maxWaitMs?: number }
+): Promise<void> {
+  const startedAt = Date.now()
+  const idleFallbackMs = Math.max(0, opts.idleFallbackMs ?? NETWORK_CAPTURE_IDLE_FALLBACK_MS)
+  const maxWaitMs = Math.max(idleFallbackMs, opts.maxWaitMs ?? NAVIGATION_CAPTURE_MAX_EXTRA_WAIT_MS)
+  const deadline = startedAt + maxWaitMs
+
+  while (Date.now() < deadline) {
+    const snapshot = recorder.getSnapshot()
+    const now = Date.now()
+    if (snapshot.lastActivityAt === null) {
+      if (now - startedAt >= idleFallbackMs) return
+    } else if (now - snapshot.lastActivityAt >= opts.quietWindowMs) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, NETWORK_CAPTURE_POLL_MS))
+  }
+}
 
 /**
  * Owns every browser tab as a native WebContentsView layered over the UI view.
@@ -548,9 +573,17 @@ export class TabManager {
         wait: shouldWaitForNavigation,
         timeoutMs: opts.timeoutMs ?? 10_000
       })
-      await new Promise((resolve) =>
-        setTimeout(resolve, opts.quietWindowMs ?? (shouldWaitForNavigation ? 750 : 250))
-      )
+      const quietWindowMs = opts.quietWindowMs ?? (shouldWaitForNavigation ? 750 : 250)
+      if (networkEnabled) {
+        await waitForNetworkCaptureQuiet(recorder, {
+          quietWindowMs,
+          idleFallbackMs: shouldWaitForNavigation ? NETWORK_CAPTURE_IDLE_FALLBACK_MS : 75
+        })
+      } else {
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(quietWindowMs, NETWORK_CAPTURE_IDLE_FALLBACK_MS))
+        )
+      }
 
       const result = networkEnabled
         ? await recorder.finalize()

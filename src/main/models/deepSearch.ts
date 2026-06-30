@@ -16,6 +16,7 @@ import { runHiddenSearch } from './hiddenSearch'
 import { GoogleGenAI, Type } from '@google/genai'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const BACKGROUND_PROBE_SPA_GRACE_MS = 250
 
 export interface DeepSearchOptions {
   query: string
@@ -287,7 +288,7 @@ Follow this exact reasoning process to complete the plan:
     const bgTabId = bgTab.id
     try {
       await deps.tabs.navigate(bgTabId, url, { wait: true, timeoutMs: 12_000 })
-      await sleep(600)
+      await sleep(BACKGROUND_PROBE_SPA_GRACE_MS)
 
       const capture = await deps.extractor.run(bgTabId)
       const md = capture.content?.markdown || ''

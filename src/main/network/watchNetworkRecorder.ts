@@ -272,6 +272,11 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
   const requests = new Map<string, CapturedNetworkRequest>()
   const bodyStates = new Map<string, CapturedNetworkBodyState>()
   const bodyClaimOrder: string[] = []
+  let lastActivityAt: number | null = null
+
+  const markActivity = (): void => {
+    lastActivityAt = Date.now()
+  }
 
   const ensureRequest = (requestId: string, seed?: Partial<CapturedNetworkRequest>): CapturedNetworkRequest => {
     const existing = requests.get(requestId)
@@ -386,6 +391,7 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
           const request = params?.request ?? {}
           const url = String(request.url ?? '')
           if (!requestId || !matchesNetworkFilter(url, options.filter)) return
+          markActivity()
           ensureRequest(requestId, {
             requestId,
             url,
@@ -403,6 +409,7 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
           const response = params?.response ?? {}
           const url = String(response.url ?? '')
           if (!requestId || !matchesNetworkFilter(url, options.filter)) return
+          markActivity()
           const record = ensureRequest(requestId, {
             requestId,
             url,
@@ -426,6 +433,7 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
           const requestId = String(params?.requestId ?? '')
           const record = requests.get(requestId)
           if (!record) return
+          markActivity()
           record.finishedAt = typeof params?.timestamp === 'number' ? params.timestamp * 1000 : Date.now()
           record.encodedDataLength = Number.isFinite(params?.encodedDataLength)
             ? Number(params.encodedDataLength)
@@ -440,6 +448,7 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
           const requestId = String(params?.requestId ?? '')
           const record = requests.get(requestId)
           if (!record) return
+          markActivity()
           record.finishedAt = typeof params?.timestamp === 'number' ? params.timestamp * 1000 : Date.now()
           record.success = false
           record.errorText = typeof params?.errorText === 'string' ? params.errorText : 'Network loading failed'
@@ -448,6 +457,10 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
       } catch {
         /* a single malformed event must not break the capture */
       }
+    },
+
+    getSnapshot(): { totalSeen: number; lastActivityAt: number | null } {
+      return { totalSeen: requests.size, lastActivityAt }
     },
 
     async finalize(): Promise<{

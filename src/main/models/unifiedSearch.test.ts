@@ -23,11 +23,18 @@ import {
 import { runHiddenSearch } from './hiddenSearch'
 
 function makeDeps() {
-  const navigate = vi.fn()
+  const navigate = vi.fn(async () => undefined)
+  const navigateWithNetworkCapture = vi.fn(async () => ({
+    totalSeen: 0,
+    captured: [],
+    bodies: [],
+    filter: undefined
+  }))
   const tabs = {
     activeTabId: 'tab-1',
     list: () => [{ id: 'tab-1', url: 'https://start.test/', loading: false }],
     navigate,
+    navigateWithNetworkCapture,
     waitForNavigationSettled: vi.fn(async () => undefined),
     create: vi.fn(() => ({ id: 'tab-new' })),
     close: vi.fn(),
@@ -54,7 +61,7 @@ function makeDeps() {
       dom: { nodeCount: 1, htmlBytes: 1, frameCount: 1 }
     }))
   }
-  return { tabs, extractor, navigate }
+  return { tabs, extractor, navigate, navigateWithNetworkCapture }
 }
 
 describe('unifiedSearch', () => {
@@ -97,7 +104,7 @@ describe('unifiedSearch', () => {
   })
 
   it('runs hidden SERP then opens top hits in the visible tab', async () => {
-    const { tabs, extractor, navigate } = makeDeps()
+    const { tabs, extractor, navigateWithNetworkCapture } = makeDeps()
     vi.mocked(runHiddenSearch).mockClear()
 
     const outcome = await runUnifiedSearch(
@@ -107,7 +114,7 @@ describe('unifiedSearch', () => {
 
     expect(outcome.ok).toBe(true)
     expect(vi.mocked(runHiddenSearch).mock.calls.length).toBeGreaterThan(0)
-    expect(navigate).toHaveBeenCalled()
+    expect(navigateWithNetworkCapture).toHaveBeenCalled()
     expect(extractor.run).toHaveBeenCalled()
     expect(outcome.text).toContain('INDEX')
     expect(outcome.text).toContain('EVIDENCE')

@@ -17,7 +17,7 @@ const PRE_NAVIGATION_CAPTURE = {
   maxBodies: 3,
   maxBodyChars: 4_000,
   timeoutMs: 10_000,
-  quietWindowMs: 900
+  quietWindowMs: 350
 }
 
 export interface SearchToolsDeps {

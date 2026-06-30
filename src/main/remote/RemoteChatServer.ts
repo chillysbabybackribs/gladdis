@@ -596,17 +596,47 @@ function manifest(): object {
     display: 'standalone',
     background_color: '#0b0d10',
     theme_color: '#0b0d10',
-    icons: []
+    icons: [
+      { src: ICON_SVG, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }
+    ]
   }
 }
 
+// Inline SVG icon as a data URI — avoids serving/committing a binary asset.
+// `sizes: 'any'` lets the vector satisfy every install size; the safe-zone
+// inset keeps the glyph inside the maskable crop circle.
+const ICON_SVG =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">` +
+      `<rect width="512" height="512" rx="96" fill="#0b0d10"/>` +
+      `<text x="256" y="316" font-family="Inter, system-ui, sans-serif" font-size="300" ` +
+      `font-weight="700" text-anchor="middle" fill="#d7f7c2">G</text>` +
+      `</svg>`
+  )
+
 function serviceWorker(): string {
+  // Cache only the manifest; NOT /app. The /app HTML embeds the bridge token as
+  // a fallback, and the auto-generated server token rotates every desktop
+  // restart — a cached /app would hand the phone a dead token and the offline
+  // fallback would keep serving it. So navigations are always network-first and
+  // only fall back to a cached shell when the desktop is genuinely unreachable.
   return `
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open('gladdis-remote-v1').then((cache) => cache.addAll(['/app', '/manifest.webmanifest'])))
+  self.skipWaiting()
+  event.waitUntil(caches.open('gladdis-remote-v2').then((cache) => cache.addAll(['/manifest.webmanifest'])))
+})
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== 'gladdis-remote-v2').map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  )
 })
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+  // Never serve a cached navigation/page response (would pin a stale token).
+  if (event.request.mode === 'navigate') return
   event.respondWith(fetch(event.request).catch(() => caches.match(event.request)))
 })
 `.trim()

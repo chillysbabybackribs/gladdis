@@ -93,6 +93,31 @@ describe('RemoteChatServer', () => {
     server = null
   })
 
+  it('serves PWA primitives unauthenticated and keeps the service worker token-safe', async () => {
+    const { bridge } = makeBridge()
+    server = new RemoteChatServer(bridge, { token: 'test-token' })
+    const info = await server.start()
+    const base = `http://${info.host}:${info.port}`
+
+    // Manifest + service worker must be reachable WITHOUT a token — the phone
+    // fetches them on first load before any auth happens.
+    const manifestRes = await fetch(`${base}/manifest.webmanifest`)
+    expect(manifestRes.status).toBe(200)
+    expect(manifestRes.headers.get('content-type')).toContain('application/manifest+json')
+    const manifest = await manifestRes.json()
+    expect(manifest.display).toBe('standalone')
+    expect(Array.isArray(manifest.icons) && manifest.icons.length).toBeGreaterThan(0)
+    expect(manifest.icons[0].src).toContain('image/svg+xml')
+
+    const swRes = await fetch(`${base}/sw.js`)
+    expect(swRes.status).toBe(200)
+    const sw = await swRes.text()
+    // The SW must NOT cache /app (would pin a stale, rotated bridge token) and
+    // must bypass the cache for navigations.
+    expect(sw).not.toContain("'/app'")
+    expect(sw).toContain("request.mode === 'navigate'")
+  })
+
   it('rejects chat sends without the bearer token', async () => {
     const { bridge } = makeBridge()
     server = new RemoteChatServer(bridge, { token: 'test-token' })

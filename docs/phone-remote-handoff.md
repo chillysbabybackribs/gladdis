@@ -1,6 +1,6 @@
 # Phone Remote Handoff
 
-Last updated: 2026-06-30
+Last updated: 2026-06-30 (revised after worktree reconciliation)
 Branch: `positioning-one-local-workspace`
 
 ## Objective
@@ -104,6 +104,12 @@ Validated during the last shipped slice:
 - `npm run check` passed
 - `npm run build` passed
 
+The remote area already has unit coverage committed:
+
+- `src/main/remote/PhoneDeviceStore.test.ts`
+- `src/main/remote/PhoneSessionStateStore.test.ts`
+- `src/main/remote/RemoteChatServer.test.ts`
+
 Known existing build note:
 
 - `src/main/models/memoryStore.ts` has a dynamic + static import chunking warning during build
@@ -116,29 +122,105 @@ What has **not** been fully completed yet:
 
 An app-window screenshot was taken after the last slice, but the actual remote phone page was not fully exercised end-to-end in that pass.
 
+## How to test before a live phone (desktop localhost)
+
+You can validate ~90% of the remote/PWA correctness in desktop Chrome with no
+phone and no tunnel, because `localhost` is a secure context.
+
+1. **Start the bridge** (off by default). To also allow a phone later, bind wide:
+
+   ```bash
+   GLADDIS_PHONE_BRIDGE=1 GLADDIS_PHONE_BRIDGE_HOST=0.0.0.0 npm run dev
+   ```
+
+   The listening URL is logged: `[gladdis] phone bridge listening at http://<host>:<port>/app?token=…`.
+
+2. **Pair a device** in the app to get an `appUrl` (token-bearing). Open it — but
+   for the desktop pass, swap the host for `localhost`:
+   `http://localhost:<port>/app?token=…`.
+
+3. **DevTools → Application tab:**
+   - **Manifest** — name "Gladdis Remote Chat", `standalone`, and a non-empty
+     icon (the inline SVG). No "no icons" warning.
+   - **Service Workers** — `/sw.js` activated. Confirm reloading the page still
+     hits the network (navigations are not cache-served).
+   - **Network** — `/manifest.webmanifest` and `/sw.js` both return `200`
+     **without** a token (they're pre-auth).
+
+4. **Restart-safety check** (the token-pinning fix): note the token in the URL,
+   stop the app, restart it, and confirm the bridge logs the **same** token. A
+   previously opened install should still authenticate.
+
+5. **Chat round-trip** — send a message from the localhost page; confirm it lands
+   in the desktop chat and the assistant reply streams back over `/ws`.
+
+For the **real phone install** you need HTTPS (SW won't register over plain LAN
+HTTP). Put a tunnel in front and open the `https://…/app?token=…` URL on the phone:
+
+```bash
+npx localtunnel --port <port>     # or: cloudflared tunnel --url http://localhost:<port>
+```
+
 ## Known gaps / risks
 
-### 1. Revoke cleanup is probably incomplete in committed code
+### 1. Revoke cleanup exists in the worktree but is not yet committed
 
-There was intent to clear persisted phone session state when a paired device is revoked, but that cleanup did **not** make it into the final committed `c3cdc09` diff.
+The committed `c3cdc09` `revokePhoneDevice` is bare — it calls `phoneDeviceStore.revoke(deviceId)` and nothing more, so persisted phone session state is **not** cleared on revoke in any commit.
 
-Because `src/main/index.ts` has many unrelated local edits in the worktree, only the safe store wiring was staged and committed.
+However, the fix is **already implemented in the working tree** (it just hasn't been committed, because `src/main/index.ts` is dirty with ~350 lines of unrelated in-flight window-chrome work):
 
-Assume this still needs a clean follow-up patch:
+```ts
+// src/main/index.ts (worktree, uncommitted)
+function revokePhoneDevice(deviceId: string): PhoneBridgeStatus {
+  phoneDeviceStore.revoke(deviceId)
+  phoneSessionStateStore.clear(deviceSessionKey(deviceId))  // <- the cleanup
+  return phoneBridgeStatus()
+}
+```
 
-- on device revoke, clear `deviceSessionKey(deviceId)` from `PhoneSessionStateStore`
+It also adds `deviceSessionKey` to the `PhoneSessionStateStore` import. So the follow-up here is **not** to re-implement this — it's to:
 
-### 2. Installability is not yet the same thing as "production PWA"
+- verify the worktree version, then **surgically stage just those two lines** (import + `.clear()` call) without dragging in the unrelated `index.ts` window-chrome edits
 
-The phone web app exists, but that does not automatically mean the full PWA install story is complete.
+If the dirty `index.ts` is ever reset/stashed and the fix is lost, the same two
+lines are preserved as a standalone patch generated against HEAD:
 
-Things to verify explicitly before calling it done:
+    git apply docs/phone-revoke-cleanup.patch
 
-- manifest presence and correctness
-- service worker strategy
-- offline/install UX
-- mobile home-screen install behavior across browsers
-- whether the phone app can reconnect cleanly when the desktop is temporarily unavailable
+(It applies cleanly on a clean checkout of HEAD's `index.ts`.)
+
+### 2. Installability — primitives now exist; a few are hardened, the rest needs a live phone
+
+The remote app **does** serve PWA primitives (`RemoteChatServer.ts`):
+
+- `GET /manifest.webmanifest` — `standalone`, `start_url: /app`, brand colors
+- `GET /sw.js` — service worker
+- both are served **before the auth gate**, so the phone can fetch them on first load
+
+Hardened in this slice (verifiable without a phone, covered by tests):
+
+- **manifest icons** — was `icons: []` (degraded install); now ships an inline SVG
+  data-URI icon (`any maskable`)
+- **service-worker token safety** — the SW previously cached `/app`. Because the
+  served `/app` HTML embeds the bridge token, and the auto-generated server token
+  rotated every desktop restart, a cached `/app` would hand the phone a **dead
+  token** after a restart and the offline fallback would keep serving it. The SW
+  now **never caches navigations** (`request.mode === 'navigate'` bypasses cache)
+  and no longer precaches `/app`.
+- **token pinning** — the server bridge token is now persisted
+  (`userData/gladdis-phone-bridge-token`) instead of `randomUUID()` per launch, so
+  a server-token install survives restarts. `GLADDIS_PHONE_BRIDGE_TOKEN` still
+  overrides and is never persisted. (Paired-device tokens already persisted.)
+
+Still requires a real phone / HTTPS tunnel to verify:
+
+- mobile home-screen install behavior across browsers (iOS Safari vs Android Chrome)
+- offline/install UX and the maskable icon crop on a real launcher
+- whether the phone app reconnects cleanly when the desktop is temporarily unavailable
+- **secure-context requirement**: service workers only register over HTTPS or
+  `localhost`. A plain-HTTP LAN IP (`http://192.168.x.x:port`) will **not**
+  register the SW on the phone — use a tunnel (`localtunnel` / `cloudflared`) for
+  a true install test. Desktop `localhost` is exempt and validates everything else.
 
 ### 3. "Computer off anywhere in the world" is not solved by the current bridge
 
@@ -167,8 +249,8 @@ Implications:
    - disconnected / retrying
 
 3. Land revoke cleanup safely:
-   - clear persisted device session state on device revoke
-   - add a focused test if feasible
+   - the clear-on-revoke code already exists in the worktree (see Gap #1) — just stage those two `index.ts` lines surgically, don't rewrite them
+   - `PhoneSessionStateStore.clear()` is already covered by `PhoneSessionStateStore.test.ts`; add a revoke-path test in `index.ts`'s area only if it's cheap
 
 ### After that
 

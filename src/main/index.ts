@@ -53,7 +53,8 @@ import { loadDreamHistory } from './models/memory/dreamHistory'
 import { ServiceRegistry } from './ServiceRegistry'
 import { RemoteChatServer } from './remote/RemoteChatServer'
 import { PhoneDeviceStore } from './remote/PhoneDeviceStore'
-import { PhoneSessionStateStore } from './remote/PhoneSessionStateStore'
+import { PhoneSessionStateStore, deviceSessionKey } from './remote/PhoneSessionStateStore'
+import { resolvePhoneBridgeToken } from './remote/phoneBridgeToken'
 
 let win: BaseWindow
 let uiView: WebContentsView
@@ -69,7 +70,9 @@ const enablePhoneBridge = process.env.GLADDIS_PHONE_BRIDGE === '1'
 const phoneBridgeHost = process.env.GLADDIS_PHONE_BRIDGE_HOST ?? '127.0.0.1'
 const phoneBridgePort = parseOptionalPort(process.env.GLADDIS_PHONE_BRIDGE_PORT)
 const phoneBridgeCorsOrigin = process.env.GLADDIS_PHONE_BRIDGE_CORS_ORIGIN
-const phoneBridgeToken = process.env.GLADDIS_PHONE_BRIDGE_TOKEN
+// Resolved lazily at server start — resolvePhoneBridgeToken() reads userData,
+// which is only valid after app is ready. Pins the token across restarts.
+let phoneBridgeToken: string | undefined
 const extraTrustedHosts = new Set(
   (process.env.GLADDIS_TRUSTED_LOCAL_CERT_HOSTS ?? '')
     .split(',')
@@ -260,6 +263,7 @@ function createRemoteChatBridge() {
 
 async function startRemoteChatServer(options: PhoneBridgeStartOptions = {}): Promise<PhoneBridgeStatus> {
   if (remoteChatServer?.getInfo()) return phoneBridgeStatus()
+  phoneBridgeToken ??= resolvePhoneBridgeToken()
   remoteChatServer = new RemoteChatServer(
     createRemoteChatBridge(),
     {
@@ -312,6 +316,7 @@ function pairPhoneDevice(label?: string): PhoneBridgePairResult {
 
 function revokePhoneDevice(deviceId: string): PhoneBridgeStatus {
   phoneDeviceStore.revoke(deviceId)
+  phoneSessionStateStore.clear(deviceSessionKey(deviceId))
   return phoneBridgeStatus()
 }
 

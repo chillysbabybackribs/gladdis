@@ -1,10 +1,12 @@
 import { execFile, spawn } from 'node:child_process'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
 import type { ChatRequest, ChatStreamEvent, CursorStatus } from '../../../../shared/types'
 import type { BridgeRegistration } from '../claudeCode/ClaudeCodeBridgeServer'
+import { CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from '../claudeCode/browserTools'
+import { formatCursorConversationPrompt } from './cursorPrompt'
 
 const execFileAsync = promisify(execFile)
 const CURSOR_BIN = process.env.GLADDIS_CURSOR_BIN || 'agent'
@@ -18,6 +20,7 @@ let activeStatus: Promise<CursorStatus> | null = null
 let cachedStatus: CursorStatus | null = null
 let lastStatusTime = 0
 const workspaceMcpLocks = new Map<string, Promise<void>>()
+const workspaceMcpFingerprints = new Map<string, string>()
 
 export interface CursorUsage {
   inputTokens?: number
@@ -161,17 +164,18 @@ export class CursorClient {
     signal: AbortSignal,
     system: string,
     user: string,
-    mode: 'ask' | 'agent'
+    mode: 'ask' | 'agent',
+    options: { enableBrowserTools?: boolean } = {}
   ): Promise<{ text: string; usage?: CursorUsage }> {
     return this.runTurn({
       modelId: req.modelId,
       system,
-      user,
+      user: formatCursorConversationPrompt(req.messages, user),
       conversationId: req.conversationId ?? null,
       requestId: req.requestId,
       signal,
       mode,
-      enableBrowserTools: true
+      enableBrowserTools: options.enableBrowserTools === true
     })
   }
 
@@ -189,15 +193,20 @@ export class CursorClient {
     if (!probe.installed) throw new Error('Cursor Agent CLI not found')
 
     const workdir = this.getWorkspaceRoot() ?? process.cwd()
-    return withWorkspaceMcpLock(workdir, async () => {
-      const bridge = args.enableBrowserTools && this.createBridgeSession
-        ? await this.createBridgeSession({
-            conversationId: args.conversationId,
-            modelId: args.modelId,
-            requestId: args.requestId
-          })
-        : null
-      const mcpConfig = bridge ? await installWorkspaceMcpConfig(workdir, bridge.mcpConfig) : null
+    const needsMcpBridge = args.enableBrowserTools && !!this.createBridgeSession
+
+    // Register the bridge session outside the lock — the token and URL are stable
+    // per workdir (persistTokenKey), so this is idempotent and cheap.
+    const bridge = needsMcpBridge
+      ? await this.createBridgeSession!({
+          conversationId: args.conversationId,
+          modelId: args.modelId,
+          requestId: args.requestId
+        })
+      : null
+
+    const runTurn = async (): Promise<{ text: string; usage?: CursorUsage }> => {
+      const mcpConfig = bridge ? await ensureWorkspaceMcpConfig(workdir, bridge.mcpConfig) : null
       const prompt = [
         args.system.trim() ? '[System]\n' + args.system.trim() : '',
         '[User]\n' + args.user
@@ -309,14 +318,15 @@ export class CursorClient {
 
             if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
               const text = assistantMessageText(msg)
-              if (classifyAssistantEvent(msg) === 'stream_delta') emitDelta(text)
+              const kind = classifyAssistantEvent(msg)
+              if (shouldEmitAssistantStreamText(kind)) emitDelta(text)
               return
             }
 
             if (msg.type === 'result') {
               if (typeof msg.result === 'string') {
                 finalText = msg.result
-                if (!emittedText) emitDelta(msg.result)
+                emitDelta(msg.result)
               }
               finalUsage = normalizeUsage(msg.usage)
               if (msg.is_error || msg.subtype === 'error') {
@@ -353,48 +363,68 @@ export class CursorClient {
         await mcpConfig?.dispose()
         bridge?.dispose()
       }
-    })
+    }
+
+    // Only serialize when we might actually write the MCP config file. On warm
+    // turns (fingerprint already cached) the write is skipped, so no lock needed.
+    if (bridge && !isMcpConfigWarm(workdir, bridge.mcpConfig)) {
+      return withWorkspaceMcpLock(workdir, runTurn)
+    }
+    return runTurn()
   }
 }
 
-async function installWorkspaceMcpConfig(workdir: string, mcpConfigJson: string): Promise<{ dispose: () => Promise<void> }> {
-  const file = join(workdir, '.cursor', 'mcp.json')
-  const dir = dirname(file)
-  let previous: string | null = null
-  let hadCursorDir = true
-  try {
-    await stat(dir)
-  } catch (error: any) {
-    if (error?.code === 'ENOENT') hadCursorDir = false
-    else throw error
+/**
+ * True when the MCP config for `workdir` is already written and matches the
+ * bridge's config — meaning `ensureWorkspaceMcpConfig` will be a no-op and the
+ * workspace lock can be skipped entirely.
+ */
+export function isMcpConfigWarm(workdir: string, mcpConfigJson: string): boolean {
+  const bridgeConfig = parseMcpConfig(mcpConfigJson)
+  const gladdisEntry = bridgeConfig.mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]
+  if (!gladdisEntry) return true
+  const fingerprint = JSON.stringify(gladdisEntry)
+  return workspaceMcpFingerprints.get(workdir) === fingerprint
+}
+
+/** Keep a stable Gladdis MCP entry in `.cursor/mcp.json`; write only when it changes. */
+export async function ensureWorkspaceMcpConfig(
+  workdir: string,
+  mcpConfigJson: string
+): Promise<{ dispose: () => Promise<void> }> {
+  const bridgeConfig = parseMcpConfig(mcpConfigJson)
+  const gladdisEntry = bridgeConfig.mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]
+  const fingerprint = JSON.stringify(gladdisEntry ?? null)
+  if (!gladdisEntry) {
+    return { dispose: async () => {} }
   }
+
+  const cached = workspaceMcpFingerprints.get(workdir)
+  if (cached === fingerprint) {
+    return { dispose: async () => {} }
+  }
+
+  const file = join(workdir, '.cursor', 'mcp.json')
+  let previous: string | null = null
   try {
     previous = await readFile(file, 'utf8')
   } catch (error: any) {
     if (error?.code !== 'ENOENT') throw error
   }
 
-  const bridgeConfig = parseMcpConfig(mcpConfigJson)
-  const nextConfig = mergeMcpConfig(parseMcpConfig(previous), bridgeConfig)
-  await mkdir(dir, { recursive: true })
-  await writeFile(file, JSON.stringify(nextConfig, null, 2) + '\n', { mode: 0o600 })
-
-  return {
-    dispose: async () => {
-      if (previous === null) {
-        await rm(file, { force: true })
-        if (!hadCursorDir) {
-          try {
-            await rm(dir, { recursive: true, force: true })
-          } catch (error: any) {
-            if (error?.code !== 'ENOENT' && error?.code !== 'ENOTEMPTY' && error?.code !== 'EISDIR') throw error
-          }
-        }
-        return
-      }
-      await writeFile(file, previous, { mode: 0o600 })
-    }
+  const existing = parseMcpConfig(previous)
+  const onDiskGladdis = JSON.stringify(existing.mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME] ?? null)
+  if (previous !== null && onDiskGladdis === fingerprint) {
+    workspaceMcpFingerprints.set(workdir, fingerprint)
+    return { dispose: async () => {} }
   }
+
+  const merged = mergeMcpConfig(existing, bridgeConfig)
+
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, JSON.stringify(merged, null, 2) + '\n', { mode: 0o600 })
+  workspaceMcpFingerprints.set(workdir, fingerprint)
+  return { dispose: async () => {} }
 }
 
 function parseMcpConfig(raw: string | null): { mcpServers: Record<string, any> } {
@@ -453,8 +483,11 @@ function assistantMessageText(msg: any): string {
 
 /**
  * Cursor's `--stream-partial-output` sends duplicate assistant snapshots before
- * tool calls and again right before the terminal `result`. Only assistant
- * events with `timestamp_ms` and without `model_call_id` are fresh text.
+ * tool calls and again right before the terminal `result`. Events with
+ * `timestamp_ms` and no `model_call_id` are live deltas; bare snapshots without
+ * `timestamp_ms` are final flushes that may carry text not yet streamed.
+ * Tool-boundary flushes (with `model_call_id`) stay suppressed — they repeat
+ * text already shown right before a tool call.
  */
 export function classifyAssistantEvent(msg: any): CursorAssistantEventKind {
   const hasText = assistantMessageText(msg).length > 0
@@ -467,57 +500,168 @@ export function classifyAssistantEvent(msg: any): CursorAssistantEventKind {
   return 'unknown'
 }
 
+/** True when an assistant snapshot should contribute new streamed chat text. */
+export function shouldEmitAssistantStreamText(kind: CursorAssistantEventKind): boolean {
+  return kind === 'stream_delta' || kind === 'final_flush'
+}
+
 function formatCursorToolName(toolCall: any): string {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
-  if (payload.mcpToolCall?.serverName && payload.mcpToolCall?.toolName) {
-    return `${String(payload.mcpToolCall.serverName)}.${String(payload.mcpToolCall.toolName)}`
+  const [firstKey, firstValue] = firstCursorToolEntry(payload)
+  if (firstKey === 'mcpToolCall') {
+    const serverName = typeof firstValue?.serverName === 'string' ? firstValue.serverName.trim() : ''
+    const toolName = typeof firstValue?.toolName === 'string' ? firstValue.toolName.trim() : ''
+    if (serverName && toolName) return `${serverName}.${toolName}`
+    if (toolName) return toolName
   }
-  if (payload.shellToolCall) return 'cursor.shell'
-  if (payload.fileReadToolCall) return 'cursor.read_file'
-  if (payload.fileEditToolCall) return 'cursor.edit_file'
-  if (payload.searchToolCall) return 'cursor.search'
-  if (payload.listDirToolCall) return 'cursor.list_dir'
-  const firstKey = Object.keys(payload)[0]
-  return firstKey ? `cursor.${firstKey}` : 'cursor.tool'
+  return normalizeCursorToolName(firstKey)
 }
 
 function cursorToolArgs(toolCall: any): unknown {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
-  const firstValue = Object.values(payload)[0] as any
+  const [, firstValue] = firstCursorToolEntry(payload)
   if (!firstValue || typeof firstValue !== 'object') return {}
-  return firstValue.args && typeof firstValue.args === 'object' ? firstValue.args : {}
+  if (firstValue.args && typeof firstValue.args === 'object') return firstValue.args
+  if (firstValue.input && typeof firstValue.input === 'object') return firstValue.input
+  return {}
 }
 
 function cursorToolOk(toolCall: any): boolean {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
-  const firstValue = Object.values(payload)[0] as any
+  const [, firstValue] = firstCursorToolEntry(payload)
   if (!firstValue || typeof firstValue !== 'object') return true
   const result = firstValue.result
-  if (!result || typeof result !== 'object') return true
-  return !('error' in result)
+  if (result == null) return true
+  if (typeof result !== 'object') return true
+  if ('error' in result && result.error) return false
+  if ('success' in result && result.success === false) return false
+  if ('ok' in result && result.ok === false) return false
+  if ('isError' in result && result.isError === true) return false
+  return true
 }
 
 function cursorToolPreview(toolCall: any): string {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
-  const firstValue = Object.values(payload)[0] as any
+  const [firstKey, firstValue] = firstCursorToolEntry(payload)
   if (!firstValue || typeof firstValue !== 'object') return 'Tool completed.'
-  const description = typeof firstValue.description === 'string' ? firstValue.description.trim() : ''
+  const args = cursorToolArgs(toolCall)
+  const description = firstTextValue(firstValue.description)
   const result = firstValue.result
-  if (result && typeof result === 'object') {
-    const success = (result as any).success
-    if (success && typeof success === 'object') {
-      const stdout = typeof success.stdout === 'string' ? success.stdout.trim() : ''
-      const stderr = typeof success.stderr === 'string' ? success.stderr.trim() : ''
-      const output = [stdout, stderr].filter(Boolean).join('\n').trim()
-      if (output) return output
-    }
-    const error = (result as any).error
-    if (error && typeof error === 'object') {
-      const message = typeof error.message === 'string' ? error.message.trim() : ''
-      if (message) return message
+  const resultText = firstNonEmptyText([
+    result,
+    (result as any)?.success,
+    (result as any)?.error,
+    (result as any)?.output,
+    (result as any)?.content
+  ])
+  if (resultText) return resultText
+
+  if (description) return description
+
+  if (args && typeof args === 'object') {
+    const argPreview = summarizeArgs(args as Record<string, unknown>)
+    if (argPreview) return argPreview
+  }
+
+  const fallbackName = normalizeCursorToolName(firstKey)
+  return fallbackName === 'search_files' ? 'Search completed.' : 'Tool completed.'
+}
+
+function firstCursorToolEntry(payload: Record<string, any>): [string, any] {
+  const firstKey = Object.keys(payload)[0] ?? ''
+  return [firstKey, firstKey ? payload[firstKey] : undefined]
+}
+
+function normalizeCursorToolName(key: string): string {
+  switch (key) {
+    case 'shellToolCall':
+      return 'execute_in_browser'
+    case 'readToolCall':
+    case 'fileReadToolCall':
+      return 'read_file'
+    case 'editToolCall':
+    case 'fileEditToolCall':
+      return 'edit_file'
+    case 'writeToolCall':
+    case 'fileWriteToolCall':
+      return 'write_file'
+    case 'grepToolCall':
+    case 'searchToolCall':
+    case 'codebaseSearchToolCall':
+      return 'search_files'
+    case 'listDirToolCall':
+    case 'lsToolCall':
+      return 'list_dir'
+    case 'runValidationToolCall':
+      return 'run_validation'
+    case 'mcpToolCall':
+      return 'tool'
+    default: {
+      const base = key.replace(/ToolCall$/, '')
+      const snake = base
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[^a-zA-Z0-9]+/g, '_')
+        .toLowerCase()
+        .replace(/^_+|_+$/g, '')
+      return snake || 'tool'
     }
   }
-  return description || 'Tool completed.'
+}
+
+function firstNonEmptyText(values: unknown[]): string {
+  for (const value of values) {
+    const text = extractPreviewText(value)
+    if (text) return text
+  }
+  return ''
+}
+
+function extractPreviewText(value: unknown, seen = new Set<unknown>()): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (seen.has(value)) return ''
+  if (Array.isArray(value)) {
+    seen.add(value)
+    for (const item of value) {
+      const text = extractPreviewText(item, seen)
+      if (text) return text
+    }
+    return ''
+  }
+  if (typeof value !== 'object') return ''
+
+  seen.add(value)
+  const record = value as Record<string, unknown>
+  for (const key of ['message', 'stderr', 'stdout', 'output', 'text', 'content', 'description', 'summary', 'title']) {
+    const text = extractPreviewText(record[key], seen)
+    if (text) return text
+  }
+  for (const nested of Object.values(record)) {
+    const text = extractPreviewText(nested, seen)
+    if (text) return text
+  }
+  return ''
+}
+
+function firstTextValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function summarizeArgs(args: Record<string, unknown>): string {
+  const path = typeof args.path === 'string' ? args.path.trim() : ''
+  if (path) return path
+  const query = typeof args.query === 'string' ? args.query.trim() : ''
+  if (query) return query
+  const url = typeof args.url === 'string' ? args.url.trim() : ''
+  if (url) return url
+  const command = typeof args.command === 'string' ? args.command.trim() : ''
+  if (command) return command
+  const text = typeof args.text === 'string' ? args.text.trim() : ''
+  if (text) return text
+  const method = typeof args.method === 'string' ? args.method.trim() : ''
+  if (method) return method
+  return ''
 }
 
 async function withWorkspaceMcpLock<T>(workdir: string, task: () => Promise<T>): Promise<T> {

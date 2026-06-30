@@ -184,6 +184,7 @@ export class ClaudeCodeClient {
         })
       : null
     const baseCliArgs = [
+      '--dangerously-skip-permissions',
       '-p',
       '--verbose',
       '--output-format',

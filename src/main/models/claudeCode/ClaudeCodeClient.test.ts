@@ -57,6 +57,7 @@ describe('ClaudeCodeClient', () => {
         expect(cliArgs).toContain('--allowedTools')
         expect(cliArgs).toContain('mcp__gladdis__*')
         expect(cliArgs).toContain('--strict-mcp-config')
+        expect(cliArgs).toContain('--dangerously-skip-permissions')
 
         const prompt = cliArgs[cliArgs.indexOf('--append-system-prompt') + 1]
         expect(prompt).toContain('call memory_read at the start of a task')

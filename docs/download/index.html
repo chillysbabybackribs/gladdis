@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gladys for Linux</title>
+    <meta
+      name="description"
+      content="Download the latest Linux build of Gladys, the desktop workshop for chat, browser automation, and local development workflows."
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">Linux preview</p>
+        <h1>Gladys</h1>
+        <p class="lede">
+          A desktop workshop for conversation, browser automation, and local
+          development workflows.
+        </p>
+        <div class="actions">
+          <a
+            class="button button-primary button-disabled"
+            id="download-appimage"
+            href="#"
+            aria-disabled="true"
+          >
+            Download AppImage
+          </a>
+          <a
+            class="button button-secondary button-disabled"
+            id="download-deb"
+            href="#"
+            aria-disabled="true"
+          >
+            Download .deb
+          </a>
+        </div>
+        <p class="meta" id="release-status">Checking the latest Linux release…</p>
+      </section>
+
+      <section class="card-grid">
+        <article class="card">
+          <h2>What this build is</h2>
+          <p>
+            This page is wired for Linux-first distribution while the final
+            product naming, brand assets, and broader platform packaging are
+            still being finished.
+          </p>
+        </article>
+        <article class="card">
+          <h2>Formats</h2>
+          <p>
+            AppImage works well for a portable install. The Debian package is
+            better when you want the app registered with your system launcher.
+          </p>
+        </article>
+        <article class="card">
+          <h2>Publishing flow</h2>
+          <p>
+            Tagged releases publish Linux artifacts to GitHub Releases, and this
+            page automatically points to the latest published build.
+          </p>
+        </article>
+      </section>
+    </main>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

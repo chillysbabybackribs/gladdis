@@ -4,13 +4,15 @@ This repo now has the first packaging scaffold in place:
 
 - Electron Builder config with Linux installer targets (`AppImage` and `deb`)
 - Linux-first GitHub Actions workflow that builds installer artifacts on Ubuntu
+- GitHub Release publishing scaffold for tagged Linux builds
+- Static Linux download page scaffold in `docs/download/`
 - `npm run release:doctor` to show what is still missing
 
 Still intentionally open:
 
 - final product name
 - final icons and branded installer artwork
-- public download/marketing page
+- final polished marketing copy and branded download page
 - macOS and Windows release/signing work
 
 Before a user-facing launch, tie up these items:
@@ -21,7 +23,8 @@ Before a user-facing launch, tie up these items:
    - GitHub Releases
    - a download CDN/bucket
    - a product website download endpoint
-4. Add the final download page once branding and naming are set.
+4. Enable GitHub Pages or move the static download page scaffold to the final host.
+5. Replace placeholder copy and styling with final brand assets once ready.
 
 Deferred until after Linux:
 

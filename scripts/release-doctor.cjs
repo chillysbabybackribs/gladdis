@@ -36,7 +36,12 @@ printStatus(
   'GitHub Actions packaging pipeline scaffold for Linux'
 )
 printStatus(
-  'Landing page / download host',
-  false,
-  'intentionally deferred for now'
+  'Download page scaffold',
+  existsSync(join(root, 'docs', 'download', 'index.html')),
+  'static Linux-first page ready for GitHub Pages or another host'
+)
+printStatus(
+  'Pages deploy workflow',
+  existsSync(join(root, '.github', 'workflows', 'deploy-download-page.yml')),
+  'optional GitHub Pages deploy pipeline'
 )

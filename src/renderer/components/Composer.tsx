@@ -412,7 +412,7 @@ export function Composer({
                 title="Stop"
               >
                 <svg width="14" height="14" viewBox="0 0 16 16">
-                  <rect x="4" y="4" width="8" height="8" rx="1.5" fill="currentColor" />
+                  <rect x="3" y="3" width="10" height="10" rx="1.5" fill="var(--danger)" />
                 </svg>
               </button>
             ) : (

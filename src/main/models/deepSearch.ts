@@ -13,7 +13,7 @@ import type { PageExtractor } from '../extract/PageExtractor'
 import type { PageCapture } from '../../../shared/types'
 import { briefPageForSearch } from './searchBrief'
 import { runHiddenSearch } from './hiddenSearch'
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI, Type } from '@google/genai'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -66,21 +66,27 @@ async function strategizeAndExpandQuery(
 User Research Query: "${query}"
 
 Your task is to:
-1.  Generate 3-5 diverse, high-quality search queries to explore the topic from multiple angles (e.g., technical, historical, practical). Include the original query.
-2.  Generate 3-4 high-level strategic directives for how the research agent should approach this topic.
-
-Output ONLY a valid JSON object with a 'queries' array and a 'directives' array.
-Example:
-{
-  "queries": ["what is X", "history of X", "X applications"],
-  "directives": ["focus on academic papers", "avoid marketing material"]
-}`;
+1. Generate 3-5 diverse, high-quality search queries to explore the topic from multiple angles (e.g., technical, historical, practical). Include the original query.
+2. Generate 3-4 high-level strategic directives for how the research agent should approach this topic.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.5-flash',
       contents: prompt,
       config: {
-        responseMimeType: 'application/json'
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            queries: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            },
+            directives: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            }
+          }
+        }
       }
     });
 
@@ -175,24 +181,23 @@ Follow this exact reasoning process to complete the plan:
 1.  Decompose the initial query into 2-4 sharp, answerable RESEARCH QUESTIONS.
 2.  Choose 4-8 high-precision CONCEPT KEYWORDS from the query list for relevance scoring.
 3.  Define 3-5 PRIORITY ANGLES (e.g., "official reports", "recent 2025 developments").
-4.  Write a one-sentence SOURCE STRATEGY (how to favor credible vs. secondary sources).
-
-Output ONLY a valid JSON object with exactly these keys. Crucially, the "queries" array in your output MUST be identical to the one provided above.
-{
-  "researchQuestions": string[],
-  "queries": ${queriesBlock},
-  "concepts": string[],
-  "priorityAngles": string[],
-  "sourceStrategy": string
-}
-
-No markdown, no extra text, no explanations outside the JSON.`
+4. Write a one-sentence SOURCE STRATEGY (how to favor credible vs. secondary sources).`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-lite',
         contents: prompt,
         config: {
-          responseMimeType: 'application/json'
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              researchQuestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+              queries: { type: Type.ARRAY, items: { type: Type.STRING } },
+              concepts: { type: Type.ARRAY, items: { type: Type.STRING } },
+              priorityAngles: { type: Type.ARRAY, items: { type: Type.STRING } },
+              sourceStrategy: { type: Type.STRING }
+            }
+          }
         }
       })
 

@@ -372,7 +372,7 @@ function registerIpc(): void {
   // Custom agents are reusable prompt/model presets created from the app menu.
   ipcMain.handle(IPC.AGENTS_LIST, () => agents.list())
   ipcMain.handle(IPC.AGENTS_OPTIMIZE, (_e, input: OptimizeAgentInput) =>
-    chat.optimizeAgent(input)
+    chat.agentOptimizer.optimizeAgent(input)
   )
   ipcMain.handle(IPC.AGENTS_SAVE, (_e, input: SaveAgentInput) => agents.save(input))
   ipcMain.handle(IPC.AGENTS_DELETE, (_e, id: string) => agents.delete(id))
@@ -571,11 +571,28 @@ function registerApplicationMenu(): void {
       ]
     },
     {
-      label: 'Agents',
+      label: 'Memory',
       submenu: [
         {
-          label: 'Create an Agent...',
-          click: () => sendAppCommand({ type: 'agents:create' })
+          label: 'Curate Memory...',
+          enabled: hasWorkspace,
+          click: () => sendAppCommand({ type: 'memory:open', section: 'curate' })
+        },
+        {
+          label: 'Review Last Dream...',
+          enabled: hasWorkspace,
+          click: () => sendAppCommand({ type: 'memory:open', section: 'review' })
+        },
+        {
+          label: 'Dream History...',
+          enabled: hasWorkspace,
+          click: () => sendAppCommand({ type: 'memory:open', section: 'history' })
+        },
+        { type: 'separator' },
+        {
+          label: 'Auto-dream Settings...',
+          enabled: hasWorkspace,
+          click: () => sendAppCommand({ type: 'memory:open', section: 'auto' })
         }
       ]
     },

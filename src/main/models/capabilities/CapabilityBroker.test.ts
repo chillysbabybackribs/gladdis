@@ -179,7 +179,7 @@ describe('CapabilityBroker', () => {
             entryPoints: []
           }
         }),
-        searchRepo: async () => ({ summary: 'unused', structuredPayload: { workspaceRoot: '/tmp/demo', query: 'unused', totalHits: 0, hits: [], suggestedSpans: [] } }),
+        searchRepo: async () => ({ summary: 'unused', structuredPayload: { workspaceRoot: '/tmp/demo', query: 'unused', totalHits: 0, hits: [], suggestedSpans: [], context: { chars: 0, estimatedTokens: 0, hitCount: 0, suggestedSpanCount: 0 } } }),
         readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
         researchDossier: async () => ({
           summary: '## Dossier\nRelevant files: src/main/models/ChatService.ts',
@@ -187,7 +187,18 @@ describe('CapabilityBroker', () => {
             workspaceRoot: '/tmp/demo',
             query: 'chat service architecture',
             searchedFiles: ['src/main/models/ChatService.ts'],
-            suggestedSpans: []
+            suggestedSpans: [],
+            context: {
+              promptChars: 0,
+              estimatedPromptTokens: 0,
+              searchSummaryChars: 0,
+              readSpanChars: 0,
+              estimatedReadSpanTokens: 0,
+              suggestedSpanCount: 0,
+              selectedFileBytes: 0,
+              estimatedFullFileTokens: 0,
+              estimatedTokensSavedBySpans: 0
+            }
           }
         })
       },
@@ -228,7 +239,7 @@ describe('CapabilityBroker', () => {
             entryPoints: []
           }
         }),
-        searchRepo: async () => ({ summary: 'unused', structuredPayload: { workspaceRoot: '/tmp/demo', query: 'unused', totalHits: 0, hits: [], suggestedSpans: [] } }),
+        searchRepo: async () => ({ summary: 'unused', structuredPayload: { workspaceRoot: '/tmp/demo', query: 'unused', totalHits: 0, hits: [], suggestedSpans: [], context: { chars: 0, estimatedTokens: 0, hitCount: 0, suggestedSpanCount: 0 } } }),
         readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
         verifyChange: async () => ({
           ok: true,
@@ -284,11 +295,11 @@ describe('CapabilityBroker', () => {
             entryPoints: []
           }
         }),
-        searchRepo: async () => ({ summary: 'unused', structuredPayload: { workspaceRoot: '/tmp/demo', query: 'unused', totalHits: 0, hits: [], suggestedSpans: [] } }),
+        searchRepo: async () => ({ summary: 'unused', structuredPayload: { workspaceRoot: '/tmp/demo', query: 'unused', totalHits: 0, hits: [], suggestedSpans: [], context: { chars: 0, estimatedTokens: 0, hitCount: 0, suggestedSpanCount: 0 } } }),
         readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
         researchDossier: async () => ({
           summary: '## Dossier',
-          structuredPayload: { workspaceRoot: '/tmp/demo', query: 'chat', searchedFiles: [], suggestedSpans: [] }
+          structuredPayload: { workspaceRoot: '/tmp/demo', query: 'chat', searchedFiles: [], suggestedSpans: [], context: { promptChars: 0, estimatedPromptTokens: 0, searchSummaryChars: 0, readSpanChars: 0, estimatedReadSpanTokens: 0, suggestedSpanCount: 0, selectedFileBytes: 0, estimatedFullFileTokens: 0, estimatedTokensSavedBySpans: 0 } }
         }),
         verifyChange: async () => ({
           ok: true,

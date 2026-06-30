@@ -124,7 +124,7 @@ export class CodebaseAuditor {
     const overview = await this.loadOverview(workspaceRoot, focusPath);
     const auditFiles = this.pickAuditFiles(overview.structuredPayload);
     const [readme, fileSpans, focusContext, goalEvidence] = await Promise.all([
-      this.readOptional(path.join(workspaceRoot, 'README.md'), 5000),
+      this.readOptional(path.join(workspaceRoot, 'README.md'), 1000),
       this.readSpans(workspaceRoot, auditFiles),
       focusPath ? this.readFocusPathContext(workspaceRoot, focusPath) : Promise.resolve(''),
       this.collectGoalEvidence(workspaceRoot, focusPath, auditGoal)
@@ -186,9 +186,12 @@ Output ONLY the final Markdown document. Be rigorous, precise, and fully grounde
       try {
         const response = await this.ai.models.generateContent({
           model,
-          contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+          contents: [
+            { role: 'user', parts: [{ text: systemPrompt }] },
+            { role: 'model', parts: [{ text: 'Acknowledged. I will produce a grounded, evidence-first audit report.' }] },
+            { role: 'user', parts: [{ text: userPrompt }] }
+          ],
           config: {
-            systemInstruction: systemPrompt,
             temperature: 0.1,
           }
         });

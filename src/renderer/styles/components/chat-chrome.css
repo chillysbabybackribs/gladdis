@@ -179,6 +179,48 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.model-menu-divider {
+  height: 1px;
+  margin: 3px 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.agent-submenu {
+  width: 285px;
+}
+.agent-create-item {
+  color: var(--text-primary);
+}
+.agent-menu-row {
+  padding: 0;
+  gap: 6px;
+}
+.agent-menu-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+.agent-menu-select {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 8px 0 8px 10px;
+  text-align: left;
+  color: inherit;
+}
+.agent-menu-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-right: 5px;
+}
+.agent-menu-action {
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.agent-menu-action:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
 .model-nokey {
   font-size: 11px;
   font-weight: 400;
@@ -196,117 +238,6 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 4px;
   padding: 1px 6px;
-}
-
-.agent-picker {
-  position: relative;
-  min-width: 0;
-  flex: 0 1 130px;
-}
-.agent-picker-btn {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  padding: 5px 10px;
-  text-align: left;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-picker-btn:hover,
-.agent-picker-btn.open,
-.agent-picker-btn.set {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.03);
-}
-.agent-picker-btn.set {
-  border-color: rgba(255, 255, 255, 0.06);
-}
-.agent-menu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  width: 210px;
-  max-height: min(360px, calc(100vh - 80px));
-  overflow-y: auto;
-  background: var(--bg-surface);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
-  padding: 5px;
-  z-index: 22;
-}
-.agent-menu-item {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  text-align: left;
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  font-size: 13.5px;
-  color: var(--text-secondary);
-}
-.agent-menu-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px 28px;
-  align-items: center;
-  border-radius: var(--radius);
-}
-.agent-menu-row:hover,
-.agent-menu-row.sel {
-  background: rgba(255, 255, 255, 0.04);
-}
-.agent-menu-row.sel .agent-menu-item {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-.agent-menu-row .agent-menu-item:hover {
-  background: transparent;
-}
-.agent-menu-item:hover,
-.agent-menu-item.sel {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-primary);
-}
-.agent-menu-item.sel {
-  font-weight: 600;
-}
-.agent-menu-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-menu-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  color: var(--text-muted);
-}
-.agent-menu-action:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
-}
-.agent-menu-delete:hover:not(:disabled) {
-  color: #ff8a8a;
-  background: rgba(255, 120, 120, 0.1);
-}
-.agent-menu-action:disabled {
-  opacity: 0.45;
-}
-.agent-menu-error {
-  padding: 7px 10px 5px;
-  font-size: 12px;
-  color: #ffb4b4;
 }
 
 /* Streaming typing indicator */
@@ -578,270 +509,41 @@
   cursor: default;
 }
 
-/* ── Memory ▾ button & dream diff modal ─────────────────────────────────── */
-.memory-btn-root {
-  position: relative;
-  flex: 0 0 auto;
-}
-.memory-btn {
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 10px;
-  border-radius: 999px;
-  color: var(--text-secondary);
-  border: 1px solid transparent;
-  background: transparent;
-  font-size: 11.5px;
-  letter-spacing: 0.1px;
-  cursor: pointer;
-}
-.memory-btn:hover:not(:disabled) {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.06);
-}
-.memory-btn.is-running {
-  color: var(--text-primary);
-  background: rgba(120, 200, 255, 0.08);
-  border-color: rgba(120, 200, 255, 0.18);
-}
-.memory-btn.is-disabled,
-.memory-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-.memory-btn-icon {
-  font-size: 12px;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-}
-.memory-btn-spinner {
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid rgba(120, 200, 255, 0.25);
-  border-top-color: rgba(120, 200, 255, 0.95);
-  border-radius: 50%;
-  animation: memory-spin 0.9s linear infinite;
-}
-@keyframes memory-spin {
-  to { transform: rotate(360deg); }
-}
-.memory-btn-caret {
-  font-size: 9px;
-  opacity: 0.7;
-}
-
-.memory-stage-detail {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  max-width: 280px;
-  padding: 5px 9px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-muted);
-  background: rgba(120, 200, 255, 0.06);
-  border: 1px solid rgba(120, 200, 255, 0.18);
-  border-radius: 6px;
-  z-index: 50;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.memory-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 220px;
-  background: var(--bg-elevated, #232323);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 6px;
-  z-index: 50;
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
-}
-.memory-menu-section {
-  font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-  padding: 4px 8px 6px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.memory-menu-section-link {
-  font-size: 10px;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-  text-decoration-color: rgba(255, 255, 255, 0.2);
-  text-underline-offset: 2px;
-}
-.memory-menu-section-link:hover {
-  color: var(--text-primary);
-  text-decoration-color: rgba(255, 255, 255, 0.5);
-}
-.memory-menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  padding: 6px 8px;
-  border-radius: 5px;
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.memory-menu-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-.memory-menu-item.is-default {
-  font-weight: 500;
-}
-.memory-menu-item.is-selected::before {
-  content: '✓';
-  font-size: 10px;
-  color: rgba(120, 200, 255, 0.85);
-  margin-right: 6px;
-  margin-left: -2px;
-}
-.memory-menu-default {
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-left: 8px;
-}
-
-.memory-pref-row {
-  display: flex;
-  gap: 4px;
-  padding: 2px 6px 6px;
-}
-.memory-pref-pill {
-  flex: 1;
-  padding: 5px 8px;
-  border-radius: 6px;
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  font-size: 11px;
-  cursor: pointer;
-}
-.memory-pref-pill:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.04);
-}
-.memory-pref-pill.is-active {
-  color: var(--text-primary);
-  background: rgba(120, 200, 255, 0.12);
-  border-color: rgba(120, 200, 255, 0.35);
-}
-.memory-menu-divider {
-  height: 1px;
-  background: var(--border-subtle);
-  margin: 4px 2px;
-}
-.memory-error {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  max-width: 280px;
-  padding: 8px 10px;
-  background: rgba(220, 80, 80, 0.18);
-  border: 1px solid rgba(220, 80, 80, 0.35);
-  border-radius: 6px;
-  font-size: 11.5px;
-  color: var(--text-primary);
-  cursor: pointer;
-  z-index: 50;
-}
-
-/* Auto-dream surface — the button badge, settings toggle, "last dream" hint,
-   and one-shot toast for auto-dream completion. */
-.memory-btn-badge {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #ffb454; /* amber: "needs attention" */
-  box-shadow: 0 0 0 1.5px var(--surface-elevated, #1f1f1f);
-  pointer-events: none;
-}
-.memory-btn { position: relative; }
-.memory-auto-toggle {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 10px;
-  cursor: pointer;
-  user-select: none;
-}
-.memory-auto-toggle input[type='checkbox'] {
-  margin-top: 2px;
-  accent-color: #5aa9ff;
-}
-.memory-auto-toggle-label {
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  color: var(--text-primary);
-}
-.memory-auto-toggle-hint {
-  font-size: 10.5px;
-  color: var(--text-tertiary, rgba(255, 255, 255, 0.5));
-  margin-top: 2px;
-}
-.memory-auto-status {
-  padding: 4px 10px 8px;
-  font-size: 11px;
-  color: var(--text-secondary, rgba(255, 255, 255, 0.7));
-}
-.memory-auto-status-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-.memory-auto-status-meta {
-  color: var(--text-tertiary, rgba(255, 255, 255, 0.5));
-}
-.memory-auto-status-reason {
-  margin-top: 4px;
-  font-size: 10.5px;
-  color: var(--text-tertiary, rgba(255, 255, 255, 0.45));
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* ── Memory menu surface ───────────────────────────────────────────────────
+   Memory lives in the application menu bar (Memory ▾). MemoryController is
+   mounted at the workspace root and renders no chrome of its own — only the
+   dream modals plus these transient status/toast/error notices, pinned to the
+   top-right where the browser tab strip sits. */
+.memory-status-toast,
+.memory-error,
 .memory-toast {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
+  top: 60px;
+  right: 16px;
   max-width: 320px;
   padding: 8px 12px;
-  background: rgba(90, 169, 255, 0.16);
-  border: 1px solid rgba(90, 169, 255, 0.4);
   border-radius: 6px;
   font-size: 12px;
   color: var(--text-primary);
+  z-index: 1200;
+  pointer-events: auto;
+}
+.memory-status-toast {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(120, 200, 255, 0.08);
+  border: 1px solid rgba(120, 200, 255, 0.2);
+}
+.memory-error {
+  background: rgba(220, 80, 80, 0.18);
+  border: 1px solid rgba(220, 80, 80, 0.35);
   cursor: pointer;
-  z-index: 55;
+}
+.memory-toast {
+  background: rgba(90, 169, 255, 0.16);
+  border: 1px solid rgba(90, 169, 255, 0.4);
+  cursor: pointer;
   animation: memoryToastIn 180ms ease-out;
 }
 .memory-toast.is-error {

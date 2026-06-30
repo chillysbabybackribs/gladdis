@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CodexStatus, KeyStatus, ModelOption } from '../../../shared/types'
+import type { CodexStatus, KeyStatus, ModelOption, SavedAgent } from '../../../shared/types'
 
 interface Props {
   value: string
   onChange: (modelId: string) => void
+  agentId: string | null
+  agents: SavedAgent[]
+  onAgentChange: (agentId: string | null) => void
+  onCreateAgent: () => void
+  onEditAgent: (agent: SavedAgent) => void
+  onDeleteAgent: (agent: SavedAgent) => void
   /** The live catalog to render (codex slice may come from the installed CLI). */
   models: ModelOption[]
   keyStatus: KeyStatus
@@ -16,15 +22,30 @@ const PROVIDERS = [
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'google', label: 'Gemini' },
   { id: 'openai', label: 'OpenAI' },
-  { id: 'grok', label: 'Grok (xAI)' }
+  { id: 'grok', label: 'Grok (xAI)' },
+  { id: 'agents', label: 'Agents' }
 ] as const
 
 /** Small dropdown to pick the active model, grouped by provider with a secondary pop out menu. */
-export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }: Props) {
+export function ModelPicker({
+  value,
+  onChange,
+  agentId,
+  agents,
+  onAgentChange,
+  onCreateAgent,
+  onEditAgent,
+  onDeleteAgent,
+  models,
+  keyStatus,
+  codexStatus
+}: Props) {
   const [open, setOpen] = useState(false)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const current = models.find((m) => m.id === value) ?? models[0]
+  const currentAgent = agentId ? agents.find((agent) => agent.id === agentId) ?? null : null
+  const buttonLabel = currentAgent ? `Agent · ${currentAgent.name}` : current.label
 
   useEffect(() => {
     if (!open) return
@@ -75,14 +96,15 @@ export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }:
         onClick={() => setOpen((o) => !o)}
         title="Select model"
       >
-        {current.label}
+        {buttonLabel}
       </button>
       {open && (
         <div className="model-menu" role="menu">
           <div className="model-menu-providers">
             {PROVIDERS.map((prov) => {
               const isActive = activeProvider === prov.id
-              const isSelectedProv = current?.provider === prov.id
+              const isAgents = prov.id === 'agents'
+              const isSelectedProv = isAgents ? !!currentAgent : current?.provider === prov.id
               const providerModels = models.filter((m) => m.provider === prov.id)
               return (
                 <div
@@ -97,7 +119,80 @@ export function ModelPicker({ value, onChange, models, keyStatus, codexStatus }:
                     <span className="model-menu-label">{prov.label}</span>
                     <span className="model-menu-chevron">›</span>
                   </button>
-                  {isActive && providerModels.length > 0 && (
+                  {isActive && isAgents && (
+                    <div className="model-submenu agent-submenu" role="menu">
+                      <button
+                        role="menuitemcheckbox"
+                        aria-checked={!agentId}
+                        className={`model-menu-item ${!agentId ? 'sel' : ''}`}
+                        onClick={() => {
+                          onAgentChange(null)
+                          setOpen(false)
+                        }}
+                      >
+                        <span className="model-menu-label">No custom agent</span>
+                      </button>
+                      <button
+                        role="menuitem"
+                        className="model-menu-item agent-create-item"
+                        onClick={() => {
+                          onCreateAgent()
+                          setOpen(false)
+                        }}
+                      >
+                        <span className="model-menu-label">Create an Agent...</span>
+                      </button>
+                      {agents.length > 0 && <div className="model-menu-divider" />}
+                      {agents.map((agent) => (
+                        <div
+                          key={agent.id}
+                          className={`model-menu-item agent-menu-row ${agent.id === agentId ? 'sel' : ''}`}
+                          role="menuitemcheckbox"
+                          aria-checked={agent.id === agentId}
+                        >
+                          <button
+                            type="button"
+                            className="agent-menu-select"
+                            onClick={() => {
+                              onAgentChange(agent.id)
+                              setOpen(false)
+                            }}
+                            title={agent.goal || agent.prompt}
+                          >
+                            <span className="model-menu-label">{agent.name}</span>
+                          </button>
+                          <span className="agent-menu-actions">
+                            <button
+                              type="button"
+                              className="agent-menu-action"
+                              aria-label={`Edit ${agent.name}`}
+                              title="Edit agent"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onEditAgent(agent)
+                                setOpen(false)
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="agent-menu-action"
+                              aria-label={`Delete ${agent.name}`}
+                              title="Delete agent"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                onDeleteAgent(agent)
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {isActive && !isAgents && providerModels.length > 0 && (
                     <div className="model-submenu" role="menu">
                       {providerModels.map((m) => {
                         const ok = usable(m)

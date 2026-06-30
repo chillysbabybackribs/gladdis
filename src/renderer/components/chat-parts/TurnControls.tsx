@@ -1,12 +1,13 @@
 import type { CodexStatus, KeyStatus, ModelOption, SavedAgent, Workspace } from '../../../../shared/types'
-import { AgentPicker } from '../AgentPicker'
-import { MemoryButton } from '../MemoryButton'
 import { ModelPicker } from '../ModelPicker'
 
 /**
  * Top-of-composer controls: model picker + workspace folder chip.
  * The chip's title flips between "click to change" and the prompt to pick
  * a folder so first-time users discover the affordance without explanation.
+ *
+ * Agent selection lives beside model selection because saved agents are
+ * effectively composer-scoped model presets.
  */
 export function TurnControls({
   modelId,
@@ -15,8 +16,9 @@ export function TurnControls({
   agentId,
   agents,
   onAgentChange,
-  onAgentEdit,
-  onAgentDelete,
+  onCreateAgent,
+  onEditAgent,
+  onDeleteAgent,
   keyStatus,
   codexStatus,
   workspace,
@@ -28,8 +30,9 @@ export function TurnControls({
   agentId: string | null
   agents: SavedAgent[]
   onAgentChange: (id: string | null) => void
-  onAgentEdit: (agent: SavedAgent) => void
-  onAgentDelete: (id: string) => Promise<void>
+  onCreateAgent: () => void
+  onEditAgent: (agent: SavedAgent) => void
+  onDeleteAgent: (agent: SavedAgent) => void
   keyStatus: KeyStatus
   codexStatus: CodexStatus | null
   workspace: Workspace
@@ -43,16 +46,15 @@ export function TurnControls({
       <ModelPicker
         value={modelId}
         onChange={onModelChange}
+        agentId={agentId}
+        agents={agents}
+        onAgentChange={onAgentChange}
+        onCreateAgent={onCreateAgent}
+        onEditAgent={onEditAgent}
+        onDeleteAgent={onDeleteAgent}
         models={models}
         keyStatus={keyStatus}
         codexStatus={codexStatus}
-      />
-      <AgentPicker
-        value={agentId}
-        agents={agents}
-        onChange={onAgentChange}
-        onEdit={onAgentEdit}
-        onDelete={onAgentDelete}
       />
       <button
         className={`workspace-btn ${workspace.folder ? 'set' : ''}`}
@@ -74,7 +76,6 @@ export function TurnControls({
         </svg>
         {folderLabel && <span className="workspace-label">{folderLabel}</span>}
       </button>
-      <MemoryButton workspace={workspace} />
     </div>
   )
 }

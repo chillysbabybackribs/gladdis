@@ -1,5 +1,6 @@
 /* ---------------- Browser panel (right) ---------------- */
 .browser {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -192,4 +193,3 @@
   color: var(--text-muted);
   font-size: 13px;
 }
-

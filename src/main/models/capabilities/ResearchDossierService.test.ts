@@ -38,6 +38,7 @@ describe('ResearchDossierService', () => {
     expect(result.summary).toContain('## Dossier')
     expect(result.structuredPayload.query).toBe('ChatService')
     expect(result.structuredPayload.searchedFiles).toContain('src/chat.ts')
+    console.log('ResearchDossier context', result.structuredPayload.context)
     expect(result.structuredPayload.context).toEqual(expect.objectContaining({
       promptChars: expect.any(Number),
       estimatedPromptTokens: expect.any(Number),

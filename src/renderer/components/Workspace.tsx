@@ -6,6 +6,7 @@ import { TerminalDock, type TerminalDockPos } from './TerminalDock'
 import { TerminalToggle } from './TerminalToggle'
 import { useTerminal } from '../hooks/useTerminal'
 import AgentBuilderModal from './AgentBuilderModal'
+import { MemoryController } from './MemoryController'
 import type { AppCommand, SavedAgent } from '../../../shared/types'
 
 const LEFT_KEY = 'gladdis:drawer:left'
@@ -262,6 +263,14 @@ export function Workspace() {
       if (command.type === 'agents:create') {
         setEditingAgent(null)
         setIsAgentBuilderOpen(true)
+        return
+      }
+      if (command.type === 'agents:edit') {
+        // Resolve the id to the live agent, then open the builder to edit it.
+        void window.gladdis.agents.list().then((list) => {
+          const agent = list.find((candidate) => candidate.id === command.agentId)
+          if (agent) editAgent(agent)
+        })
       }
     })
     return off
@@ -319,7 +328,16 @@ export function Workspace() {
             {leftDockActive ? (
               <>
                 <div style={{ display: 'none' }}>
-                  <ChatPanel panelId="left" zoom={leftZoom} footerSlot={null} onAgentEdit={editAgent} />
+                  <ChatPanel
+                    panelId="left"
+                    zoom={leftZoom}
+                    footerSlot={null}
+                    onCreateAgent={() => {
+                      setEditingAgent(null)
+                      setIsAgentBuilderOpen(true)
+                    }}
+                    onEditAgent={editAgent}
+                  />
                 </div>
                 <TerminalDock
                   dock="left"
@@ -333,7 +351,11 @@ export function Workspace() {
                 panelId="left"
                 zoom={leftZoom}
                 footerSlot={leftOpen ? leftFooterSlot : null}
-                onAgentEdit={editAgent}
+                onCreateAgent={() => {
+                  setEditingAgent(null)
+                  setIsAgentBuilderOpen(true)
+                }}
+                onEditAgent={editAgent}
               />
             )}
           </div>
@@ -372,7 +394,16 @@ export function Workspace() {
             {rightDockActive ? (
               <>
                 <div style={{ display: 'none' }}>
-                  <ChatPanel panelId="right" zoom={rightZoom} footerSlot={null} onAgentEdit={editAgent} />
+                  <ChatPanel
+                    panelId="right"
+                    zoom={rightZoom}
+                    footerSlot={null}
+                    onCreateAgent={() => {
+                      setEditingAgent(null)
+                      setIsAgentBuilderOpen(true)
+                    }}
+                    onEditAgent={editAgent}
+                  />
                 </div>
                 <TerminalDock
                   dock="right"
@@ -386,7 +417,11 @@ export function Workspace() {
                 panelId="right"
                 zoom={rightZoom}
                 footerSlot={rightOpen ? rightFooterSlot : null}
-                onAgentEdit={editAgent}
+                onCreateAgent={() => {
+                  setEditingAgent(null)
+                  setIsAgentBuilderOpen(true)
+                }}
+                onEditAgent={editAgent}
               />
             )}
           </div>
@@ -446,6 +481,7 @@ export function Workspace() {
           setEditingAgent(null)
         }}
       />
+      <MemoryController />
     </div>
   )
 }

@@ -43,18 +43,14 @@ async function getOrCreateGeminiCache(args: {
   }
 
   try {
-    // 1. Count tokens to verify the API's real minimum-cacheable size. Gemini's
-    // documented floor is 2,048 tokens (2.0/2.5) and 4,096 (3.x); use 4,096 so the
-    // cache create never fails on a Gemini-3 model. The old 32,768 floor was ~8x too
-    // high and starved small-many-files reviews (the workspaceBlock rarely reaches it)
-    // of any caching at all.
     const MIN_CACHEABLE_TOKENS = 4096
+    const combinedText = args.workspaceBlock
+      ? `${args.agentSystem}\n\n${args.workspaceBlock}`
+      : args.agentSystem
+
     const countResponse = await args.ai.models.countTokens({
       model: args.modelId,
-      contents: [{ role: 'user', parts: [{ text: args.workspaceBlock }] }],
-      config: {
-        systemInstruction: args.agentSystem
-      }
+      contents: [{ role: 'user', parts: [{ text: combinedText }] }]
     })
 
     const totalTokens = countResponse.totalTokens ?? 0
@@ -64,10 +60,9 @@ async function getOrCreateGeminiCache(args: {
 
     // 2. Create the cache
     const config: any = {
-      systemInstruction: args.agentSystem,
       contents: [
-        { role: 'user', parts: [{ text: args.workspaceBlock }] },
-        { role: 'model', parts: [{ text: 'Workspace context loaded successfully. I am ready to help you with your code!' }] }
+        { role: 'user', parts: [{ text: combinedText }] },
+        { role: 'model', parts: [{ text: 'I have loaded the workspace context and tool definitions. I am ready to assist you.' }] }
       ],
       ttl: '1800s', // 30 minutes
       displayName: `gladdis_${args.tools ? 'tools_' : ''}${hash.slice(0, 8)}`
@@ -198,8 +193,12 @@ export async function completeGoogle(args: {
   try {
     const res = await args.ai.models.generateContent({
       model: args.modelId,
-      contents: [{ role: 'user', parts: [{ text: args.user }] }],
-      config: { systemInstruction: args.system, maxOutputTokens: args.maxOutputTokens }
+      contents: [
+        { role: 'user', parts: [{ text: args.system }] },
+        { role: 'model', parts: [{ text: 'Acknowledged. I will follow these instructions.' }] },
+        { role: 'user', parts: [{ text: args.user }] }
+      ],
+      config: { maxOutputTokens: args.maxOutputTokens }
     })
     const text = res.text ?? ''
     call.finish({ output: text, usage: usageFromGoogle(res) })
@@ -234,10 +233,13 @@ export async function streamGooglePlain(args: {
   try {
     const response = await args.ai.models.generateContentStream({
       model: args.modelId,
-      contents,
+      contents: [
+        { role: 'user', parts: [{ text: args.system }] },
+        { role: 'model', parts: [{ text: 'Acknowledged. I will follow these instructions.' }] },
+        ...contents
+      ],
       config: {
         abortSignal: args.signal,
-        systemInstruction: args.system,
         maxOutputTokens: args.maxOutputTokens
       }
     })
@@ -277,38 +279,43 @@ export async function runGoogleToolLoop(args: {
     transition: (iteration: number, transition: SupervisorTransition) => void
   }
 }): Promise<void> {
-  const systemInstruction = args.workspaceBlock
+  const preambleText = args.workspaceBlock
     ? `${args.agentSystem}\n\n${args.workspaceBlock}`
     : args.agentSystem
-  // Rebuilt each step because request_tools can grow the granted set mid-turn.
-  const buildDecls = () =>
-    resolveTurnTools(args.toolDefs, args.ctx.grantedTools).map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: toGeminiSchema(t.parameters)
-    }))
-  let functionDeclarations = buildDecls()
 
-  const contents = toGoogleContents(args.req)
+  // Use all tools for stable prefix caching
+  const functionDeclarations = args.toolDefs.map((t) => ({
+    name: t.name,
+    description: t.description,
+    parameters: toGeminiSchema(t.parameters)
+  }))
+
+  const cachedContentName = await getOrCreateGeminiCache({
+    ai: args.ai,
+    modelId: args.modelId,
+    agentSystem: args.agentSystem,
+    workspaceBlock: args.workspaceBlock,
+    tools: [{ functionDeclarations }]
+  })
+
+  // Prepend preamble if not using explicit cache (explicit cache already includes it)
+  const fullContents = toGoogleContents(args.req)
+  const contents = cachedContentName
+    ? fullContents
+    : [
+        { role: 'user', parts: [{ text: preambleText }] },
+        { role: 'model', parts: [{ text: 'I have loaded the workspace context and tool definitions. I am ready to assist you.' }] },
+        ...fullContents
+      ]
+
   const responseObjs: GoogleToolResponseRecord[] = []
   const validation = createToolValidationState()
-
-  // Gemini explicit context caching is disabled: getOrCreateGeminiCache uses
-  // `systemInstruction` on countTokens/caches.create, which the Gemini *Developer* API
-  // rejects ("only supported in Gemini Enterprise Agent Platform mode"), so the path
-  // always threw, was caught, and returned undefined — i.e. it never cached anything and
-  // only spammed the log. Left as a no-op until real Developer-API caching is wired
-  // (contents-only, no systemInstruction). The token win is the aged-result summarizer below.
-  const cachedContentName: string | undefined = undefined
-  void getOrCreateGeminiCache
 
   for (let turn = 0; !args.signal.aborted; turn++) {
     args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
-    functionDeclarations = buildDecls() // pick up tools granted via request_tools last step
-    // The prebuilt cache only covers the starting tools; once the model has pulled
-    // in extra groups, send the full tool list inline instead of relying on it.
-    const useCache = cachedContentName && !(args.ctx.grantedTools && args.ctx.grantedTools.size > 0)
+    
+    const useCache = !!cachedContentName
     const call = args.audit.begin({
       requestId: args.req.requestId,
       conversationId: args.req.conversationId,
@@ -367,7 +374,6 @@ export async function runGoogleToolLoop(args: {
       if (useCache) {
         config.cachedContent = cachedContentName
       } else {
-        config.systemInstruction = systemInstruction
         config.tools = [{ functionDeclarations }]
       }
 

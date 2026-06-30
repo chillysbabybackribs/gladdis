@@ -21,38 +21,24 @@ export type TurnSupervisor = {
 export function createTurnSupervisor(
   emitLoopState: (event: SupervisorLoopStateEvent) => void
 ): TurnSupervisor {
-  const emitPolicyEvents = (
-    events:
-      | ReturnType<typeof supervisorIterationStarted>
-      | ReturnType<typeof supervisorIterationCompleted>
-      | ReturnType<typeof supervisorComplete>
-      | ReturnType<typeof supervisorBlocked>
-      | ReturnType<typeof supervisorStart>
-      | ReturnType<typeof supervisorTransitionEvents>
-  ) => {
-    for (const event of Array.isArray(events) ? events : [events]) {
-      emitLoopState(event)
-    }
-  }
-
   return {
     start: (summary = 'Starting agent task loop.', actSummary = 'Entering execution loop.') => {
-      emitPolicyEvents(supervisorStart(summary, actSummary))
+      for (const event of supervisorStart(summary, actSummary)) emitLoopState(event)
     },
     iterationStarted: (iteration) => {
-      emitPolicyEvents(supervisorIterationStarted(iteration))
+      emitLoopState(supervisorIterationStarted(iteration))
     },
     iterationCompleted: (iteration, summary) => {
-      emitPolicyEvents(supervisorIterationCompleted(iteration, summary))
+      emitLoopState(supervisorIterationCompleted(iteration, summary))
     },
-    transition: (iteration, next) => {
-      emitPolicyEvents(supervisorTransitionEvents(iteration, next))
+    transition: (iteration, transition) => {
+      for (const event of supervisorTransitionEvents(iteration, transition)) emitLoopState(event)
     },
     complete: (summary = 'Agent task loop completed.') => {
-      emitPolicyEvents(supervisorComplete(summary))
+      emitLoopState(supervisorComplete(summary))
     },
     blocked: (reason, aborted = false) => {
-      emitPolicyEvents(supervisorBlocked(reason, aborted))
+      emitLoopState(supervisorBlocked(reason, aborted))
     }
   }
 }

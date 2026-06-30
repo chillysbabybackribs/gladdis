@@ -46,12 +46,14 @@ export function ChatPanel({
   panelId = 'left',
   zoom = 1,
   footerSlot = null,
-  onAgentEdit
+  onCreateAgent = () => {},
+  onEditAgent = () => {}
 }: {
   panelId?: PanelId
   zoom?: number
   footerSlot?: HTMLElement | null
-  onAgentEdit?: (agent: SavedAgent) => void
+  onCreateAgent?: () => void
+  onEditAgent?: (agent: SavedAgent) => void
 } = {}) {
   const [messages, setMessages] = useState<Message[]>([])
   const [convId, setConvId] = useState<string>(() => newConversationId())
@@ -64,8 +66,12 @@ export function ChatPanel({
   const [activeId, setActiveId] = useState<string | null>(null)
   const [modelId, setModelId] = useState<string>(() => {
     try {
-      const saved = localStorage.getItem(modelKey(panelId))
-      return saved && MODELS.some((m) => m.id === saved) ? saved : MODELS[0].id
+      // Trust the saved selection verbatim. We deliberately do NOT validate it
+      // against the static MODELS list: the live catalog (esp. Codex CLI models)
+      // carries ids that aren't in MODELS, and validating here would silently
+      // reset the user's choice to MODELS[0] on every restart. MODELS[0] is only
+      // a first-run placeholder for when nothing has ever been picked.
+      return localStorage.getItem(modelKey(panelId)) || MODELS[0].id
     } catch {
       return MODELS[0].id
     }
@@ -233,13 +239,28 @@ export function ChatPanel({
       console.warn('Failed to save agent to localStorage:', e)
     }
     const agent = id ? agents.find((candidate) => candidate.id === id) : null
-    if (agent) persistModel(agent.modelId)
+    if (agent) persistModel(agent.runtimeModelId || agent.modelId)
   }
 
-  const deleteAgent = async (id: string) => {
-    await window.gladdis.agents.delete(id)
-    if (id === agentId) persistAgent(null)
+  const deleteAgent = (agent: SavedAgent) => {
+    if (!window.confirm(`Delete agent "${agent.name}"?`)) return
+    void window.gladdis.agents.delete(agent.id).then(() => {
+      if (agentId === agent.id) persistAgent(null)
+    })
   }
+
+  // The native Agents menu ("Chat Left" / "Chat Right") selects agents per panel.
+  // persistAgent is recreated each render; route through a ref so the listener
+  // stays subscribed once and always calls the latest closure.
+  const persistAgentRef = useRef(persistAgent)
+  persistAgentRef.current = persistAgent
+  useEffect(() => {
+    return window.gladdis.app.onCommand((command) => {
+      if (command.type === 'agents:select' && command.panel === panelId) {
+        persistAgentRef.current(command.agentId)
+      }
+    })
+  }, [panelId])
 
   const toggleAudio = () => {
     setAudioOn((on) => {
@@ -436,8 +457,9 @@ export function ChatPanel({
       agentId={agentId}
       agents={agents}
       onAgentChange={persistAgent}
-      onAgentEdit={onAgentEdit ?? (() => {})}
-      onAgentDelete={deleteAgent}
+      onCreateAgent={onCreateAgent}
+      onEditAgent={onEditAgent}
+      onDeleteAgent={deleteAgent}
       keyStatus={keyStatus}
       codexStatus={codexStatus}
       workspace={workspace}

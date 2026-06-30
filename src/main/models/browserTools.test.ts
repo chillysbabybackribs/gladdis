@@ -130,7 +130,7 @@ describe('BrowserTools', () => {
           }),
           searchRepo: async () => ({
             summary: 'unused',
-            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [] }
+            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [], context: { chars: 0, estimatedTokens: 0, hitCount: 0, suggestedSpanCount: 0 } }
           }),
           readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
           researchDossier: async () => ({
@@ -139,7 +139,18 @@ describe('BrowserTools', () => {
               workspaceRoot: dir,
               query: 'chat service architecture',
               searchedFiles: ['src/main/models/ChatService.ts'],
-              suggestedSpans: []
+              suggestedSpans: [],
+              context: {
+                promptChars: 0,
+                estimatedPromptTokens: 0,
+                searchSummaryChars: 0,
+                readSpanChars: 0,
+                estimatedReadSpanTokens: 0,
+                suggestedSpanCount: 0,
+                selectedFileBytes: 0,
+                estimatedFullFileTokens: 0,
+                estimatedTokensSavedBySpans: 0
+              }
             }
           })
         },
@@ -179,7 +190,7 @@ describe('BrowserTools', () => {
           }),
           searchRepo: async () => ({
             summary: 'unused',
-            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [] }
+            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [], context: { chars: 0, estimatedTokens: 0, hitCount: 0, suggestedSpanCount: 0 } }
           }),
           readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
           verifyChange: async () => ({

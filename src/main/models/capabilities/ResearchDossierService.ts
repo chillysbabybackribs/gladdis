@@ -129,10 +129,12 @@ export class ResearchDossierService {
 
     const response = await this.getAi().models.generateContent({
       model: 'gemini-2.5-flash-lite',
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [
+        { role: 'user', parts: [{ text: 'You are a compact repository reconnaissance agent. Synthesize a concise Markdown dossier grounded only in the supplied workspace evidence. Focus on the user goal, identify the most relevant files/modules, explain why they matter, and suggest the next concrete reads or edits. Do not invent files or behavior not supported by the evidence.' }] },
+        { role: 'model', parts: [{ text: 'Acknowledged. I will synthesize the dossier based on the provided evidence.' }] },
+        { role: 'user', parts: [{ text: prompt }] }
+      ],
       config: {
-        systemInstruction:
-          'You are a compact repository reconnaissance agent. Synthesize a concise Markdown dossier grounded only in the supplied workspace evidence. Focus on the user goal, identify the most relevant files/modules, explain why they matter, and suggest the next concrete reads or edits. Do not invent files or behavior not supported by the evidence.',
         temperature: 0.1
       }
     })
@@ -166,9 +168,21 @@ export class ResearchDossierService {
     const cached = this.getCache(this.workspaceContextCache, cacheKey)
     if (cached) return cached
 
-    const [readme, packageJson, tree] = await Promise.all([
-      this.readOptional(path.join(workspaceRoot, 'README.md'), 4000),
-      this.readOptional(path.join(workspaceRoot, 'package.json'), 4000),
+    let packageJson = ''
+    try {
+      const rawPkg = await fs.readFile(path.join(workspaceRoot, 'package.json'), 'utf8')
+      const parsed = JSON.parse(rawPkg)
+      packageJson = JSON.stringify({
+        dependencies: parsed.dependencies || {},
+        devDependencies: parsed.devDependencies || {},
+        scripts: parsed.scripts || {}
+      }, null, 2)
+    } catch {
+      packageJson = ''
+    }
+
+    const [readme, tree] = await Promise.all([
+      this.readOptional(path.join(workspaceRoot, 'README.md'), 1000),
       snapshotDirectoryTree(workspaceRoot, workspaceRoot, {
         maxDepth: 4,
         maxEntriesPerDirectory: 40,

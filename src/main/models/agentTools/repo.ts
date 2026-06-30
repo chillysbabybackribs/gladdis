@@ -173,7 +173,7 @@ export const REPO_TOOLS: ToolDef[] = [
               path: { type: 'string' },
               startLine: { type: 'number' },
               endLine: { type: 'number' },
-              totalLines: { type: 'number' },
+              totalLines: { anyOf: [{ type: 'number' }, { type: 'null' }] },
               truncated: { type: 'boolean' },
               content: { type: 'string' },
               matchedVariations: { type: 'array', items: { type: 'string' } }
@@ -198,7 +198,7 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'read_spans',
     description:
-      'Read bounded line windows from workspace files, plus multi-span batches.',
+      'Read bounded line windows from workspace files; batch related windows with items (up to 6 spans per call).',
     parameters: {
       type: 'object',
     properties: {
@@ -241,7 +241,7 @@ export const REPO_TOOLS: ToolDef[] = [
               path: { type: 'string' },
               startLine: { type: 'number' },
               endLine: { type: 'number' },
-              totalLines: { type: 'number' },
+              totalLines: { anyOf: [{ type: 'number' }, { type: 'null' }] },
               truncated: { type: 'boolean' },
               defaultWindow: { type: 'boolean' },
               content: { type: 'string' }

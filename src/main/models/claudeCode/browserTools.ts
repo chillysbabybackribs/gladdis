@@ -103,6 +103,7 @@ export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
   'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, memory_create_task, repo_overview, ' +
   'repo_grep_task, search_repo, read_spans, research_dossier, and verify_change.\n' +
+  'When reading code, batch related windows into one read_spans({items:[...]}) call instead of a long chain of single-span reads.\n' +
   'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook: call memory_read before re-asking for ' +
   'context that may already be known, use memory_write for durable decisions/constraints/identifiers, use memory_list for a ' +
   'quick inventory, use memory_create_task for task-specific notes, and use memory_forget to clear stale notes when plans change. ' +

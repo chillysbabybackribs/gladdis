@@ -13,37 +13,55 @@ export interface ReadResult {
   path: string
   content: string
   truncated: boolean
-  totalLines: number
+  totalLines: number | null
   startLine: number
   endLine: number
   defaultWindow: boolean
 }
 
+export interface ReadLineRangeOptions {
+  countTotalLines?: boolean
+  defaultWindow?: boolean
+}
+
 /**
  * Stream a 1-based inclusive line range from `abs` without buffering the
  * whole file. We stop early on `MAX_READ_BYTES` so a runaway file (logs,
- * minified bundles) can't blow the model context — the caller still gets
- * `truncated: true` and the actual `totalLines` once the stream finishes.
+ * minified bundles) can't blow the model context. When the caller only needs
+ * a bounded range, `countTotalLines: false` lets us stop once the requested
+ * window is satisfied instead of scanning the rest of the file.
  */
 export async function readLineRange(
   abs: string,
   startLine?: number,
   endLine?: number,
-  defaultWindow = false
+  options: ReadLineRangeOptions = {}
 ): Promise<ReadResult> {
   const s = Math.max(1, startLine ?? 1)
   const e = Math.max(s, endLine ?? Number.MAX_SAFE_INTEGER)
+  const countTotalLines = options.countTotalLines ?? false
   const lines: string[] = []
   let bytes = 0
   let totalLines = 0
   let truncated = false
+  let totalLinesKnown = true
+  const stream = createReadStream(abs, { encoding: 'utf8' })
   const rl = createInterface({
-    input: createReadStream(abs, { encoding: 'utf8' }),
+    input: stream,
     crlfDelay: Infinity
   })
   for await (const line of rl) {
     totalLines += 1
-    if (totalLines < s || totalLines > e) continue
+    if (totalLines < s) continue
+    if (totalLines > e) {
+      if (!countTotalLines) {
+        totalLinesKnown = false
+        rl.close()
+        stream.destroy()
+        break
+      }
+      continue
+    }
     const nextBytes = Buffer.byteLength(line, 'utf8') + 1
     if (bytes + nextBytes > MAX_READ_BYTES) {
       truncated = true
@@ -56,10 +74,10 @@ export async function readLineRange(
     path: abs,
     content: lines.join('\n'),
     truncated,
-    totalLines,
+    totalLines: totalLinesKnown ? totalLines : null,
     startLine: s,
     endLine: Math.min(e, Math.max(s, totalLines)),
-    defaultWindow
+    defaultWindow: options.defaultWindow ?? false
   }
 }
 

@@ -23,12 +23,18 @@ type ReadSpansPayload = {
     path: string;
     startLine: number;
     endLine: number;
-    totalLines: number;
+    totalLines: number | null;
     truncated: boolean;
     defaultWindow: boolean;
     content: string;
   }>;
 };
+
+function formatSpanMeta(path: string, startLine: number, endLine: number, totalLines: number | null): string {
+  return totalLines == null
+    ? `=== ${path} (lines ${startLine}-${endLine}) ===`
+    : `=== ${path} (lines ${startLine}-${endLine} of ${totalLines}) ===`;
+}
 
 export interface CodebaseAuditorOptions {
   capabilityBroker?: Pick<CapabilityBroker, 'repoOverview' | 'searchRepo' | 'readSpans'>;
@@ -267,7 +273,7 @@ Output ONLY the final Markdown document. Be rigorous, precise, and fully grounde
   private formatReadSpans(payload: ReadSpansPayload): string {
     return payload.items
       .map((item) => {
-        const meta = `=== ${item.path} (lines ${item.startLine}-${item.endLine} of ${item.totalLines}) ===`;
+        const meta = formatSpanMeta(item.path, item.startLine, item.endLine, item.totalLines);
         return `${meta}\n${item.content}`;
       })
       .join('\n\n');

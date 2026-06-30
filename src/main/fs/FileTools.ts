@@ -85,13 +85,17 @@ export class FileTools {
     const abs = this.resolve(path)
     if (startLine != null || endLine != null) return readLineRange(abs, startLine, endLine)
     if (!full) {
-      const preview = await readLineRange(abs, 1, SMALL_FILE_FULL_LINES, true)
+      const preview = await readLineRange(abs, 1, SMALL_FILE_FULL_LINES, {
+        countTotalLines: true,
+        defaultWindow: true
+      })
       // Small files come back whole — no point making a second tool call
       // when we already paid for the I/O. Larger files truncate to
       // DEFAULT_READ_LINES and signal `defaultWindow: true` so the agent
       // knows to ask for more.
-      if (preview.totalLines <= SMALL_FILE_FULL_LINES) {
-        return { ...preview, endLine: preview.totalLines, defaultWindow: false }
+      if ((preview.totalLines ?? 0) <= SMALL_FILE_FULL_LINES) {
+        const totalLines = preview.totalLines ?? preview.endLine
+        return { ...preview, totalLines, endLine: totalLines, defaultWindow: false }
       }
       const previewLines = preview.content.split('\n').slice(0, DEFAULT_READ_LINES)
       return {

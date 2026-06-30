@@ -96,8 +96,9 @@ describe('AgentConfigurationService', () => {
       'openai'
     )
 
-    expect(system).toContain('## OpenAI local-work contract')
+    expect(system).toContain('## Direct API local-work contract')
     expect(system).toContain('prefer repo_overview, search_repo, repo_grep_task, and read_spans')
+    expect(system).toContain('Batch related file windows into one read_spans({items:[...]}) call')
     expect(system).toContain('avoid full:true unless the file is small')
     expect(system).toContain('Keep Gladdis browser tools first-class for web search')
   })

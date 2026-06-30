@@ -89,7 +89,7 @@ export interface RepoGrepTaskResult {
       path: string
       startLine: number
       endLine: number
-      totalLines: number
+      totalLines: number | null
       truncated: boolean
       content: string
       matchedVariations: string[]
@@ -121,7 +121,7 @@ export interface ReadSpansResult {
       path: string
       startLine: number
       endLine: number
-      totalLines: number
+      totalLines: number | null
       truncated: boolean
       defaultWindow: boolean
       content: string
@@ -138,6 +138,14 @@ export interface RelatedSpanInput {
   paths: string[]
   query?: string
   maxResults?: number
+}
+
+function formatSpanMeta(path: string, startLine: number, endLine: number, totalLines: number | null, extra?: string): string {
+  const lineWindow =
+    totalLines == null
+      ? `lines ${startLine}-${endLine}`
+      : `lines ${startLine}-${endLine} of ${totalLines}`
+  return extra ? `=== ${path} (${lineWindow}; ${extra}) ===` : `=== ${path} (${lineWindow}) ===`
 }
 
 const KEY_FILE_CANDIDATES = [
@@ -396,9 +404,13 @@ export class RepoIntelligenceService {
       .slice(0, maxResults * 2)
       .map((hit) => `${hit.path}:${hit.line} [${hit.variation}]${hit.text ? ` - ${hit.text}` : ''}`)
     const spanBlocks = spans.map((span) => {
-      const meta =
-        `=== ${span.path} (lines ${span.startLine}-${span.endLine} of ${span.totalLines}; ` +
-        `matched: ${span.matchedVariations.join(', ')}) ===`
+      const meta = formatSpanMeta(
+        span.path,
+        span.startLine,
+        span.endLine,
+        span.totalLines,
+        `matched: ${span.matchedVariations.join(', ')}`
+      )
       return `${meta}\n${span.content}`
     })
     const summary = [
@@ -463,7 +475,7 @@ export class RepoIntelligenceService {
 
     const summary = resolved
       .map((item) => {
-        const meta = `=== ${item.path} (lines ${item.startLine}-${item.endLine} of ${item.totalLines}) ===`
+        const meta = formatSpanMeta(item.path, item.startLine, item.endLine, item.totalLines)
         return `${meta}\n${item.content}`
       })
       .join('\n\n')

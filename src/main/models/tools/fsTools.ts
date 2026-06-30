@@ -6,6 +6,17 @@ export interface FsToolsDeps {
   files: FileTools
 }
 
+function renderLineWindow(startLine: number, endLine: number, totalLines: number | null, defaultWindow: boolean): string {
+  if (totalLines == null) {
+    return defaultWindow
+      ? `showing lines ${startLine}-${endLine}; default window`
+      : `showing lines ${startLine}-${endLine}; total lines not counted`
+  }
+  return defaultWindow
+    ? `showing lines ${startLine}-${endLine} of ${totalLines}; default window`
+    : `showing lines ${startLine}-${endLine} of ${totalLines}`
+}
+
 export async function runReadFile(deps: FsToolsDeps, args: Record<string, any>): Promise<ToolOutcome> {
   const path = String(args.path ?? '')
   let r
@@ -22,12 +33,9 @@ export async function runReadFile(deps: FsToolsDeps, args: Record<string, any>):
     }
     throw err
   }
-  const window =
-    r.defaultWindow
-      ? `showing lines ${r.startLine}-${r.endLine} of ${r.totalLines}; default window`
-      : `showing lines ${r.startLine}-${r.endLine} of ${r.totalLines}`
+  const window = renderLineWindow(r.startLine, r.endLine, r.totalLines, r.defaultWindow)
   const next =
-    r.defaultWindow && r.totalLines > r.endLine
+    r.defaultWindow && r.totalLines != null && r.totalLines > r.endLine
       ? `\nPrefer search_repo/search_files or read_spans before reading more. Next narrow range: read_file({"path":${JSON.stringify(r.path)},"start_line":${r.endLine + 1},"end_line":${Math.min(r.endLine + 120, r.totalLines)}}). Use full:true only when the whole file is genuinely needed.`
       : ''
   const header = `${r.path} — ${window}${r.truncated ? ' (truncated)' : ''}${next}`

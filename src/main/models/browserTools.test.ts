@@ -130,7 +130,7 @@ describe('BrowserTools', () => {
     )
 
     expect(result.ok).toBe(true)
-    expect(result.text).toContain('=== example.ts (lines 2-3 of 4) ===')
+    expect(result.text).toContain('=== example.ts (lines 2-3) ===')
     expect(result.text).toContain('beta')
     expect(result.text).toContain('gamma')
   })

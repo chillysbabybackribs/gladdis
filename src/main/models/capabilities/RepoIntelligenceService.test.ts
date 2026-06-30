@@ -235,14 +235,14 @@ describe('RepoIntelligenceService', () => {
       items: [{ path: 'src/example.ts', startLine: 2, endLine: 4 }]
     })
 
-    expect(result.summary).toContain('=== src/example.ts (lines 2-4 of 5) ===')
+    expect(result.summary).toContain('=== src/example.ts (lines 2-4) ===')
     expect(result.summary).toContain('target line 3')
     expect(result.structuredPayload.items).toEqual([
       expect.objectContaining({
         path: 'src/example.ts',
         startLine: 2,
         endLine: 4,
-        totalLines: 5
+        totalLines: null
       })
     ])
     expect(result.structuredPayload.context).toEqual(expect.objectContaining({

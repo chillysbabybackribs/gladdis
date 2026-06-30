@@ -84,6 +84,7 @@ export const CODEX_BROWSER_INSTRUCTIONS =
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
   'recall_history, repo_overview, repo_grep_task, search_repo, read_spans, research_dossier, and verify_change. ' +
+  'When reading code, batch related windows into one read_spans({items:[...]}) call instead of a long chain of single-span reads. ' +
   'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook (your native cross-session ' +
   'memory is disabled here, so this is the only durable channel): memory_read before re-asking for context that ' +
   'may already be known, memory_write for durable decisions/constraints/identifiers, memory_list for a quick ' +

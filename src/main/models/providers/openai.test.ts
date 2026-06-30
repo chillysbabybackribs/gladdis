@@ -390,6 +390,7 @@ describe('runOpenAiToolLoop', () => {
     expect(toolResult?.preview).toContain('OpenAI local-work policy')
     expect(toolResult?.preview).toContain('search_repo')
     expect(toolResult?.preview).toContain('read_spans')
+    expect(toolResult?.preview).toContain('Batch related windows into one read_spans')
   })
 
   it('allows direct read_file after search_repo has already narrowed the task', async () => {

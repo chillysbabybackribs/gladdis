@@ -3,90 +3,527 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Gladys for Linux</title>
+    <title>Gladys — Browse, build, and operate from one local workspace</title>
     <meta
       name="description"
-      content="Download the latest Linux build of Gladys, the desktop workshop for chat, browser automation, and local development workflows."
+      content="Gladys is a local desktop workshop: a chat agent on the left, a real multi-tab Chromium browser on the right, with full filesystem, shell, and Chrome DevTools Protocol access."
     />
-    <link rel="stylesheet" href="./styles.css?v=0.1.3" />
+    <link rel="stylesheet" href="./styles.css?v=0.3.3" />
   </head>
   <body>
-    <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="#top">Gladys</a>
+      <nav class="topnav">
+        <a href="#capabilities">Capabilities</a>
+        <a href="#perception">Perception</a>
+        <a href="#models">Models</a>
+        <a href="#download">Download</a>
+        <a
+          class="topnav-cta"
+          href="https://github.com/chillysbabybackribs/gladdis"
+          rel="noopener"
+          >GitHub</a
+        >
+      </nav>
+    </header>
+
+    <main id="top">
       <section class="hero">
-        <p class="eyebrow">Linux preview</p>
-        <h1>Gladys</h1>
-        <p class="lede">
-          A desktop workshop for conversation, browser automation, and local
-          development workflows.
-        </p>
-        <div class="actions">
+        <p class="eyebrow">Local desktop workshop · Linux preview</p>
+        <h1 class="hero-title">Browse, build and operate</h1>
+        <p class="hero-subtitle">Drive productivity with a model riding shotgun</p>
+
+        <div class="hero-actions">
+          <a class="button button-primary" href="#download">Download for Linux</a>
           <a
-            class="button button-primary button-disabled"
-            id="download-appimage"
-            href="#"
-            aria-disabled="true"
+            class="button button-ghost"
+            href="https://github.com/chillysbabybackribs/gladdis"
+            rel="noopener"
+            >View source</a
           >
-            Download AppImage
-          </a>
-          <a
-            class="button button-secondary button-disabled"
-            id="download-deb"
-            href="#"
-            aria-disabled="true"
-          >
-            Download .deb
-          </a>
-          <a
-            class="button button-secondary button-disabled"
-            id="download-checksums"
-            href="#"
-            aria-disabled="true"
-          >
-            Checksums
-          </a>
         </div>
-        <p class="meta" id="release-status">Checking the latest Linux release…</p>
-        <p class="meta meta-small" id="checksum-status">
-          Checksums and install commands will appear with the latest release.
+
+        <div class="hero-mobile-showcase" aria-label="Gladys mobile preview">
+          <div class="hero-mobile-copy">
+            <p class="hero-mobile-tagline">
+              One local workspace for chat, browsing, shell access, and code edits.
+            </p>
+            <p class="hero-mobile-description">
+              Gladys combines a real Chromium browser, filesystem access, terminal
+              execution, and coding agents in one desktop surface. The installable
+              phone-side PWA remote is in active development.
+            </p>
+            <div class="hero-mobile-actions">
+              <a
+                class="button button-primary"
+                href="https://github.com/chillysbabybackribs/gladdis/blob/main/docs/phone-remote-handoff.md"
+                rel="noopener"
+                >PWA Remote</a
+              >
+            </div>
+          </div>
+          <div class="hero-mobile-video-shell">
+            <video
+              class="hero-mobile-video"
+              controls
+              playsinline
+              preload="metadata"
+              poster="./assets/gladys-mobile-preview-poster.jpg"
+            >
+              <source src="./assets/gladys-mobile-preview.mp4" type="video/mp4" />
+              Your browser does not support the Gladys preview video.
+            </video>
+          </div>
+        </div>
+
+        <div class="demo-frame" aria-label="Interactive Gladys interface preview">
+          <div class="gd-window">
+            <div class="gd-titlebar">
+              <nav class="gd-menubar" aria-hidden="true">
+                <span>File</span>
+                <span>Memory</span>
+                <span>Edit</span>
+                <span>View</span>
+                <span>Window</span>
+              </nav>
+              <span class="gd-app-title">gladdis</span>
+              <span class="gd-winctl" aria-hidden="true">
+                <i class="gd-wc gd-wc-min"></i>
+                <i class="gd-wc gd-wc-max"></i>
+                <i class="gd-wc gd-wc-close"></i>
+              </span>
+            </div>
+
+            <div class="gd-body">
+              <!-- Left: agent panel (Codex) -->
+              <aside class="gd-agent">
+                <div class="gd-agent-empty"></div>
+
+                <div class="gd-composer">
+                  <div class="gd-composer-box">
+                    <div class="gd-composer-top">
+                      <span class="gd-model">Codex · GPT-5.4</span>
+                      <span class="gd-folder">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.5 1.5H13A1.5 1.5 0 0 1 14.5 6v5A1.5 1.5 0 0 1 13 12.5H3A1.5 1.5 0 0 1 1.5 11V4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                        </svg>
+                        myworkspace/Gladdis
+                      </span>
+                    </div>
+                    <textarea
+                      class="gd-composer-input"
+                      rows="1"
+                      placeholder="Ask or tell Gladys what to do…   (/ for commands)"
+                    ></textarea>
+                    <div class="gd-composer-bar">
+                      <button class="gd-composer-new" type="button" title="New chat">+</button>
+                      <div class="gd-composer-right">
+                        <span class="gd-composer-hint" data-demo-hint hidden>
+                          Demo — download to run
+                        </span>
+                        <button class="gd-icon-btn" type="button" title="Voice" tabindex="-1" aria-hidden="true">
+                          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                            <path d="M2.5 6.5v3h2L8 12.5v-9L4.5 6.5h-2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                            <path d="M10.5 6q1 2 0 4M12.2 4.6q1.8 3.4 0 6.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                          </svg>
+                        </button>
+                        <button class="gd-icon-btn gd-icon-caret" type="button" title="Options" tabindex="-1" aria-hidden="true">
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                          </svg>
+                        </button>
+                        <button class="gd-composer-send" type="button" title="Send" data-demo-send>
+                          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M8 13V3M8 3 4 7M8 3l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <div class="gd-resizer" data-resizer="left" aria-hidden="true"></div>
+
+              <!-- Center: native browser -->
+              <section class="gd-browser">
+                <div class="gd-tabstrip" role="tablist">
+                  <button class="gd-tab active" role="tab">
+                    <span class="gd-tab-fav">🦆</span>
+                    <span class="gd-tab-title">DuckDuckGo — Protecting…</span>
+                    <span class="gd-tab-close" aria-hidden="true">×</span>
+                  </button>
+                  <button class="gd-tab-new" type="button" title="New tab">+</button>
+                </div>
+
+                <div class="gd-urlbar">
+                  <button class="gd-nav gd-nav-dim" type="button" title="Back">‹</button>
+                  <button class="gd-nav gd-nav-dim" type="button" title="Forward">›</button>
+                  <button class="gd-nav" type="button" title="Reload">⟳</button>
+                  <input class="gd-url" data-url value="https://duckduckgo.com/" spellcheck="false" />
+                </div>
+
+                <div class="gd-stage">
+                  <div class="gd-ddg">
+                    <div class="gd-ddg-top">
+                      <span class="gd-ddg-ai">
+                        <span class="gd-ddg-ai-ic">🦆</span> Duck.ai
+                      </span>
+                      <span class="gd-ddg-menu" aria-hidden="true">
+                        <i></i><i></i><i></i>
+                      </span>
+                    </div>
+
+                    <div class="gd-ddg-center">
+                      <div class="gd-ddg-logo" aria-hidden="true">🦆</div>
+                      <div class="gd-ddg-word">DuckDuckGo</div>
+
+                      <div class="gd-ddg-seg" role="tablist">
+                        <button class="gd-ddg-segbtn active" type="button" data-ddg="search">
+                          <span aria-hidden="true">🔍</span> Search
+                        </button>
+                        <button class="gd-ddg-segbtn" type="button" data-ddg="ai">
+                          <span aria-hidden="true">🦆</span> Duck.ai
+                        </button>
+                      </div>
+
+                      <div class="gd-ddg-search">
+                        <input
+                          class="gd-ddg-input"
+                          placeholder="Search privately"
+                          spellcheck="false"
+                        />
+                        <span class="gd-ddg-search-ic" aria-hidden="true">🔍</span>
+                      </div>
+
+                      <p class="gd-ddg-tag">Protection. Privacy. Peace of mind.</p>
+                    </div>
+
+                    <span class="gd-ddg-settings" aria-hidden="true">⚙ AI Settings</span>
+                  </div>
+                </div>
+
+                <div class="gd-terminal" data-terminal hidden>
+                  <div class="gd-term-head">
+                    <span class="gd-term-title">
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.1"/>
+                        <path d="M4 6l2 2-2 2M8 10h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                      Terminal
+                    </span>
+                    <span class="gd-term-tools" aria-hidden="true">
+                      <i class="gd-term-ic"></i>
+                      <i class="gd-term-ic"></i>
+                      <button class="gd-term-close" type="button" data-terminal-close title="Close terminal">×</button>
+                    </span>
+                  </div>
+                  <div class="gd-term-body">
+<span class="gd-term-line"><span class="gd-term-user">dp@dp-HP-Pavilion-Gaming-Laptop-15-ec0xxx</span><span class="gd-term-path">:~/Desktop/myworkspace/Gladdis$</span> ls</span>
+<span class="gd-term-out"><span class="gd-term-dir">build</span>   electron-builder.config.cjs  <span class="gd-term-dir">node_modules</span>  package-lock.json  <span class="gd-term-dir">release</span>  <span class="gd-term-dir">skills</span>   tsconfig.json
+CLAUDE.md  electron.vite.config.ts      <span class="gd-term-dir">out</span>           <span class="gd-term-dir">pipeline-runs</span>      <span class="gd-term-dir">scripts</span>  <span class="gd-term-dir">src</span>
+<span class="gd-term-dir">docs</span>       gladdis-skill.md             package.json  README.md          <span class="gd-term-dir">shared</span>   <span class="gd-term-dir">tmp</span></span>
+<span class="gd-term-line"><span class="gd-term-user">dp@dp-HP-Pavilion-Gaming-Laptop-15-ec0xxx</span><span class="gd-term-path">:~/Desktop/myworkspace/Gladdis$</span> <span class="gd-term-cursor"></span></span></div>
+                </div>
+              </section>
+
+              <div class="gd-resizer" data-resizer="right" aria-hidden="true"></div>
+
+              <!-- Right: second agent panel (idle) -->
+              <aside class="gd-agent gd-agent-right">
+                <div class="gd-agent-empty"></div>
+
+                <div class="gd-composer">
+                  <div class="gd-composer-box">
+                    <div class="gd-composer-top">
+                      <span class="gd-model">Claude Opus 4.8</span>
+                      <span class="gd-folder">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M1.5 4.5A1.5 1.5 0 0 1 3 3h3l1.5 1.5H13A1.5 1.5 0 0 1 14.5 6v5A1.5 1.5 0 0 1 13 12.5H3A1.5 1.5 0 0 1 1.5 11V4.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                        </svg>
+                        myworkspace/Gladdis
+                      </span>
+                    </div>
+                    <textarea
+                      class="gd-composer-input"
+                      rows="1"
+                      placeholder="Ask or tell Gladys what to do…   (/ for commands)"
+                    ></textarea>
+                    <div class="gd-composer-bar">
+                      <button class="gd-composer-new" type="button" title="New chat">+</button>
+                      <div class="gd-composer-right">
+                        <span class="gd-composer-hint" data-demo-hint hidden>
+                          Demo — download to run
+                        </span>
+                        <button class="gd-icon-btn" type="button" title="Voice" tabindex="-1" aria-hidden="true">
+                          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+                            <path d="M2.5 6.5v3h2L8 12.5v-9L4.5 6.5h-2Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                            <path d="M10.5 6q1 2 0 4M12.2 4.6q1.8 3.4 0 6.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                          </svg>
+                        </button>
+                        <button class="gd-icon-btn gd-icon-caret" type="button" title="Options" tabindex="-1" aria-hidden="true">
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                          </svg>
+                        </button>
+                        <button class="gd-composer-send" type="button" title="Send" data-demo-send>
+                          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M8 13V3M8 3 4 7M8 3l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+
+            <div class="gd-statusbar">
+              <button
+                class="gd-rail-toggle"
+                type="button"
+                data-rail="left"
+                title="Toggle left panel"
+              >‹</button>
+              <button
+                class="gd-term-toggle"
+                type="button"
+                data-terminal-toggle
+                title="Toggle terminal"
+              >
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.1"/>
+                  <path d="M4 6l2 2-2 2M8 10h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Terminal
+              </button>
+              <button
+                class="gd-rail-toggle"
+                type="button"
+                data-rail="right"
+                title="Toggle right panel"
+              >›</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="capabilities">
+        <div class="section-head">
+          <h2>What Gladys actually does</h2>
+          <p>
+            A trusted local app, not a sandboxed assistant. The agent can act on
+            your behalf with the same reach you have as the OS user.
+          </p>
+        </div>
+
+        <div class="card-grid">
+          <article class="card">
+            <h3>Split workshop layout</h3>
+            <p>
+              Conversation on the left, a native multi-tab Chromium browser on
+              the right. Each tab is an Electron <code>WebContentsView</code>
+              rendered as a real OS layer, not an iframe.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Real browser automation</h3>
+            <p>
+              The agent navigates, clicks, types, and presses keys in the live
+              browser — discovering targets and acting on them as one step, with
+              trusted input dispatched at real coordinates.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Full Chrome DevTools Protocol</h3>
+            <p>
+              Every tab attaches the CDP debugger with DOM, network, console,
+              runtime, storage, and performance domains enabled — reachable
+              through structured calls or a raw command escape hatch.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Filesystem and shell</h3>
+            <p>
+              Read, write, and surgically edit files, list directories, search
+              recursively, and run arbitrary shell commands across everything
+              the OS user can reach.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Repository intelligence</h3>
+            <p>
+              Workspace orientation, task-shaped grep, bounded span reads, and
+              validation gates let the agent understand a codebase before it
+              edits, then verify the change.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Custom agents and memory</h3>
+            <p>
+              Save reusable agent blueprints with model preferences, tool
+              constraints, and workflows. Working memory and history recall keep
+              long sessions coherent without bloating the prompt.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Web research in-tab</h3>
+            <p>
+              Search, deep recursive crawl, and single-URL fetch all surface
+              their results in the visible Chromium tab, so research stays
+              transparent and inspectable.
+            </p>
+          </article>
+
+          <article class="card">
+            <h3>Local terminal</h3>
+            <p>
+              A real PTY-backed terminal lives inside the app for installs,
+              builds, tests, and dev servers — alongside the chat and browser,
+              never in a separate window.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section section-feature" id="perception">
+        <div class="feature-text">
+          <p class="eyebrow">The core design bet</p>
+          <h2>Perception is grep and accessibility, not pixels</h2>
+          <p>
+            Instead of guessing from screenshots, Gladys reads the live page the
+            way the page is actually built. A grep engine runs inside the page
+            and returns matched elements with a stable selector, visibility, and
+            live bounding-box coordinates. An accessibility-tree snapshot exposes
+            roles, names, states, and stable refs for component-heavy UIs.
+          </p>
+          <p>
+            That makes targeting more precise than vision — a literal node and a
+            literal coordinate, not pixels the model has to infer. Screenshots
+            stay available as a fallback for genuinely visual content.
+          </p>
+        </div>
+        <ul class="feature-list">
+          <li>
+            <span class="feature-term">grep_page</span>
+            Find exact text, regex, or selectors on the live page with
+            surrounding context and coordinates.
+          </li>
+          <li>
+            <span class="feature-term">read_a11y</span>
+            Capture a compact accessibility tree with stable refs for reliable
+            control discovery.
+          </li>
+          <li>
+            <span class="feature-term">grep_click / grep_type</span>
+            Discover and act in a single primitive, dispatched at real
+            coordinates.
+          </li>
+          <li>
+            <span class="feature-term">watch_network</span>
+            Read the JSON behind the render — the data a page loads, not just its
+            markup.
+          </li>
+        </ul>
+      </section>
+
+      <section class="section" id="models">
+        <div class="section-head">
+          <h2>Bring your own models</h2>
+          <p>
+            Completions run in the main process, so API keys never reach the
+            renderer. Keys are stored encrypted on-device through the OS keychain.
+          </p>
+        </div>
+        <div class="pill-row">
+          <span class="pill">Anthropic</span>
+          <span class="pill">Google Gemini</span>
+          <span class="pill">OpenAI</span>
+          <span class="pill">Grok / xAI</span>
+          <span class="pill">Codex</span>
+          <span class="pill">Claude Code</span>
+        </div>
+        <p class="models-note">
+          Streamed multi-provider chat, embedded Codex and Claude Code runtimes,
+          and a focused tool surface that escalates only when a turn needs more.
         </p>
       </section>
 
-      <section class="card-grid">
-        <article class="card">
-          <h2>What this build is</h2>
-          <p>
-            This page is wired for Linux-first distribution while the final
-            product naming, brand assets, and broader platform packaging are
-            still being finished.
+      <section class="section" id="download">
+        <div class="download-panel">
+          <div class="download-head">
+            <p class="eyebrow">Linux-first distribution</p>
+            <h2>Download Gladys</h2>
+            <p class="download-lede">
+              Naming, brand assets, and broader platform packaging are still
+              being finished. For now the latest tagged release publishes Linux
+              artifacts straight to GitHub Releases.
+            </p>
+          </div>
+
+          <div class="download-actions">
+            <a
+              class="button button-primary button-disabled"
+              id="download-appimage"
+              href="#"
+              aria-disabled="true"
+              >Download AppImage</a
+            >
+            <a
+              class="button button-ghost button-disabled"
+              id="download-deb"
+              href="#"
+              aria-disabled="true"
+              >Download .deb</a
+            >
+            <a
+              class="button button-ghost button-disabled"
+              id="download-checksums"
+              href="#"
+              aria-disabled="true"
+              >Checksums</a
+            >
+          </div>
+
+          <p class="meta" id="release-status">Checking the latest Linux release…</p>
+          <p class="meta meta-small" id="checksum-status">
+            Checksums and install commands will appear with the latest release.
           </p>
-        </article>
-        <article class="card">
-          <h2>Formats</h2>
-          <p>
-            AppImage works well for a portable install. The Debian package is
-            better when you want the app registered with your system launcher.
-          </p>
-        </article>
-        <article class="card">
-          <h2>Publishing flow</h2>
-          <p>
-            Tagged releases publish Linux artifacts to GitHub Releases, and this
-            page automatically points to the latest published build.
-          </p>
-        </article>
-        <article class="card card-wide">
-          <h2>Verify and install</h2>
-          <p>
-            Verify the checksum before installing if you want an integrity check
-            from the published release bundle.
-          </p>
-          <pre class="command-block"><code id="verify-command">sha256sum -c SHA256SUMS.txt --ignore-missing</code></pre>
-          <pre class="command-block"><code id="appimage-command">chmod +x Gladys-*.AppImage && ./Gladys-*.AppImage</code></pre>
-          <pre class="command-block"><code id="deb-command">sudo apt install ./Gladys-*.deb</code></pre>
-        </article>
+
+          <div class="install-grid">
+            <div class="install-block">
+              <p class="install-label">Verify integrity</p>
+              <pre class="command-block"><code id="verify-command">sha256sum -c SHA256SUMS.txt --ignore-missing</code></pre>
+            </div>
+            <div class="install-block">
+              <p class="install-label">Run the AppImage</p>
+              <pre class="command-block"><code id="appimage-command">chmod +x Gladys-*.AppImage &amp;&amp; ./Gladys-*.AppImage</code></pre>
+            </div>
+            <div class="install-block">
+              <p class="install-label">Install the .deb</p>
+              <pre class="command-block"><code id="deb-command">sudo apt install ./Gladys-*.deb</code></pre>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
 
-    <script src="./app.js?v=0.1.3" defer></script>
+    <footer class="footer">
+      <p class="footer-brand">Gladys</p>
+      <p class="footer-note">
+        A local desktop workshop for conversation, browser automation, and
+        development workflows. This preview lives at
+        <span class="footer-domain">chillysbabybackribs.github.io/gladdis</span>
+        and will move to its own domain soon.
+      </p>
+    </footer>
+
+    <script src="./app.js?v=0.3.1" defer></script>
   </body>
 </html>

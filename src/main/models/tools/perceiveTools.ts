@@ -44,7 +44,20 @@ export async function runReadPage(
   if (cached) {
     if (cached.pageUrl === currentUrl && now - cached.capturedAt <= deps.pageCacheTtlMs) {
       deps.recordPageCacheEvent('hit')
-      return { ok: true, text: appendReadPageCacheMetrics(cached.digest, deps.getPageCacheStats()) }
+      return {
+        ok: true,
+        text: appendReadPageCacheMetrics(cached.digest, deps.getPageCacheStats()),
+        structuredContent: {
+          pageUrl: cached.pageUrl,
+          focus: typeof args.focus === 'string' ? args.focus : undefined,
+          viewportOnly: args.viewportOnly === true,
+          cache: {
+            status: 'hit',
+            capturedAt: cached.capturedAt,
+            ...deps.getPageCacheStats()
+          }
+        }
+      }
     }
     if (cached.pageUrl === currentUrl) {
       deps.recordPageCacheEvent('expired')
@@ -71,7 +84,20 @@ export async function runReadPage(
     deps.recordPageCacheEvent('evicted')
   }
   deps.pageCache.set(cacheKey, { pageUrl: resolvedUrl, digest, capturedAt: nowCaptured })
-  return { ok: true, text: appendReadPageCacheMetrics(digest, deps.getPageCacheStats()) }
+  return {
+    ok: true,
+    text: appendReadPageCacheMetrics(digest, deps.getPageCacheStats()),
+    structuredContent: {
+      pageUrl: resolvedUrl,
+      focus: typeof args.focus === 'string' ? args.focus : undefined,
+      viewportOnly: args.viewportOnly === true,
+      cache: {
+        status: 'miss',
+        capturedAt: nowCaptured,
+        ...deps.getPageCacheStats()
+      }
+    }
+  }
 }
 
 function normalizePageUrl(url: string): string {
@@ -98,7 +124,12 @@ export async function runScreenshot(
   return {
     ok: true,
     text: `${fullPage ? 'Full-page' : 'Visible viewport'} screenshot of the active tab captured.`,
-    imageBase64
+    imageBase64,
+    structuredContent: {
+      target: 'active_tab',
+      fullPage,
+      mimeType: 'image/png'
+    }
   }
 }
 
@@ -112,7 +143,15 @@ export async function runScreenshotApp(deps: PerceiveToolsDeps): Promise<ToolOut
   if (!imageBase64) {
     return { ok: false, text: 'screenshot_app: could not capture the app window.' }
   }
-  return { ok: true, text: 'Screenshot of the entire Gladdis app window captured.', imageBase64 }
+  return {
+    ok: true,
+    text: 'Screenshot of the entire Gladdis app window captured.',
+    imageBase64,
+    structuredContent: {
+      target: 'app_window',
+      mimeType: 'image/png'
+    }
+  }
 }
 
 export interface GrepMatch {

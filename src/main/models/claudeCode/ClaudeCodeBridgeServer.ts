@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
-import type { BrowserTools, ToolContext } from '../browserTools'
+import type { BrowserTools, ToolContext, ToolOutcome } from '../browserTools'
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { ChatStreamEvent } from '../../../../shared/types'
 import {
@@ -281,6 +281,7 @@ export class ClaudeCodeBridgeServer {
               }]
             : [])
         ],
+        structuredContent: buildStructuredToolResult(toolName, request.params.arguments, outcome),
         isError: outcome.ok === false
       }
     })
@@ -327,4 +328,19 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   const raw = Buffer.concat(chunks).toString('utf8').trim()
   if (!raw) return null
   return JSON.parse(raw)
+}
+
+function buildStructuredToolResult(
+  toolName: string,
+  args: unknown,
+  outcome: ToolOutcome
+): Record<string, unknown> {
+  return {
+    tool: toolName,
+    ok: outcome.ok,
+    text: outcome.text,
+    hasImage: Boolean(outcome.imageBase64),
+    arguments: record(args),
+    ...(outcome.structuredContent ? { data: outcome.structuredContent } : {})
+  }
 }

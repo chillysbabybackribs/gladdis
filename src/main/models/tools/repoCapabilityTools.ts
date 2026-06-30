@@ -40,7 +40,11 @@ export async function runRepoOverview(
     workspaceRoot: wired.workspaceRoot,
     focus: typeof args.focus === 'string' ? args.focus : undefined
   })
-  return { ok: result.ok, text: result.summary }
+  return {
+    ok: result.ok,
+    text: result.summary,
+    structuredContent: asStructuredContent(result.structuredPayload)
+  }
 }
 
 export async function runSearchRepo(
@@ -61,7 +65,11 @@ export async function runSearchRepo(
     glob: typeof args.glob === 'string' ? args.glob : undefined,
     maxResults: Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : undefined
   })
-  return { ok: result.ok, text: result.summary }
+  return {
+    ok: result.ok,
+    text: result.summary,
+    structuredContent: asStructuredContent(result.structuredPayload)
+  }
 }
 
 export async function runReadSpans(
@@ -79,7 +87,11 @@ export async function runReadSpans(
     workspaceRoot: wired.workspaceRoot,
     items
   })
-  return { ok: result.ok, text: result.summary }
+  return {
+    ok: result.ok,
+    text: result.summary,
+    structuredContent: asStructuredContent(result.structuredPayload)
+  }
 }
 
 export async function runResearchDossier(
@@ -99,7 +111,11 @@ export async function runResearchDossier(
     glob: typeof args.glob === 'string' ? args.glob : undefined,
     maxResults: Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : undefined
   })
-  return { ok: result.ok, text: result.summary }
+  return {
+    ok: result.ok,
+    text: result.summary,
+    structuredContent: asStructuredContent(result.structuredPayload)
+  }
 }
 
 export async function runVerifyChange(
@@ -119,7 +135,17 @@ export async function runVerifyChange(
     ...(checks.length ? { checks } : {}),
     ...(goal ? { goal } : {})
   })
-  return { ok: result.ok, text: result.summary }
+  return {
+    ok: result.ok,
+    text: result.summary,
+    structuredContent: asStructuredContent(result.structuredPayload)
+  }
+}
+
+function asStructuredContent(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
 }
 
 function normalizeReadSpanArgs(args: Record<string, any>): Array<{

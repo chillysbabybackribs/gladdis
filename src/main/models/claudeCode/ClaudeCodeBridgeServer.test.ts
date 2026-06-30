@@ -13,7 +13,15 @@ describe('ClaudeCodeBridgeServer', () => {
   })
 
   it('exposes Claude browser tools over direct HTTP MCP', async () => {
-    const run = vi.fn(async () => ({ ok: true, text: 'tool ok', imageBase64: null }))
+    const run = vi.fn(async () => ({
+      ok: true,
+      text: 'tool ok',
+      imageBase64: null,
+      structuredContent: {
+        workspaceRoot: '/tmp/workspace',
+        packageName: 'demo'
+      }
+    }))
     const bridge = new ClaudeCodeBridgeServer(
       {
         run,
@@ -76,6 +84,17 @@ describe('ClaudeCodeBridgeServer', () => {
       })
     )
     expect(result.content).toEqual([{ type: 'text', text: 'tool ok' }])
+    expect(result.structuredContent).toEqual({
+      tool: 'repo_overview',
+      ok: true,
+      text: 'tool ok',
+      hasImage: false,
+      arguments: { focus: 'bridge test' },
+      data: {
+        workspaceRoot: '/tmp/workspace',
+        packageName: 'demo'
+      }
+    })
 
     await transport.close()
     registration.dispose()

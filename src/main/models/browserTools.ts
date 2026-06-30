@@ -72,6 +72,7 @@ export const TOOLS: ToolDef[] = AGENT_TOOLS
 export interface ToolOutcome {
   text: string
   imageBase64?: string
+  structuredContent?: Record<string, unknown>
   ok: boolean
 }
 

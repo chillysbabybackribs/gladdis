@@ -18,17 +18,17 @@ Still intentionally open:
 Before a user-facing launch, tie up these items:
 
 1. Choose the production `GLADDIS_PRODUCT_NAME` and `GLADDIS_APP_ID`.
-2. Add `build/icon.png` for polished Linux packaging.
+2. Replace the provisional Linux icon and desktop branding with final artwork.
 3. Decide where Linux release artifacts will live:
    - GitHub Releases
    - a download CDN/bucket
    - a product website download endpoint
-4. Enable GitHub Pages or move the static download page scaffold to the final host.
+4. Move the preview download page deployment from the packaging branch to the final release branch flow.
 5. Replace placeholder copy and styling with final brand assets once ready.
 
 Deferred until after Linux:
 
-1. Add `build/icon.icns` and `build/icon.ico`.
+1. Replace the provisional `build/icon.icns` and `build/icon.ico` with final branded assets.
 2. Configure Apple notarization secrets:
    - `APPLE_ID`
    - `APPLE_APP_SPECIFIC_PASSWORD`

@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - grep-page-reliability
     paths:
       - 'docs/download/**'
       - '.github/workflows/deploy-download-page.yml'

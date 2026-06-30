@@ -66,6 +66,7 @@ describe('applyStreamEventToMessages', () => {
     expect(next[0].text).toBe('alpha tail')
     expect(next[0].parts).toEqual([{ kind: 'text', text: 'alpha' }])
     expect(next[0].liveText).toBe(' tail')
+    expect(next[0].liveTextSegments).toEqual([' tail'])
   })
 
   it('keeps streaming prose out of parts until a structural event needs ordering', () => {
@@ -82,6 +83,7 @@ describe('applyStreamEventToMessages', () => {
 
     expect(withDelta[0].parts).toEqual([{ kind: 'text', text: 'alpha' }])
     expect(withDelta[0].liveText).toBe(' beta')
+    expect(withDelta[0].liveTextSegments).toEqual([' beta'])
 
     const withTool = applyStreamEventToMessages(withDelta, {
       requestId: 'req-a',
@@ -106,6 +108,7 @@ describe('applyStreamEventToMessages', () => {
       }
     ])
     expect(withTool[0].liveText).toBeUndefined()
+    expect(withTool[0].liveTextSegments).toBeUndefined()
   })
 
   it('keeps tool timing on the matching assistant message', () => {
@@ -283,7 +286,8 @@ describe('applyStreamEventToMessages', () => {
         role: 'assistant',
         text: 'alpha beta',
         parts: [{ kind: 'text', text: 'alpha' }],
-        liveText: ' beta'
+        liveText: ' beta',
+        liveTextSegments: [' beta']
       }
     ]
 
@@ -296,5 +300,26 @@ describe('applyStreamEventToMessages', () => {
 
     expect(next[0].parts).toEqual([{ kind: 'text', text: 'alpha beta' }])
     expect(next[0].liveText).toBeUndefined()
+    expect(next[0].liveTextSegments).toBeUndefined()
+  })
+
+  it('seals long streaming prose into bounded markdown segments at paragraph breaks', () => {
+    const messages: Message[] = [
+      { id: 'assistant-a', role: 'assistant', text: '', parts: [] }
+    ]
+
+    const longParagraph = `${'a'.repeat(1300)}\n\n${'b'.repeat(50)}`
+    const next = applyStreamEventToMessages(messages, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'delta',
+      text: longParagraph
+    })
+
+    expect(next[0].liveText).toBe(longParagraph)
+    expect(next[0].liveTextSegments).toEqual([
+      `${'a'.repeat(1300)}\n\n`,
+      'b'.repeat(50)
+    ])
   })
 })

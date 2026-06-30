@@ -37,6 +37,12 @@ export {
  * decides via memo whether to actually re-render its body.
  */
 export const ChatMessageBody = memo(function ChatMessageBody({ message }: { message: Message }) {
+  const liveBlocks = message.liveTextSegments?.length
+    ? message.liveTextSegments
+    : message.liveText
+      ? [message.liveText]
+      : []
+
   if (message.parts && message.parts.length) {
     const blocks: ReactNode[] = []
     let toolRun: ToolActivity[] = []
@@ -106,9 +112,9 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       }
     })
     flushAll()
-    if (message.liveText) {
-      blocks.push(<MarkdownBlock key="live-text" text={message.liveText} />)
-    }
+    liveBlocks.forEach((text, idx) => {
+      blocks.push(<MarkdownBlock key={`live-text-${idx}`} text={text} />)
+    })
     return <>{blocks}</>
   }
 
@@ -117,8 +123,14 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       {message.tools && message.tools.length > 0 && (
         <ToolRun tools={message.tools} />
       )}
-      {(message.liveText || message.text) ? (
-        <MarkdownBlock text={message.liveText || message.text} />
+      {liveBlocks.length > 0 ? (
+        <>
+          {liveBlocks.map((text, idx) => (
+            <MarkdownBlock key={`live-text-${idx}`} text={text} />
+          ))}
+        </>
+      ) : message.text ? (
+        <MarkdownBlock text={message.text} />
       ) : (
         !(message.tools && message.tools.length) && (
           <span className="typing">

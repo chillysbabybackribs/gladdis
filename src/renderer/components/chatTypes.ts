@@ -75,6 +75,12 @@ export interface Message {
    * has accumulated lots of tool/activity blocks.
    */
   liveText?: string
+  /**
+   * Bounded streaming markdown segments for the in-flight tail. Older sealed
+   * segments stay stable so only the newest tail block reparses while text is
+   * arriving.
+   */
+  liveTextSegments?: string[]
   /** Optional context line shown under a user message (the attached page). */
   meta?: string
   /** Ordered prose/tool fragments for an assistant turn (live + new saves). */

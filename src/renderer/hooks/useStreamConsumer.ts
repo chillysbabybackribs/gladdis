@@ -4,6 +4,48 @@ import type { Message, ToolActivity } from '../components/chatTypes'
 import { appendText } from '../components/chatTypes'
 
 const noop = () => {}
+const STREAM_SEGMENT_SOFT_LIMIT = 1200
+const STREAM_SEGMENT_MIN_BREAK = 300
+
+function liveSegments(message: Message): string[] {
+  if (message.liveTextSegments?.length) return message.liveTextSegments
+  if (message.liveText) return [message.liveText]
+  return []
+}
+
+function liveTextValue(message: Message): string {
+  if (message.liveTextSegments?.length) return message.liveTextSegments.join('')
+  return message.liveText ?? ''
+}
+
+function findSafeSplit(text: string): number {
+  const candidates = [
+    { index: text.lastIndexOf('\n```\n'), length: '\n```\n'.length },
+    { index: text.lastIndexOf('```\n\n'), length: '```\n\n'.length },
+    { index: text.lastIndexOf('\n\n'), length: '\n\n'.length }
+  ].filter((candidate) => candidate.index >= STREAM_SEGMENT_MIN_BREAK)
+
+  if (!candidates.length) return -1
+  const best = candidates.reduce((latest, candidate) =>
+    candidate.index > latest.index ? candidate : latest
+  )
+  return best.index + best.length
+}
+
+function appendLiveTextSegments(segments: string[], text: string): string[] {
+  if (!text) return segments
+  const sealed = segments.slice(0, -1)
+  let tail = (segments.at(-1) ?? '') + text
+
+  while (tail.length >= STREAM_SEGMENT_SOFT_LIMIT) {
+    const splitAt = findSafeSplit(tail)
+    if (splitAt === -1) break
+    sealed.push(tail.slice(0, splitAt))
+    tail = tail.slice(splitAt)
+  }
+
+  return tail ? [...sealed, tail] : sealed
+}
 
 function findAssistantIndex(messages: Message[], assistantMessageId?: string | null): number {
   if (assistantMessageId) {
@@ -16,11 +58,13 @@ function findAssistantIndex(messages: Message[], assistantMessageId?: string | n
 }
 
 function commitLiveText(message: Message): Message {
-  if (!message.liveText) return message
+  const text = liveTextValue(message)
+  if (!text) return message
   return {
     ...message,
     liveText: undefined,
-    parts: appendText(message.parts ?? [], message.liveText)
+    liveTextSegments: undefined,
+    parts: appendText(message.parts ?? [], text)
   }
 }
 
@@ -39,10 +83,12 @@ export function applyStreamEventToMessages(
   const out = messages.slice()
 
   if (event.type === 'delta') {
+    const nextLiveSegments = appendLiveTextSegments(liveSegments(message), event.text)
     out[index] = {
       ...message,
       text: message.text + event.text,
-      liveText: (message.liveText ?? '') + event.text
+      liveText: (message.liveText ?? '') + event.text,
+      liveTextSegments: nextLiveSegments
     }
     return out
   }

@@ -2,7 +2,6 @@ import type { TabManager } from '../../TabManager'
 import type { PageExtractor } from '../../extract/PageExtractor'
 import type { KeyStore } from '../KeyStore'
 import type { ToolContext, ToolOutcome } from '../browserTools'
-import { shouldUseDirectBrowserTools } from '../../../../shared/types'
 import { digestPage } from '../PageDigest'
 import { runDeepSearch } from '../deepSearch'
 import { runUnifiedSearch } from '../unifiedSearch'
@@ -161,11 +160,21 @@ export async function runSearchOpenTool(
   }
 }
 
+/**
+ * Decide whether `search` should also navigate the active visible tab to the
+ * best probed hit when the model omits `navigate_visible`.
+ *
+ * Previously this also short-circuited on `shouldUseDirectBrowserTools`, which
+ * fires on the bare word "tab", "browser", "url", etc. and on any http(s)
+ * URL in the user's text. That treated every "talk about the browser" turn
+ * as authorization to abruptly redirect the visible tab — too broad, and the
+ * source of the "the search result keeps showing up in my tab" complaint. We
+ * now require an explicit "open/navigate/visit/load/go to ..." verb phrase.
+ */
 function resolveSearchNavigationMode(args: Record<string, any>, ctx: ToolContext): boolean {
   if (typeof args.navigate_visible === 'boolean') return args.navigate_visible
   const latestUserText = ctx.latestUserText ?? ''
   return (
-    shouldUseDirectBrowserTools(latestUserText) ||
     /\b(?:open|navigate|visit|load|go to)\b.{0,80}\b(?:result|page|site|tab|link|url|browser)\b/i.test(latestUserText) ||
     /\b(?:open|navigate|visit|load|go to)\s+(?:it|them|that|those|the best result|the first result)\b/i.test(latestUserText)
   )

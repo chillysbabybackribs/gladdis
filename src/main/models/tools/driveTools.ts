@@ -3,9 +3,18 @@ import type { ToolOutcome } from '../browserTools'
 import { cap, safeJson } from './toolUtils'
 import { executeGrepInTab, summarizeNetworkCapture } from './perceiveTools'
 import { clampInt } from './toolUtils'
+import type { AxSnapshotNode } from '../../extract/axTree'
+import {
+  axNodeCenter,
+  axRefTargetError,
+  describeAxRefMatch,
+  isAxRefQuery,
+  refreshAxNodeBounds
+} from '../../extract/axRef'
 
 export interface DriveToolsDeps {
   tabs: TabManager
+  resolveAxRef?: (tabId: string, query: string) => AxSnapshotNode | null
 }
 
 export interface DriveToolsContext {
@@ -64,19 +73,38 @@ export async function runNavigate(
     return { ok: false, text: 'navigate: "url" is required.' }
   }
 
+  // Strict parse BEFORE handing off to TabManager. Without this, a model that
+  // mistakenly called navigate({ url: "cursor docs" }) used to silently load
+  // the DDG SERP for "cursor docs" into the visible tab (via the URL-bar
+  // smart-input fallback). Surface the mistake as an actionable tool error
+  // instead so the model retries with search().
+  let parsedUrl: string
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error('non-http(s) scheme')
+    }
+    parsedUrl = parsed.toString()
+  } catch {
+    return {
+      ok: false,
+      text: `navigate: ${JSON.stringify(rawUrl)} is not an http(s) URL. Use search() if you meant to look it up.`
+    }
+  }
+
   const shouldWait = args.wait === undefined ? true : !!args.wait
   const timeoutMs = clampInt(args.timeout_ms, 500, 8_000, 2_000)
   const armed = deps.tabs.takeArmedNetworkCapture(ctx.tabId)
   let network = null
   if (armed) {
-    network = await deps.tabs.navigateWithNetworkCapture(ctx.tabId, rawUrl, {
+    network = await deps.tabs.navigateWithNetworkCapture(ctx.tabId, parsedUrl, {
       ...armed,
       waitForNavigation: shouldWait,
       timeoutMs,
       quietWindowMs: shouldWait ? undefined : 250
     })
   } else {
-    await deps.tabs.navigate(ctx.tabId, rawUrl, { wait: shouldWait, timeoutMs })
+    await deps.tabs.navigate(ctx.tabId, parsedUrl, { wait: shouldWait, timeoutMs })
   }
 
   // Free calibration signal for the model's next read: how text-heavy this page
@@ -111,10 +139,10 @@ export async function runNavigate(
       ok: true,
       text:
         (shouldWait
-          ? `Navigated to ${rawUrl} (waited up to ${timeoutMs}ms).`
-          : `Navigating to ${rawUrl}.`) + sizeHint,
+          ? `Navigated to ${parsedUrl} (waited up to ${timeoutMs}ms).`
+          : `Navigating to ${parsedUrl}.`) + sizeHint,
       structuredContent: {
-        url: rawUrl,
+        url: parsedUrl,
         wait: shouldWait,
         timeoutMs,
         pageTextChars
@@ -129,8 +157,42 @@ export async function runClickXY(
   args: Record<string, any>,
   ctx: DriveToolsContext
 ): Promise<ToolOutcome> {
+  const refArg = typeof args.ref === 'string' ? args.ref.trim() : ''
+  if (refArg) {
+    const resolved = await resolveAxRefTarget(deps, ctx.tabId, refArg)
+    if (!resolved.ok) {
+      return { ok: false, text: `click_xy: ${resolved.text}` }
+    }
+    const { node, x, y } = resolved
+    const { network } = await deps.tabs.runWithPendingNetworkCapture(
+      ctx.tabId,
+      () => dispatchClick(deps.tabs, ctx.tabId, x, y)
+    )
+    return withOptionalNetworkCapture(
+      {
+        ok: true,
+        text: `click_xy successful. ${describeAxRefMatch(node)} at coordinate (${x}, ${y}).`,
+        structuredContent: {
+          x,
+          y,
+          ref: node.ref,
+          role: node.role,
+          name: node.name,
+          ...(node.frameLabel ? { frameLabel: node.frameLabel } : {})
+        }
+      },
+      network
+    )
+  }
+
   const x = Number(args.x)
   const y = Number(args.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return {
+      ok: false,
+      text: 'click_xy: provide numeric x and y, or ref from read_a11y (e.g. @a1).'
+    }
+  }
   const { network } = await deps.tabs.runWithPendingNetworkCapture(
     ctx.tabId,
     () => dispatchClick(deps.tabs, ctx.tabId, x, y)
@@ -212,13 +274,42 @@ export async function runGrepClick(
     return { ok: false, text: 'grep_click: query must be a non-empty string.' }
   }
 
-  const type = args.type || 'text'
-  if (type !== 'text' && type !== 'regex' && type !== 'selector') {
-    return { ok: false, text: 'grep_click: type must be "text", "regex", or "selector".' }
+  const explicitType = args.type || 'text'
+  const type = isAxRefQuery(query, explicitType) ? 'ref' : explicitType
+  if (type !== 'text' && type !== 'regex' && type !== 'selector' && type !== 'ref') {
+    return { ok: false, text: 'grep_click: type must be "text", "regex", "selector", or "ref".' }
   }
   const caseSensitive = !!args.caseSensitive
 
   try {
+    if (type === 'ref') {
+      const resolved = await resolveAxRefTarget(deps, ctx.tabId, query)
+      if (!resolved.ok) {
+        return { ok: false, text: `grep_click: ${resolved.text}` }
+      }
+      const { node, x, y } = resolved
+      const { network } = await deps.tabs.runWithPendingNetworkCapture(
+        ctx.tabId,
+        () => dispatchClick(deps.tabs, ctx.tabId, x, y)
+      )
+      return withOptionalNetworkCapture({
+        ok: true,
+        text: `grep_click successful. ${describeAxRefMatch(node)} at coordinate (${x}, ${y}).`,
+        structuredContent: {
+          query,
+          type,
+          caseSensitive,
+          coordinates: { x, y },
+          match: {
+            ref: node.ref,
+            role: node.role,
+            name: node.name,
+            ...(node.frameLabel ? { frameLabel: node.frameLabel } : {})
+          }
+        }
+      }, network)
+    }
+
     const runResult = await executeGrepInTab(deps.tabs, ctx.tabId, query, type, caseSensitive, 2)
     if (!runResult.success) {
       return { ok: false, text: `grep_click: search execution failed: ${runResult.error}` }
@@ -273,13 +364,43 @@ export async function runGrepType(
   }
   const text = String(args.text ?? '')
 
-  const type = args.type || 'text'
-  if (type !== 'text' && type !== 'regex' && type !== 'selector') {
-    return { ok: false, text: 'grep_type: type must be "text", "regex", or "selector".' }
+  const explicitType = args.type || 'text'
+  const type = isAxRefQuery(query, explicitType) ? 'ref' : explicitType
+  if (type !== 'text' && type !== 'regex' && type !== 'selector' && type !== 'ref') {
+    return { ok: false, text: 'grep_type: type must be "text", "regex", "selector", or "ref".' }
   }
   const caseSensitive = !!args.caseSensitive
 
   try {
+    if (type === 'ref') {
+      const resolved = await resolveAxRefTarget(deps, ctx.tabId, query)
+      if (!resolved.ok) {
+        return { ok: false, text: `grep_type: ${resolved.text}` }
+      }
+      const { node, x, y } = resolved
+      const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+        await dispatchClick(deps.tabs, ctx.tabId, x, y)
+        await deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
+      })
+      return withOptionalNetworkCapture({
+        ok: true,
+        text: `grep_type successful. ${describeAxRefMatch(node)} at coordinate (${x}, ${y}).`,
+        structuredContent: {
+          query,
+          text,
+          type,
+          caseSensitive,
+          coordinates: { x, y },
+          match: {
+            ref: node.ref,
+            role: node.role,
+            name: node.name,
+            ...(node.frameLabel ? { frameLabel: node.frameLabel } : {})
+          }
+        }
+      }, network)
+    }
+
     const runResult = await executeGrepInTab(deps.tabs, ctx.tabId, query, type, caseSensitive, 2)
     if (!runResult.success) {
       return { ok: false, text: `grep_type: search execution failed: ${runResult.error}` }
@@ -348,6 +469,46 @@ async function dispatchClick(tabs: TabManager, tabId: string, x: number, y: numb
   await tabs.cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
   await tabs.cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', ...base })
   await tabs.cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', ...base })
+}
+
+async function resolveAxRefTarget(
+  deps: DriveToolsDeps,
+  tabId: string,
+  query: string
+): Promise<{ ok: true; node: AxSnapshotNode; x: number; y: number } | { ok: false; text: string }> {
+  if (!deps.resolveAxRef) {
+    return { ok: false, text: axRefTargetError(query, 'read_a11y has not been called on this tab') }
+  }
+  const node = deps.resolveAxRef(tabId, query)
+  if (!node) {
+    return { ok: false, text: axRefTargetError(query, 'ref is missing or stale after navigation') }
+  }
+  if (node.states.includes('disabled')) {
+    return { ok: false, text: `ref ${node.ref} is disabled.` }
+  }
+
+  let center = axNodeCenter(node)
+  if (!center && typeof node.backendDOMNodeId === 'number') {
+    const layout = (await deps.tabs.cdpSend(tabId, 'Page.getLayoutMetrics', {})) as {
+      cssVisualViewport?: { clientWidth?: number; clientHeight?: number }
+      cssLayoutViewport?: { clientWidth?: number; clientHeight?: number }
+    }
+    const viewport = layout.cssVisualViewport ?? layout.cssLayoutViewport ?? {}
+    await refreshAxNodeBounds(
+      (method, params) => deps.tabs.cdpSend(tabId, method, params),
+      node,
+      {
+        width: Math.round(viewport.clientWidth ?? 0),
+        height: Math.round(viewport.clientHeight ?? 0)
+      }
+    )
+    center = axNodeCenter(node)
+  }
+
+  if (!center) {
+    return { ok: false, text: axRefTargetError(query, `ref ${node.ref} has no clickable coordinates`) }
+  }
+  return { ok: true, node, x: center.x, y: center.y }
 }
 
 function normalizeStructuredValue(value: unknown): Record<string, unknown> | string | number | boolean | null | unknown[] {

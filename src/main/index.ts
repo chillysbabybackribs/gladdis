@@ -261,7 +261,13 @@ function registerIpc(): void {
   ipcMain.handle(IPC.TAB_CREATE, (_e, url?: string) => registry.tabs.create(url))
   ipcMain.handle(IPC.TAB_CLOSE, (_e, id: string) => registry.tabs.close(id))
   ipcMain.handle(IPC.TAB_SWITCH, (_e, id: string) => registry.tabs.switch(id))
-  ipcMain.handle(IPC.TAB_NAVIGATE, (_e, id: string, url: string) => registry.tabs.navigate(id, url))
+  ipcMain.handle(IPC.TAB_NAVIGATE, (_e, id: string, url: string) =>
+    // URL-bar input is the ONE place we want the "type words → DDG SERP, type
+    // bare host → https://host" smart-input rewrite. Every other navigate path
+    // (tool calls, search auto-navigate, deep-search probes) goes through the
+    // strict ensureNavigableUrl validation by default.
+    registry.tabs.navigate(id, url, { smartAddressBarInput: true })
+  )
   ipcMain.handle(IPC.TAB_BACK, (_e, id: string) => registry.tabs.back(id))
   ipcMain.handle(IPC.TAB_FORWARD, (_e, id: string) => registry.tabs.forward(id))
   ipcMain.handle(IPC.TAB_RELOAD, (_e, id: string) => registry.tabs.reload(id))

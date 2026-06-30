@@ -2,12 +2,45 @@ import { type WebContents } from 'electron'
 
 import { DEFAULT_URL, SEARCH_URL, ABOUT_BLANK, HTTP_URL } from './constants'
 
+/**
+ * URL-bar smart input: "github" → https://github.com, "rust async" → DDG SERP.
+ * This is the right behavior for a human typing into the address bar.
+ *
+ * IMPORTANT: do NOT call this from programmatic (agent / tool) navigation paths.
+ * The SERP-fallback arm would silently load DuckDuckGo's results page into the
+ * VISIBLE tab whenever a tool passed a non-URL string (e.g. the model called
+ * `navigate({ url: "cursor docs" })`), which is exactly the "DDG initial search
+ * page with the query typed and searched" leak users see. Tool callers must use
+ * {@link ensureNavigableUrl} and surface a clean error instead.
+ */
 export function normalizeAddress(input: string): string {
   const value = input.trim()
   if (!value) return DEFAULT_URL
   if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value
   if (isLikelyHostname(value)) return `https://${value}`
   return `${SEARCH_URL}${encodeURIComponent(value)}`
+}
+
+/**
+ * Strict URL-or-throw used by every programmatic navigation. Accepts
+ * about:blank and any http/https URL; rejects everything else so a bad input
+ * cannot silently land in the DDG SERP fallback of {@link normalizeAddress}.
+ */
+export function ensureNavigableUrl(input: string): string {
+  const value = input.trim()
+  if (value === ABOUT_BLANK) return value
+  try {
+    const parsed = new URL(value)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString()
+    }
+  } catch {
+    /* fall through to the explicit error below */
+  }
+  throw new Error(
+    `navigate: ${JSON.stringify(input)} is not a navigable http(s) URL. ` +
+      `Use search() if you meant to look it up.`
+  )
 }
 
 export function isLikelyHostname(value: string): boolean {
@@ -83,12 +116,26 @@ export function waitForNavigationSettled(
   })
 }
 
+export interface NavigateToOptions {
+  wait?: boolean
+  timeoutMs?: number
+  /**
+   * Opt-in URL-bar behavior: rewrite non-URL input as a DuckDuckGo SERP and
+   * bare hostnames as https URLs (see {@link normalizeAddress}). Default false
+   * so every programmatic / tool-driven navigation gets the strict
+   * {@link ensureNavigableUrl} validation instead.
+   */
+  smartAddressBarInput?: boolean
+}
+
 export async function navigateTo(
   wc: WebContents,
   url: string,
-  opts?: { wait?: boolean; timeoutMs?: number }
+  opts?: NavigateToOptions
 ): Promise<void> {
-  const normalized = normalizeAddress(url)
+  const normalized = opts?.smartAddressBarInput
+    ? normalizeAddress(url)
+    : ensureNavigableUrl(url)
   const settlePromise =
     opts?.wait === false ? Promise.resolve() : waitForNavigationSettled(wc, opts?.timeoutMs)
   wc.loadURL(normalized)

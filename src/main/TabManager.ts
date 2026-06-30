@@ -46,6 +46,8 @@ type NavigationNetworkCaptureOptions = Omit<WatchNetworkOptions, 'windowMs'> & {
   timeoutMs?: number
   quietWindowMs?: number
   waitForNavigation?: boolean
+  /** Opt-in to URL-bar smart-input rewriting; see navigateTo for semantics. */
+  smartAddressBarInput?: boolean
 }
 
 type PendingNetworkCaptureArm = WatchNetworkOptions
@@ -301,7 +303,11 @@ export class TabManager {
     this.onChange()
   }
 
-  navigate(id: string, url: string, opts?: { wait?: boolean; timeoutMs?: number }): Promise<void> {
+  navigate(
+    id: string,
+    url: string,
+    opts?: { wait?: boolean; timeoutMs?: number; smartAddressBarInput?: boolean }
+  ): Promise<void> {
     const tab = this.tabs.get(id)
     if (!tab) return Promise.resolve()
     return navigateTo(tab.view.webContents, url, opts)
@@ -571,7 +577,8 @@ export class TabManager {
       const shouldWaitForNavigation = opts.waitForNavigation !== false
       await navigateTo(tab.view.webContents, url, {
         wait: shouldWaitForNavigation,
-        timeoutMs: opts.timeoutMs ?? 10_000
+        timeoutMs: opts.timeoutMs ?? 10_000,
+        smartAddressBarInput: opts.smartAddressBarInput === true
       })
       const quietWindowMs = opts.quietWindowMs ?? (shouldWaitForNavigation ? 750 : 250)
       if (networkEnabled) {

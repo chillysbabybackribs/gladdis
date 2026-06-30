@@ -9,7 +9,8 @@ export const SEARCH_TOOLS: ToolDef[] = [
   {
     name: 'search',
     description:
-      'Find web pages and evidence. For browser-oriented tasks it also opens the best result in the visible tab; otherwise it keeps the visible tab unchanged unless `navigate_visible` is true.',
+      'Find web pages and evidence. Keeps the visible tab unchanged by default. ' +
+      'Set `navigate_visible: true` (or omit it when the user explicitly asks to "open/visit/navigate to the result/page/site") to also load the best hit in the visible tab.',
     parameters: {
       type: 'object',
       properties: {
@@ -21,7 +22,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
           type: 'boolean',
           description:
             'If true, navigates the active visible browser tab to the best search result. ' +
-            'If omitted, Gladdis auto-navigates for browser-oriented tasks and stays background-only for pure research.'
+            'If omitted, Gladdis auto-navigates only when the user explicitly asked to open/visit/navigate to a result; otherwise it stays background-only.'
         }
       },
       required: ['query']
@@ -114,13 +115,13 @@ export const SEARCH_TOOLS: ToolDef[] = [
               type: 'object',
               properties: {
                 preflightMs: { type: 'number' },
-                dispatchMs: { type: 'number' },
+                navigateCaptureMs: { type: 'number' },
                 readableMs: { type: 'number' },
                 extractMs: { type: 'number' },
                 digestMs: { type: 'number' },
                 totalMs: { type: 'number' }
               },
-              required: ['preflightMs', 'dispatchMs', 'readableMs', 'extractMs', 'digestMs', 'totalMs']
+              required: ['preflightMs', 'navigateCaptureMs', 'readableMs', 'extractMs', 'digestMs', 'totalMs']
             }
           },
           required: ['requestedUrl', 'finalUrl', 'pageUrl', 'viewportOnly', 'timings']
@@ -160,13 +161,13 @@ export const SEARCH_TOOLS: ToolDef[] = [
           type: 'object',
           properties: {
             preflightMs: { type: 'number' },
-            dispatchMs: { type: 'number' },
+            navigateCaptureMs: { type: 'number' },
             readableMs: { type: 'number' },
             extractMs: { type: 'number' },
             digestMs: { type: 'number' },
             totalMs: { type: 'number' }
           },
-          required: ['preflightMs', 'dispatchMs', 'readableMs', 'extractMs', 'digestMs', 'totalMs']
+          required: ['preflightMs', 'navigateCaptureMs', 'readableMs', 'extractMs', 'digestMs', 'totalMs']
         }
       },
       required: ['requestedUrl', 'finalUrl', 'pageUrl', 'viewportOnly', 'timings']

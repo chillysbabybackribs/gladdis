@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type {
   ClaudeCodeStatus,
   CodexStatus,
+  CursorStatus,
   KeyStatus,
   ModelOption,
   SavedAgent
@@ -23,11 +24,14 @@ interface Props {
   codexStatus: CodexStatus | null
   /** Claude Code usability (CLI install + login); null while probing. */
   claudeCodeStatus: ClaudeCodeStatus | null
+  /** Cursor Agent usability (CLI install + login); null while probing. */
+  cursorStatus: CursorStatus | null
 }
 
 const PROVIDERS = [
   { id: 'codex', label: 'Codex' },
   { id: 'claudecode', label: 'Claude Code' },
+  { id: 'cursor', label: 'Cursor' },
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'google', label: 'Gemini' },
   { id: 'openai', label: 'OpenAI' },
@@ -48,7 +52,8 @@ export function ModelPicker({
   models,
   keyStatus,
   codexStatus,
-  claudeCodeStatus
+  claudeCodeStatus,
+  cursorStatus
 }: Props) {
   const [open, setOpen] = useState(false)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
@@ -79,6 +84,8 @@ export function ModelPicker({
         return !!codexStatus?.installed && !!codexStatus?.authenticated
       case 'claudecode':
         return !!claudeCodeStatus?.installed && !!claudeCodeStatus?.authenticated
+      case 'cursor':
+        return !!cursorStatus?.installed && !!cursorStatus?.authenticated
       case 'anthropic':
         return keyStatus.anthropic
       case 'google':
@@ -104,6 +111,11 @@ export function ModelPicker({
       if (!claudeCodeStatus) return '…'
       if (!claudeCodeStatus.installed) return 'not installed'
       if (!claudeCodeStatus.authenticated) return 'log in'
+    }
+    if (m.provider === 'cursor') {
+      if (!cursorStatus) return '…'
+      if (!cursorStatus.installed) return 'not installed'
+      if (!cursorStatus.authenticated) return 'log in'
     }
     return 'no key'
   }

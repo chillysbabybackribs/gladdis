@@ -1,5 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { normalizeWatchNetworkArgs, runWatchNetwork } from './perceiveTools'
+import { normalizeWatchNetworkArgs, runWatchNetwork, type PerceiveToolsDeps } from './perceiveTools'
+
+function mockPerceiveDeps(overrides: Partial<PerceiveToolsDeps> & Pick<PerceiveToolsDeps, 'tabs'>): PerceiveToolsDeps {
+  return {
+    extractor: {} as any,
+    pageCache: new Map(),
+    pageCacheLimit: 0,
+    pageCacheTtlMs: 0,
+    a11yCache: new Map(),
+    a11yCacheLimit: 0,
+    a11yCacheTtlMs: 0,
+    setAxRefStore: () => {},
+    appCapture: null,
+    getPageCacheStats: () => ({ hits: 0, misses: 0, expired: 0, evictions: 0, size: 0, limit: 0, ttlMs: 0 }),
+    getA11yCacheStats: () => ({ hits: 0, misses: 0, expired: 0, evictions: 0, size: 0, limit: 0, ttlMs: 0 }),
+    recordPageCacheEvent: () => {},
+    recordA11yCacheEvent: () => {},
+    ...overrides
+  }
+}
 
 describe('normalizeWatchNetworkArgs', () => {
   it('applies defaults', () => {
@@ -137,18 +156,9 @@ describe('runWatchNetwork', () => {
       captured: [],
       bodies: []
     }))
-    const outcome = await runWatchNetwork({
-      tabs: { watchNetwork, armNextNetworkCapture } as any,
-      extractor: {} as any,
-      pageCache: new Map(),
-      pageCacheLimit: 0,
-      pageCacheTtlMs: 0,
-      appCapture: null,
-      getPageCacheStats: () => ({ hits: 0, misses: 0, expired: 0, evictions: 0, size: 0, limit: 0, ttlMs: 0 }),
-      recordPageCacheEvent: () => {
-        // no-op
-      }
-    },
+    const outcome = await runWatchNetwork(mockPerceiveDeps({
+      tabs: { watchNetwork, armNextNetworkCapture } as any
+    }),
     {
       url_filter: '/api/',
       window_ms: 7_000,
@@ -201,18 +211,9 @@ describe('runWatchNetwork', () => {
       ],
       bodies: []
     }))
-    const outcome = await runWatchNetwork({
-      tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any,
-      extractor: {} as any,
-      pageCache: new Map(),
-      pageCacheLimit: 0,
-      pageCacheTtlMs: 0,
-      appCapture: null,
-      getPageCacheStats: () => ({ hits: 0, misses: 0, expired: 0, evictions: 0, size: 0, limit: 0, ttlMs: 0 }),
-      recordPageCacheEvent: () => {
-        // no-op
-      }
-    },
+    const outcome = await runWatchNetwork(mockPerceiveDeps({
+      tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any
+    }),
     {
       mode: 'passive',
       url_filter: '/api/',
@@ -274,18 +275,9 @@ describe('runWatchNetwork', () => {
     })
 
     const outcome = await runWatchNetwork(
-      {
-        tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any,
-        extractor: {} as any,
-        pageCache: new Map(),
-        pageCacheLimit: 0,
-        pageCacheTtlMs: 0,
-        appCapture: null,
-        getPageCacheStats: () => ({ hits: 0, misses: 0, expired: 0, evictions: 0, size: 0, limit: 0, ttlMs: 0 }),
-        recordPageCacheEvent: () => {
-          // no-op
-        }
-      },
+      mockPerceiveDeps({
+        tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any
+      }),
       { mode: 'passive' },
       'tab-1'
     )
@@ -298,18 +290,9 @@ describe('runWatchNetwork', () => {
     const watchNetwork = vi.fn(async () => ({ totalSeen: 0, captured: [], bodies: [] }))
 
     const outcome = await runWatchNetwork(
-      {
-        tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any,
-        extractor: {} as any,
-        pageCache: new Map(),
-        pageCacheLimit: 0,
-        pageCacheTtlMs: 0,
-        appCapture: null,
-        getPageCacheStats: () => ({ hits: 0, misses: 0, expired: 0, evictions: 0, size: 0, limit: 0, ttlMs: 0 }),
-        recordPageCacheEvent: () => {
-          // no-op
-        }
-      },
+      mockPerceiveDeps({
+        tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any
+      }),
       {
         window_ms: 'not-a-number'
       },

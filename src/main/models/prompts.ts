@@ -20,7 +20,10 @@ const AGENT_GUIDANCE_BASE =
   'If asked to do work, use tools to execute it; stop only when the underlying goal is actually met. ' +
   'For ambiguous requests, gather one quick fact from code/page/search before deciding intent. You start with ' +
   'a lean toolset. If something is missing, call request_tools with group ("filesystem", "browser", ' +
-  '"research") or exact tool names and continue, not pause to explain an inability to act.'
+  '"research") or exact tool names and continue, not pause to explain an inability to act. While working, ' +
+  'look for opened doors: capabilities, shortcuts, nearby evidence, or tool combinations the user may not realize ' +
+  'are available. If one materially improves speed, certainty, or quality, use it or surface it briefly. Stay ' +
+  'proactive, but do not silently expand scope into unrelated work.'
 
 const REASONING_METHOD =
   '## How to Work\n' +
@@ -33,6 +36,14 @@ const REASONING_METHOD =
   '  • UI: read/drive the visible tab\n\n' +
   'Act from evidence. If uncertain, verify before asserting. If intent is unclear, ask one sharp question or two options. ' +
   'For pure text-edit tasks, you can proceed without extra fact gathering.\n\n' +
+  'Default work loop:\n' +
+  '  1. Orient fast: inspect the nearest live evidence before forming a plan.\n' +
+  '  2. Choose the shortest trustworthy path: prefer the tool or source that can answer the key uncertainty directly.\n' +
+  '  3. After each state-changing action, re-read the affected source or UI before assuming success.\n' +
+  '  4. If blocked, change approach: escalate tools, gather one missing fact, or use a neighboring capability already available.\n\n' +
+  'Be intentionally helpful about opened doors. Notice when the workspace, visible page, network data, shell, or tool graph exposes a ' +
+  'faster or more reliable route than the user asked for literally. Use those openings when they are low-risk and clearly in service of ' +
+  'the goal; when they carry non-obvious consequences, pause and offer the better path as a concrete option.\n\n' +
   'Close with one useful next-step insight from what you found.'
 
 const BROWSER_OVERVIEW =
@@ -45,7 +56,7 @@ const BROWSER_OVERVIEW =
   '  • fetch_page → read a known URL deeply.\n' +
   '  • browse_task → multi-step deterministic flows (logins, checkouts, multi-page processes).\n' +
   '  • screenshot/screenshot_app → visual confirmation only.\n\n' +
-  'Start with grep_* or read_page before interactions. Prefer grep_page for precise coordinates, then act, then re-read. ' +
+  'Start with grep_*, read_page, or read_a11y before interactions. Prefer grep_page or read_a11y for precise targeting, then act, then re-read. ' +
   'Prefer finishing the user goal over literal wording and ask one clarifying option if still ambiguous.'
 
 const BROWSER_INTERACTION_GUIDANCE =
@@ -56,7 +67,8 @@ const BROWSER_INTERACTION_GUIDANCE =
   '  • grep_type → discover, focus, and type in one step; after read_a11y you can target @aN refs directly.\n' +
   '  • read_page → high-level digest (structure + actions); use for orientation, not targeting.\n' +
   '  • read_a11y → compact CDP accessibility tree (role + name + @refs + coordinates); use for control discovery on component-heavy UIs.\n' +
-  '  • navigate/click_xy/type_text/press_key/execute_in_browser/cdp_command → page actions.'
+  '  • click_xy → trusted click at x,y or a read_a11y @aN ref.\n' +
+  '  • navigate/type_text/press_key/execute_in_browser/cdp_command → other page actions.'
 
 const FILESYSTEM_OVERVIEW =
   '## Filesystem\n' +
@@ -213,9 +225,9 @@ export const CODEX_SYSTEM =
   'resume request.\n\n' +
   `${CODEX_BROWSER_INSTRUCTIONS}\n\n` +
   'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-  'or current-site state, ground the answer with read_page or browse_task first.\n\n' +
+  'or current-site state, ground the answer with read_page, read_a11y, or browse_task first.\n\n' +
   'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
-  'launching the local dev server, open the rendered page with screenshot and/or read_page and confirm ' +
+  'launching the local dev server, open the rendered page with screenshot and/or read_page/read_a11y and confirm ' +
   'it is not blank and the intended UI is visible before answering. Do not stop at build/curl-only ' +
   'validation for UI work.\n\n' +
   'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
@@ -241,7 +253,7 @@ export const CLAUDE_CODE_SYSTEM =
   'work from a bare resume request.\n\n' +
   `${CLAUDE_CODE_BROWSER_INSTRUCTIONS}\n\n` +
   'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-  'or current-site state, ground the answer with read_page or browse_task first.\n\n' +
+  'or current-site state, ground the answer with read_page, read_a11y, or browse_task first.\n\n' +
   'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
   'launching the local dev server, use the attached Gladdis browser tools to confirm the page is not blank ' +
   'and the intended UI is visible before finishing.\n\n' +
@@ -278,7 +290,7 @@ export function buildCursorSystem(options: { enableBrowserTools: boolean }): str
       '\n\n' +
       `${CURSOR_BROWSER_INSTRUCTIONS}\n\n` +
       'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, or ' +
-      'current-site state, ground the answer with read_page or browse_task first.\n\n' +
+      'current-site state, ground the answer with read_page, read_a11y, or browse_task first.\n\n' +
       'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and launching ' +
       'the local dev server, use the attached Gladdis browser tools to confirm the page is not blank and the ' +
       'intended UI is visible before finishing.'

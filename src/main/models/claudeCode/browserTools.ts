@@ -46,8 +46,13 @@ export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
     outputSchema: tool.outputSchema
   }))
 
-// Cursor already has native local repo/file/shell tools, so keep the attached
-// Gladdis MCP surface focused on web/page work plus conversation memory.
+// Cursor already has native local repo/file/shell tools, so the attached Gladdis
+// MCP surface stays focused on web/page work, conversation memory, and Gladdis's
+// own bounded repo-intelligence helpers (which are NOT redundant with native
+// grep — they return architecture-aware, token-capped digests). It deliberately
+// omits raw FS/shell, which the CLI runtime supplies natively.
+// Kept in parity with CODEX_BROWSER_TOOL_NAMES — see the surface-parity guard in
+// toolSurfaceCoverage.test.ts.
 export const CURSOR_MCP_TOOL_NAMES = new Set([
   'recall_history',
   'memory_write',
@@ -55,6 +60,12 @@ export const CURSOR_MCP_TOOL_NAMES = new Set([
   'memory_list',
   'memory_forget',
   'memory_create_task',
+  'repo_overview',
+  'search_repo',
+  'repo_grep_task',
+  'read_spans',
+  'research_dossier',
+  'verify_change',
   'search',
   'search_open',
   'deep_search',

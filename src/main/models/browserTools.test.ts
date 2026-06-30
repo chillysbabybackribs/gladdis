@@ -797,6 +797,137 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('second exact turn')
   })
 
+  it('routes read_a11y through CDP accessibility capture and returns a compact digest', async () => {
+    const cdpSend = vi.fn(async (_tabId: string, method: string) => {
+      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.enable' || method === 'DOM.disable') {
+        return {}
+      }
+      if (method === 'Page.getFrameTree') {
+        return {
+          frameTree: {
+            frame: { id: 'main', url: 'https://example.com' },
+            childFrames: []
+          }
+        }
+      }
+      if (method === 'Accessibility.getFullAXTree') {
+        return {
+          nodes: [
+            { nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }
+          ]
+        }
+      }
+      if (method === 'Page.getLayoutMetrics') {
+        return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
+      }
+      if (method === 'DOM.getBoxModel') {
+        return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
+      }
+      return {}
+    })
+    const tabs = {
+      list: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com' }],
+      getTabUrl: () => 'https://example.com',
+      cdpSend
+    }
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('read_a11y', { focus: 'sign' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('SOURCE: CDP Accessibility.getFullAXTree')
+    expect(result.text).toContain('@a1')
+    expect(result.text).toContain('Sign in')
+    expect(result.text).toContain('[read_a11y cache]')
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Accessibility.getFullAXTree', { frameId: 'main' })
+  })
+
+  it('routes grep_click through read_a11y refs', async () => {
+    const cdpSend = vi.fn(async (_tabId: string, method: string, params?: Record<string, unknown>) => {
+      if (method.startsWith('Input.')) return {}
+      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.enable' || method === 'DOM.disable') {
+        return {}
+      }
+      if (method === 'Page.getFrameTree') {
+        return { frameTree: { frame: { id: 'main', url: 'https://example.com' }, childFrames: [] } }
+      }
+      if (method === 'Accessibility.getFullAXTree') {
+        return {
+          nodes: [
+            { nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }
+          ]
+        }
+      }
+      if (method === 'Page.getLayoutMetrics') {
+        return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
+      }
+      if (method === 'DOM.getBoxModel') {
+        return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
+      }
+      return {}
+    })
+    const tabs = {
+      list: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com' }],
+      getTabUrl: () => 'https://example.com',
+      cdpSend,
+      runWithPendingNetworkCapture: async (_id: string, action: () => Promise<unknown> | unknown) => ({
+        value: await action(),
+        network: null
+      })
+    }
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    await tools.run('read_a11y', {}, { tabId: 'tab-1' })
+    const result = await tools.run('grep_click', { query: '@a1' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('@a1')
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 140, y: 220 }))
+  })
+
+  it('routes click_xy through read_a11y refs', async () => {
+    const cdpSend = vi.fn(async (_tabId: string, method: string) => {
+      if (method.startsWith('Input.')) return {}
+      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.enable' || method === 'DOM.disable') {
+        return {}
+      }
+      if (method === 'Page.getFrameTree') {
+        return { frameTree: { frame: { id: 'main', url: 'https://example.com' }, childFrames: [] } }
+      }
+      if (method === 'Accessibility.getFullAXTree') {
+        return {
+          nodes: [
+            { nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }
+          ]
+        }
+      }
+      if (method === 'Page.getLayoutMetrics') {
+        return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
+      }
+      if (method === 'DOM.getBoxModel') {
+        return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
+      }
+      return {}
+    })
+    const tabs = {
+      list: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com' }],
+      getTabUrl: () => 'https://example.com',
+      cdpSend,
+      runWithPendingNetworkCapture: async (_id: string, action: () => Promise<unknown> | unknown) => ({
+        value: await action(),
+        network: null
+      })
+    }
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    await tools.run('read_a11y', {}, { tabId: 'tab-1' })
+    const result = await tools.run('click_xy', { ref: '@a1' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('@a1')
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 140, y: 220 }))
+  })
+
   it('routes grep_page through the capability broker and returns grep results', async () => {
     const executeJavaScript = vi.fn(async () => ({
       success: true,

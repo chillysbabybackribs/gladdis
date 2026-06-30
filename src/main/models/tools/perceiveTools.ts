@@ -2,12 +2,20 @@ import type { TabManager } from '../../TabManager'
 import type { PageExtractor } from '../../extract/PageExtractor'
 import type { ToolOutcome } from '../browserTools'
 import { digestPage } from '../PageDigest'
+import { captureAxSnapshotForTab, digestAxSnapshot } from '../../extract/axTree'
 import type { CapturedNetworkBody, CapturedNetworkRequest } from '../../network/watchNetworkRecorder'
 import type { NetworkFilterSpec } from '../../network/watchNetworkRecorder'
 
 export interface ReadPageCacheEntry {
   pageUrl: string
   digest: string
+  capturedAt: number
+}
+
+export interface ReadA11yCacheEntry {
+  pageUrl: string
+  digest: string
+  snapshot: import('../../extract/axTree').AxSnapshot
   capturedAt: number
 }
 
@@ -28,9 +36,17 @@ export interface PerceiveToolsDeps {
   pageCache: Map<string, ReadPageCacheEntry>
   pageCacheLimit: number
   pageCacheTtlMs: number
+  /** Read-through digest cache for read_a11y. */
+  a11yCache: Map<string, ReadA11yCacheEntry>
+  a11yCacheLimit: number
+  a11yCacheTtlMs: number
+  /** Latest read_a11y snapshot per tab for @aN ref resolution in grep_click/grep_type/click_xy. */
+  setAxRefStore: (tabId: string, entry: ReadA11yCacheEntry) => void
   appCapture: (() => Promise<string>) | null
   getPageCacheStats: () => ReadPageCacheStats
+  getA11yCacheStats: () => ReadPageCacheStats
   recordPageCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') => void
+  recordA11yCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') => void
 }
 
 export async function runReadPage(
@@ -114,6 +130,132 @@ function normalizePageUrl(url: string): string {
 
 function appendReadPageCacheMetrics(digest: string, stats: ReadPageCacheStats): string {
   return `${digest}\n[read_page cache] size=${stats.size}/${stats.limit}, ttl=${stats.ttlMs}ms, hits=${stats.hits}, misses=${stats.misses}, expired=${stats.expired}, evictions=${stats.evictions}`
+}
+
+function appendA11yCacheMetrics(digest: string, stats: ReadPageCacheStats): string {
+  return `${digest}\n[read_a11y cache] size=${stats.size}/${stats.limit}, ttl=${stats.ttlMs}ms, hits=${stats.hits}, misses=${stats.misses}, expired=${stats.expired}, evictions=${stats.evictions}`
+}
+
+function a11yCacheKey(tabId: string, args: Record<string, any>): string {
+  return `${tabId}:${args.focus ?? ''}:${args.viewportOnly === true}:${args.interactiveOnly !== false}`
+}
+
+function storeAxRefs(deps: PerceiveToolsDeps, tabId: string, entry: ReadA11yCacheEntry): void {
+  deps.setAxRefStore(tabId, entry)
+}
+
+export async function runReadA11y(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string
+): Promise<ToolOutcome> {
+  try {
+    const focus = typeof args.focus === 'string' ? args.focus : undefined
+    const viewportOnly = args.viewportOnly === true
+    const interactiveOnly = args.interactiveOnly !== false
+    const cacheKey = a11yCacheKey(tabId, args)
+    const now = Date.now()
+    const currentUrl = normalizePageUrl(deps.tabs.getTabUrl(tabId))
+    const cached = deps.a11yCache.get(cacheKey)
+
+    if (cached) {
+      if (cached.pageUrl === currentUrl && now - cached.capturedAt <= deps.a11yCacheTtlMs) {
+        deps.recordA11yCacheEvent('hit')
+        storeAxRefs(deps, tabId, cached)
+        return {
+          ok: true,
+          text: appendA11yCacheMetrics(cached.digest, deps.getA11yCacheStats()),
+          structuredContent: {
+            pageUrl: cached.pageUrl,
+            title: cached.snapshot.title,
+            focus,
+            viewportOnly,
+            interactiveOnly,
+            totalSeen: cached.snapshot.totalSeen,
+            truncated: cached.snapshot.truncated,
+            cache: {
+              status: 'hit',
+              capturedAt: cached.capturedAt,
+              ...deps.getA11yCacheStats()
+            },
+            nodes: cached.snapshot.nodes.map((node) => ({
+              ref: node.ref,
+              role: node.role,
+              name: node.name,
+              value: node.value,
+              states: node.states,
+              inViewport: node.inViewport,
+              ...(node.bounds ? { bounds: node.bounds } : {}),
+              ...(node.frameLabel ? { frameLabel: node.frameLabel } : {})
+            }))
+          }
+        }
+      }
+      if (cached.pageUrl === currentUrl) {
+        deps.recordA11yCacheEvent('expired')
+      }
+      if (deps.a11yCache.delete(cacheKey)) {
+        deps.recordA11yCacheEvent('evicted')
+      }
+      deps.recordA11yCacheEvent('miss')
+    } else {
+      deps.recordA11yCacheEvent('miss')
+    }
+
+    const snapshot = await captureAxSnapshotForTab(deps.tabs, tabId, {
+      focus,
+      viewportOnly,
+      interactiveOnly
+    })
+    const digest = digestAxSnapshot(snapshot, { focus, viewportOnly, interactiveOnly })
+    const nowCaptured = Date.now()
+    const resolvedUrl = normalizePageUrl(snapshot.url || currentUrl)
+    const entry: ReadA11yCacheEntry = {
+      pageUrl: resolvedUrl,
+      digest,
+      snapshot,
+      capturedAt: nowCaptured
+    }
+
+    if (deps.a11yCache.size >= deps.a11yCacheLimit) {
+      const first = deps.a11yCache.keys().next().value
+      if (first !== undefined) deps.a11yCache.delete(first)
+      deps.recordA11yCacheEvent('evicted')
+    }
+    deps.a11yCache.set(cacheKey, entry)
+    storeAxRefs(deps, tabId, entry)
+
+    return {
+      ok: true,
+      text: appendA11yCacheMetrics(digest, deps.getA11yCacheStats()),
+      structuredContent: {
+        pageUrl: resolvedUrl,
+        title: snapshot.title,
+        focus,
+        viewportOnly,
+        interactiveOnly,
+        totalSeen: snapshot.totalSeen,
+        truncated: snapshot.truncated,
+        cache: {
+          status: 'miss',
+          capturedAt: nowCaptured,
+          ...deps.getA11yCacheStats()
+        },
+        nodes: snapshot.nodes.map((node) => ({
+          ref: node.ref,
+          role: node.role,
+          name: node.name,
+          value: node.value,
+          states: node.states,
+          inViewport: node.inViewport,
+          ...(node.bounds ? { bounds: node.bounds } : {}),
+          ...(node.frameLabel ? { frameLabel: node.frameLabel } : {})
+        }))
+      }
+    }
+  } catch (err: any) {
+    return { ok: false, text: `read_a11y error: ${err?.message ?? err}` }
+  }
 }
 
 export async function runScreenshot(

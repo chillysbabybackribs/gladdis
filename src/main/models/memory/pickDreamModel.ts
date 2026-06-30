@@ -120,6 +120,8 @@ export function providerAvailable(keyStatus: KeyStatus, provider: Provider): boo
       return keyStatus.codex
     case 'claudecode':
       return false
+    case 'cursor':
+      return false
     case 'anthropic':
       return keyStatus.anthropic
     case 'google':

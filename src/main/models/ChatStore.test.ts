@@ -53,13 +53,16 @@ describe('ChatStore search', () => {
       createdAt: 1,
       updatedAt: 10,
       codexThreadId: 'thread-codex-123',
+      cursorSessionId: 'cursor-session-123',
       messages: [
         { role: 'user', text: 'Keep this as local Gladdis history.' }
       ]
     } as any)
 
     expect(saved.codexThreadId).toBe('thread-codex-123')
+    expect(saved.cursorSessionId).toBe('cursor-session-123')
     expect(store.get('conv-1')?.codexThreadId).toBe('thread-codex-123')
+    expect(store.get('conv-1')?.cursorSessionId).toBe('cursor-session-123')
 
     const updated = store.save({
       id: 'conv-1',
@@ -73,6 +76,7 @@ describe('ChatStore search', () => {
     } as any)
 
     expect(updated.codexThreadId).toBe('thread-codex-123')
+    expect(updated.cursorSessionId).toBe('cursor-session-123')
   })
 })
 

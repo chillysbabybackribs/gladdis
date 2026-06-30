@@ -7,7 +7,7 @@ export interface CodexToolPolicyViolation {
 }
 
 const GLADDIS_BROWSER_GUIDANCE =
-  'Use the gladdis dynamic tools for browser viewing/testing: search, fetch_page, browse_task, read_page, grep_page, or screenshot.'
+  'Use the gladdis dynamic tools for browser viewing/testing: search, fetch_page, browse_task, read_page, read_a11y, grep_page, or screenshot.'
 
 /**
  * Codex may use its native shell/file tools for repo work, but browser viewing

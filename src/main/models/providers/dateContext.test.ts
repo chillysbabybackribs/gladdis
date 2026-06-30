@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { ChatMessage } from '../../../../shared/types'
-import { currentDatePreamble, withDateContext } from './dateContext'
+import { currentDatePreamble, withDateContext, prependDateContextToText } from './dateContext'
 
 const FIXED = new Date('2026-06-29T12:00:00Z')
 
@@ -56,5 +56,27 @@ describe('withDateContext', () => {
     const messages: ChatMessage[] = [{ role: 'assistant', content: 'system note' }]
     const out = withDateContext(messages, FIXED)
     expect(out).toBe(messages)
+  })
+})
+
+describe('prependDateContextToText', () => {
+  it('prepends the date preamble to the given text', () => {
+    const text = 'What is the latest version of React?'
+    const result = prependDateContextToText(text, FIXED)
+    expect(result).toContain('2026')
+    expect(result).toContain('June')
+    expect(result).toContain('What is the latest version of React?')
+    expect(result.startsWith('[Current date:')).toBe(true)
+  })
+
+  it('returns just the preamble when text is empty', () => {
+    const result = prependDateContextToText('', FIXED)
+    expect(result).toBe(currentDatePreamble(FIXED))
+  })
+
+  it('tells the model to search for time-sensitive info', () => {
+    const result = prependDateContextToText('What is the latest news?', FIXED)
+    expect(result.toLowerCase()).toContain('training data is older')
+    expect(result.toLowerCase()).toContain('search the web')
   })
 })

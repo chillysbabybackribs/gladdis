@@ -892,11 +892,23 @@ export function cursorToolPreview(toolCall: any): string {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
   const [firstKey, firstValue] = firstCursorToolEntry(payload)
   if (!firstValue || typeof firstValue !== 'object') return 'Tool completed.'
-  const toolName = normalizeCursorToolName(firstKey)
   const args = cursorToolArgs(toolCall)
   const description = firstTextValue(firstValue.description)
   const result = firstValue.result
   const ok = cursorToolOk(toolCall)
+
+  if (firstKey === 'mcpToolCall') {
+    const serverName = typeof firstValue.serverName === 'string' ? firstValue.serverName.trim() : ''
+    const mcpToolName = typeof firstValue.toolName === 'string' ? firstValue.toolName.trim() : ''
+    const qualified = serverName && mcpToolName ? `${serverName}.${mcpToolName}` : mcpToolName || 'tool'
+    const resultText = extractMcpToolResultText(mcpToolName, args, result, ok)
+    if (resultText) return resultText
+    const argPreview = summarizeArgs(args as Record<string, unknown>)
+    if (ok) return argPreview ? `${qualified}: ${argPreview}` : `${qualified} completed.`
+    return formatToolError(argPreview ? `${qualified}: ${argPreview}` : `${qualified} failed`)
+  }
+
+  const toolName = normalizeCursorToolName(firstKey)
   const resultText = extractToolResultText(toolName, args, result, ok)
   if (resultText) return resultText
 
@@ -1005,6 +1017,81 @@ function summarizeArgs(args: Record<string, unknown>): string {
   const method = typeof args.method === 'string' ? args.method.trim() : ''
   if (method) return method
   return ''
+}
+
+function extractMcpToolResultText(
+  toolName: string,
+  args: unknown,
+  result: unknown,
+  ok: boolean
+): string {
+  const argRecord = args && typeof args === 'object' ? args as Record<string, unknown> : {}
+  const scope = summarizeArgs(argRecord)
+  const body = compactPreview(extractMcpResultBody(result))
+  const qualified = toolName ? `gladdis.${toolName}` : 'gladdis.tool'
+
+  if (toolName === 'read_page' || toolName === 'read_a11y' || toolName === 'grep_page') {
+    if (body) return ok ? body : formatToolError(scope ? prefixScope(scope, body) : body)
+    if (ok) return scope ? `${qualified}: ${scope}` : `${qualified} completed.`
+    return formatToolError(scope || `${qualified} failed`)
+  }
+
+  if (toolName === 'grep_click' || toolName === 'grep_type' || toolName === 'click_xy') {
+    if (body) return ok ? body : formatToolError(scope ? prefixScope(scope, body) : body)
+    if (ok) return scope ? `${qualified}: ${scope}` : `${qualified} completed.`
+    return formatToolError(scope || `${qualified} failed`)
+  }
+
+  if (toolName === 'navigate' || toolName === 'fetch_page') {
+    const url = typeof argRecord.url === 'string' ? argRecord.url.trim() : scope
+    if (body) return ok ? body : formatToolError(url ? prefixScope(url, body) : body)
+    if (ok) return url ? `Navigated to ${url}` : `${qualified} completed.`
+    return formatToolError(url || `${qualified} failed`)
+  }
+
+  if (toolName === 'search' || toolName === 'search_open' || toolName === 'deep_search') {
+    const query = typeof argRecord.query === 'string' ? argRecord.query.trim() : scope
+    if (body) return ok ? body : formatToolError(query ? prefixScope(query, body) : body)
+    if (ok) return query ? `Searched for ${query}` : `${qualified} completed.`
+    return formatToolError(query || `${qualified} failed`)
+  }
+
+  if (toolName === 'screenshot' || toolName === 'screenshot_app') {
+    if (body) return ok ? body : formatToolError(body)
+    return ok ? 'Screenshot captured.' : formatToolError(`${qualified} failed`)
+  }
+
+  if (toolName.startsWith('memory_')) {
+    if (body) return ok ? body : formatToolError(body)
+    if (ok) return scope ? `${qualified}: ${scope}` : `${qualified} completed.`
+    return formatToolError(scope || `${qualified} failed`)
+  }
+
+  if (body) return ok ? body : formatToolError(scope ? prefixScope(scope, body) : body)
+  if (ok) return scope ? `${qualified}: ${scope}` : `${qualified} completed.`
+  return formatToolError(scope || `${qualified} failed`)
+}
+
+function extractMcpResultBody(result: unknown): string {
+  if (result == null) return ''
+  if (typeof result === 'string') return result.trim()
+  if (typeof result !== 'object') return ''
+
+  const record = result as Record<string, unknown>
+  const contentText = extractPreviewText(record.content)
+  if (contentText) return contentText
+
+  return firstNonEmptyText([
+    record.error,
+    record.message,
+    record.stderr,
+    record.stdout,
+    record.output,
+    record.text,
+    record.summary,
+    record.description,
+    record.title
+  ])
 }
 
 function extractToolResultText(

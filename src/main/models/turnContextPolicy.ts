@@ -35,7 +35,10 @@ export interface BuildTraceOptions {
   activePageFollowup?: boolean
 }
 
-export function resolveTurnContextPolicy(req: ChatRequest): TurnContextPolicy {
+export function resolveTurnContextPolicy(
+  req: ChatRequest,
+  options?: { hasWorkspaceFolder?: boolean }
+): TurnContextPolicy {
   const lastMsg = req.messages[req.messages.length - 1]
   const userText = lastMsg && lastMsg.role === 'user' ? lastMsg.content.trim() : ''
   const activePageContextLabel = extractActivePageContextLabel(userText)
@@ -53,7 +56,9 @@ export function resolveTurnContextPolicy(req: ChatRequest): TurnContextPolicy {
     activePageFollowup,
     browserIntent,
     workspaceIntent: shouldUseWorkspaceContext(actionableText),
-    profile: selectAgentToolProfile(actionableText)
+    profile: selectAgentToolProfile(actionableText, {
+      hasWorkspaceFolder: options?.hasWorkspaceFolder
+    })
   }
 }
 

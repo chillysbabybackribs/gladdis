@@ -101,6 +101,7 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   memorycreatetask: 'memory_create_task',
   browsetask: 'browse_task',
   readpage: 'read_page',
+  reada11y: 'read_a11y',
   execinbrowser: 'execute_in_browser',
   screenshotapp: 'screenshot_app'
 }
@@ -295,8 +296,26 @@ export function resolveTurnTools(profileTools: ToolDef[], granted?: Set<string>)
  * Pick the lean starting profile based on the user's prompt. The model can
  * always escalate to a richer profile via `request_tools`, so getting this
  * exactly right matters less than keeping the starting tool set small.
+ *
+ * When a workspace folder is selected the user is working inside a project, so
+ * the toolless `conversation` baseline is upgraded to `filesystem` — file and
+ * coding tools are then present from the first step instead of being gated
+ * behind a request_tools round-trip. Explicit browser/research intent still
+ * wins (those turns reach filesystem via request_tools when needed), and with
+ * no folder open pure chat stays lean.
  */
-export function selectAgentToolProfile(userText: string): AgentToolProfile {
+export function selectAgentToolProfile(
+  userText: string,
+  options?: { hasWorkspaceFolder?: boolean }
+): AgentToolProfile {
+  const profile = selectBaseAgentToolProfile(userText)
+  if (options?.hasWorkspaceFolder && profile.name === 'conversation') {
+    return { name: 'filesystem', tools: PROFILE_TOOLS.filesystem }
+  }
+  return profile
+}
+
+function selectBaseAgentToolProfile(userText: string): AgentToolProfile {
   const text = userText.toLowerCase()
   const wantsFilesystem = shouldUseWorkspaceContext(text)
   const wantsBrowser = shouldUseDirectBrowserTools(text)

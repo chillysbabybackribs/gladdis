@@ -23,12 +23,14 @@ pnpm-debug.log*
 .gladdis/memory.v1.backup.json
 .gladdis/memory.next.json
 .gladdis/memory.next.diff.json
+.gladdis/api-registry.json
 .gladdis/repo-intel/
 
 # Local environment
 .env
 .env.*
 !.env.example
+.cursor/mcp.json
 
 # OS/editor noise
 .DS_Store

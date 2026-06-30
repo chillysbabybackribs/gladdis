@@ -7,6 +7,8 @@ import type { LlmComplete } from '../pipeline/Planner'
 import type { PipelineProgressEvent } from '../pipeline/Runner'
 import { KeyStore } from './KeyStore'
 import type { CapabilityBroker } from './capabilities/CapabilityBroker'
+import type { AxSnapshotNode } from '../extract/axTree'
+import { axRefStillValid, resolveAxRef, type AxRefStore } from '../extract/axRef'
 
 import {
   runClickXY,
@@ -32,7 +34,7 @@ import {
   runSearchFiles,
   runWriteFile
 } from './tools/fsTools'
-import { type ReadPageCacheEntry, runGrepPage, runReadPage, runScreenshot, runScreenshotApp, runWatchNetwork } from './tools/perceiveTools'
+import { type ReadPageCacheEntry, type ReadA11yCacheEntry, runGrepPage, runReadA11y, runReadPage, runScreenshot, runScreenshotApp, runWatchNetwork } from './tools/perceiveTools'
 import {
   runReadSpans,
   runRepoGrepTask,
@@ -138,6 +140,20 @@ export class BrowserTools {
     evictions: 0
   }
 
+  /** Read-through digest cache for `read_a11y`. */
+  private readonly a11yCache = new Map<string, ReadA11yCacheEntry>()
+  private static readonly A11Y_CACHE_LIMIT = 32
+  private static readonly A11Y_CACHE_TTL_MS = 120_000
+  private readonly a11yCacheStats: Pick<ReadPageCacheStats, 'hits' | 'misses' | 'expired' | 'evictions'> = {
+    hits: 0,
+    misses: 0,
+    expired: 0,
+    evictions: 0
+  }
+  /** Latest read_a11y snapshot per tab for @aN actions. */
+  private readonly axRefByTab = new Map<string, AxRefStore>()
+  private static readonly AX_REF_TTL_MS = 120_000
+
   constructor(
     public readonly tabs: TabManager,
     public readonly extractor: PageExtractor,
@@ -207,13 +223,39 @@ export class BrowserTools {
         this.recordPageCacheEvent('evicted')
       }
     }
+    for (const key of this.a11yCache.keys()) {
+      if (key.startsWith(`${tabId}:`)) {
+        this.a11yCache.delete(key)
+        this.recordA11yCacheEvent('evicted')
+      }
+    }
+    this.axRefByTab.delete(tabId)
+  }
+
+  private setAxRefStore(tabId: string, entry: ReadA11yCacheEntry): void {
+    this.axRefByTab.set(tabId, {
+      pageUrl: entry.pageUrl,
+      capturedAt: entry.capturedAt,
+      nodes: entry.snapshot.nodes
+    })
+  }
+
+  private resolveAxRef(tabId: string, query: string): AxSnapshotNode | null {
+    const store = this.axRefByTab.get(tabId)
+    if (!axRefStillValid(store, this.tabs.getTabUrl(tabId), BrowserTools.AX_REF_TTL_MS)) {
+      return null
+    }
+    return resolveAxRef(store!.nodes, query)
   }
 
   // Bound dep bundles for each tool module. Recomputed per call only because
   // a few of them depend on `this.capabilityBroker` which the renderer can
   // wire up post-construction.
   private driveDeps() {
-    return { tabs: this.tabs }
+    return {
+      tabs: this.tabs,
+      resolveAxRef: (tabId: string, query: string) => this.resolveAxRef(tabId, query)
+    }
   }
 
   private fsDeps() {
@@ -227,11 +269,34 @@ export class BrowserTools {
       pageCache: this.pageCache,
       pageCacheLimit: BrowserTools.PAGE_CACHE_LIMIT,
       pageCacheTtlMs: BrowserTools.PAGE_CACHE_TTL_MS,
+      a11yCache: this.a11yCache,
+      a11yCacheLimit: BrowserTools.A11Y_CACHE_LIMIT,
+      a11yCacheTtlMs: BrowserTools.A11Y_CACHE_TTL_MS,
+      setAxRefStore: (tabId: string, entry: ReadA11yCacheEntry) => this.setAxRefStore(tabId, entry),
       appCapture: this.appCapture,
       getPageCacheStats: () => this.getPageCacheStatsSnapshot(),
+      getA11yCacheStats: () => this.getA11yCacheStatsSnapshot(),
       recordPageCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') =>
-        this.recordPageCacheEvent(event)
+        this.recordPageCacheEvent(event),
+      recordA11yCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') =>
+        this.recordA11yCacheEvent(event)
     }
+  }
+
+  private getA11yCacheStatsSnapshot(): ReadPageCacheStats {
+    return {
+      ...this.a11yCacheStats,
+      size: this.a11yCache.size,
+      limit: BrowserTools.A11Y_CACHE_LIMIT,
+      ttlMs: BrowserTools.A11Y_CACHE_TTL_MS
+    }
+  }
+
+  private recordA11yCacheEvent(event: 'hit' | 'miss' | 'expired' | 'evicted'): void {
+    if (event === 'hit') this.a11yCacheStats.hits += 1
+    if (event === 'miss') this.a11yCacheStats.misses += 1
+    if (event === 'expired') this.a11yCacheStats.expired += 1
+    if (event === 'evicted') this.a11yCacheStats.evictions += 1
   }
 
   private getPageCacheStatsSnapshot(): ReadPageCacheStats {
@@ -290,6 +355,8 @@ export class BrowserTools {
         // ── Perceive ────────────────────────────────────────────────────────
         case 'read_page':
           return runReadPage(this.perceiveDeps(), args, ctx.tabId)
+        case 'read_a11y':
+          return runReadA11y(this.perceiveDeps(), args, ctx.tabId)
         case 'grep_page':
           return runGrepPage(this.perceiveDeps(), args, ctx.tabId)
         case 'watch_network':

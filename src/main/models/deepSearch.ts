@@ -181,7 +181,7 @@ Follow this exact reasoning process to complete the plan:
 
 1.  Decompose the initial query into 2-4 sharp, answerable RESEARCH QUESTIONS.
 2.  Choose 4-8 high-precision CONCEPT KEYWORDS from the query list for relevance scoring.
-3.  Define 3-5 PRIORITY ANGLES (e.g., "official reports", "recent 2025 developments").
+3.  Define 3-5 PRIORITY ANGLES (e.g., "official reports", "recent ${new Date().getFullYear()} developments").
 4. Write a one-sentence SOURCE STRATEGY (how to favor credible vs. secondary sources).`;
 
       const response = await ai.models.generateContent({

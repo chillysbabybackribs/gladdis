@@ -52,3 +52,13 @@ function findLastUserIndex(messages: ChatMessage[]): number {
   }
   return -1
 }
+
+/**
+ * Prepend the date/freshness preamble to a raw text string.
+ * Used for local CLI agents (Cursor, Claude Code, Codex) that don't
+ * use the message-array format of API providers.
+ */
+export function prependDateContextToText(text: string, now: Date = new Date()): string {
+  const preamble = currentDatePreamble(now)
+  return text ? `${preamble}\n\n${text}` : preamble
+}

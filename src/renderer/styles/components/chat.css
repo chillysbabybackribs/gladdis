@@ -14,6 +14,7 @@
   --chat-message-gap: 14px;
   --chat-pad-y: 16px;
   --chat-pad-x: 16px;
+  --chat-composer-safe-h: var(--chat-composer-h);
   /* The composer is application chrome — its height is intentionally fixed so
      the input box looks identical across panels regardless of either panel's
      chat zoom. Do NOT add this var to the inline zoom-scaled style or the
@@ -45,7 +46,6 @@
   padding: var(--chat-pad-y) var(--chat-pad-x);
   display: flex;
   flex-direction: column;
-  gap: var(--chat-message-gap);
   user-select: text;
   /* No global smooth-scroll: streaming pins must land instantly, and a smooth
      setting here also animates every user wheel/key gesture, which feels
@@ -60,6 +60,13 @@
      gesture instead of a noisy stream of micro-events. */
   scrollbar-gutter: stable;
 }
+.chat-transcript {
+  min-width: 0;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--chat-message-gap);
+}
 /* Floating jump-to-latest button — appears only when the user has scrolled
    away from the bottom. Anchored to the bottom of .chat so it stays above
    the composer regardless of which messages are rendered. */
@@ -67,7 +74,7 @@
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(var(--chat-composer-h) + 10px);
+  bottom: calc(var(--chat-composer-safe-h) + 10px);
   width: 30px;
   height: 30px;
   display: grid;
@@ -152,8 +159,9 @@
 /* ---------------- Composer (command center) ---------------- */
 .composer {
   position: relative;
-  flex: 0 0 var(--chat-composer-h);
-  height: var(--chat-composer-h);
+  flex: 0 0 auto;
+  min-height: var(--chat-composer-h);
+  height: auto;
   padding: 9px 12px 11px;
   border-top: 1px solid var(--border-subtle);
   min-width: 0;

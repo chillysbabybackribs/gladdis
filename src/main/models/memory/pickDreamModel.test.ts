@@ -6,6 +6,7 @@ const NO_KEYS: KeyStatus = {
   anthropic: false,
   google: false,
   codex: false,
+  cursor: false,
   openai: false,
   grok: false
 }

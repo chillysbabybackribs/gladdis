@@ -4,8 +4,19 @@ import type { LlmComplete } from '../../pipeline/Planner'
 import type { ChatStreamEvent } from '../../../../shared/types'
 import type { JsonValue, RequestId, ServerRequest } from './protocol'
 
+// Codex keeps its native FS/shell for code work, so this surface omits raw
+// filesystem/shell tools. It DOES include Gladdis's memory notebook: Codex's own
+// cross-session memory is disabled (see CODEX_DISABLED_NATIVE_CONFIG) so that the
+// only durable memory channel is Gladdis's — which requires the memory_* writers
+// to actually be attached. Kept in parity with CURSOR_MCP_TOOL_NAMES — see the
+// surface-parity guard in toolSurfaceCoverage.test.ts.
 export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'recall_history',
+  'memory_write',
+  'memory_read',
+  'memory_list',
+  'memory_forget',
+  'memory_create_task',
   'repo_overview',
   'search_repo',
   'repo_grep_task',
@@ -19,6 +30,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'navigate',
   'browse_task',
   'read_page',
+  'read_a11y',
   'grep_page',
   'watch_network',
   'grep_click',
@@ -53,7 +65,9 @@ export const GLADDIS_WEB_TOOLS_RULE =
   'tools, which drive the visible Chromium tab the user is watching. Use search and deep_search for web ' +
   'search (the user sees the results in-tab), use search_open when you have both a search query and a likely direct URL to check in parallel, and use fetch_page to read a known URL. ' +
   'You do NOT have a working built-in/native web search or grounding here: it is disabled and its results ' +
-  'do not reach the user. Treat any urge to "search the web" or answer a current/dated/online question ' +
+  'do not reach the user. If your runtime exposes a native search/fetch tool anyway, such as WebSearch, ' +
+  'WebFetch, web_search, web_fetch, browser_search, or browser_fetch, do not call it; it is outside the ' +
+  'Gladdis contract for this turn. Treat any urge to "search the web" or answer a current/dated/online question ' +
   'from your own knowledge as a signal to call search instead. Never answer a question that needs live web ' +
   'facts from memory, and never claim you cannot search — the search tool is always available for that. ' +
   'Gladdis\'s search is the only web search that exists for this turn.'
@@ -66,10 +80,15 @@ export const GLADDIS_WEB_TOOLS_RULE =
 // explicit "even via your shell" line.
 export const CODEX_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the gladdis.* tools too: navigate, browse_task, read_page, grep_page, ' +
+  'For browser work beyond search use the gladdis.* tools too: navigate, browse_task, read_page, read_a11y, grep_page, ' +
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
   'recall_history, repo_overview, repo_grep_task, search_repo, read_spans, research_dossier, and verify_change. ' +
+  'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook (your native cross-session ' +
+  'memory is disabled here, so this is the only durable channel): memory_read before re-asking for context that ' +
+  'may already be known, memory_write for durable decisions/constraints/identifiers, memory_list for a quick ' +
+  'inventory, memory_create_task for task-specific notes, and memory_forget to clear stale notes. Store concise, ' +
+  'reusable facts rather than large transcript dumps.\n' +
   'Prefer grep_click/grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
   'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, ' +
   'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +

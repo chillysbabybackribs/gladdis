@@ -29,13 +29,13 @@ calls, and Claude Code receives a local HTTP MCP bridge.
 The tools come in two families:
 
 - **PERCEIVE** (`models/agentTools/perceive.ts`, impl in `models/tools/perceiveTools.ts`):
-  `read_page`, `grep_page`. `screenshot`/`screenshot_app` exist but are a
-  **fallback** — the docstring says "Prefer read_page for understanding."
+  `grep_page`, `read_a11y`, `read_page`. `screenshot`/`screenshot_app` exist but are a
+  **fallback** — for understanding, prefer grep or the accessibility tree over pixels.
 - **DRIVE** (`models/agentTools/drive.ts`, impl in `models/tools/driveTools.ts`):
   `navigate`, `grep_click`, `grep_type`, `click_xy`, `type_text`, `press_key`,
   `execute_in_browser`, `cdp_command`.
 
-### Perception is grep, not vision — this is the core design bet
+### Perception is grep + accessibility, not vision — this is the core design bet
 
 `grep_page` runs a JS payload **inside the live page** and returns matched
 elements with a stable CSS `selector`, visibility, and **live bounding-box
@@ -47,16 +47,28 @@ search with `type: "text"`/`type: "regex"`, or DOM target lookup with
 `type: "selector"` for CSS selectors and XPath. The model asks for exactly the
 element it needs and gets that and nothing more.
 
-`grep_click` / `grep_type` are the **same engine one step further**: they run
+`read_a11y` (`src/main/extract/axTree.ts`) captures the live CDP accessibility
+tree (`Accessibility.getFullAXTree`, multi-frame), flattens it to a compact
+digest, and assigns stable `@a1`/`@a2` refs with role, name, state, and
+coordinates (via `DOM.getBoxModel` when available). Use it on component-heavy
+UIs where grep text is sparse but controls have accessible names. After
+`read_a11y`, pass `@aN` refs to `grep_click`, `grep_type`, or `click_xy`
+(`ref` arg); refs are cached per tab and invalidated on navigation.
+
+`read_page` (`PageExtractor`) returns a bounded structural digest + ACTIONS table
+— good for orientation, not primary targeting.
+
+`grep_click` / `grep_type` are the **same grep engine one step further**: they run
 the same in-page grep (`executeGrepInTab`), filter to `visible && coordinates`,
 take the best match, and dispatch a trusted action at those live coordinates.
-Discovery and action are one primitive.
+With `type: "ref"` or a bare `@aN` query they resolve against the latest
+`read_a11y` snapshot instead. Discovery and action are one primitive.
 
 This is why screenshots/vision are nearly irrelevant here: for "what is this
-element and where exactly is it," the grep result is *more* precise than a
+element and where exactly is it," grep and a11y results are *more* precise than a
 screenshot (literal node + literal coordinate vs. pixels the model must infer
-from). The only thing it gives up is genuinely vision-only content (canvas,
-unlabeled image-buttons with no text/selector hook) — which is what the
+from). The only thing they give up is genuinely vision-only content (canvas,
+unlabeled image-buttons with no text/selector/a11y hook) — which is what the
 screenshot fallback is for.
 
 ## `pipeline/` — read this before you assume it's central OR dead
@@ -91,8 +103,8 @@ it's live for a given feature, check whether that feature routes through
   import a *type*, not the pipeline.
 - Reading tool *schemas/descriptions* and inferring behavior, instead of reading
   the *handlers* in `models/tools/`.
-- Treating `screenshot` as the perception path. It's the fallback; `grep_page`
-  is the path.
+- Treating `screenshot` as the perception path. It's the fallback; `grep_page` and
+  `read_a11y` are the paths.
 
 ## Build / run
 

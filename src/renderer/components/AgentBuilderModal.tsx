@@ -24,7 +24,8 @@ function isModelUsable(
   model: ModelOption,
   keyStatus: ReturnType<typeof useEnvironmentStatus>['keyStatus'],
   codexStatus: ReturnType<typeof useEnvironmentStatus>['codexStatus'],
-  claudeCodeStatus: ReturnType<typeof useEnvironmentStatus>['claudeCodeStatus']
+  claudeCodeStatus: ReturnType<typeof useEnvironmentStatus>['claudeCodeStatus'],
+  cursorStatus: ReturnType<typeof useEnvironmentStatus>['cursorStatus']
 ): boolean {
   if (!keyStatus) return false
   switch (model.provider) {
@@ -32,6 +33,8 @@ function isModelUsable(
       return !!codexStatus?.installed && !!codexStatus?.authenticated
     case 'claudecode':
       return !!claudeCodeStatus?.installed && !!claudeCodeStatus?.authenticated
+    case 'cursor':
+      return !!cursorStatus?.installed && !!cursorStatus?.authenticated
     case 'anthropic':
       return keyStatus.anthropic
     case 'google':
@@ -68,10 +71,10 @@ function buildLocalDraft(goal: string, workspaceFolder: string | null): string {
 }
 
 export default function AgentBuilderModal({ isOpen, agent = null, onClose }: AgentBuilderModalProps) {
-  const { models, keyStatus, codexStatus, claudeCodeStatus, workspace } = useEnvironmentStatus()
+  const { models, keyStatus, codexStatus, claudeCodeStatus, cursorStatus, workspace } = useEnvironmentStatus()
   const availableModels = useMemo(
-    () => models.filter((model) => isModelUsable(model, keyStatus, codexStatus, claudeCodeStatus)),
-    [models, keyStatus, codexStatus, claudeCodeStatus]
+    () => models.filter((model) => isModelUsable(model, keyStatus, codexStatus, claudeCodeStatus, cursorStatus)),
+    [models, keyStatus, codexStatus, claudeCodeStatus, cursorStatus]
   )
 
   const [agentName, setAgentName] = useState('')

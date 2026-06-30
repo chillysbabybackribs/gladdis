@@ -12,7 +12,7 @@ import {
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
-import { approxInputChars } from '../ModelCallLedger'
+import { estimatePromptInputChars } from './promptAuditCache'
 import { renderTrimmedToolResultStub } from './toolResultSummary'
 import { toOpenAiFunctionTools } from './toolPromptCache'
 
@@ -666,7 +666,7 @@ export async function runOpenAiToolLoop(args: {
       modelId: args.modelId,
       stage: `chat:browser:${turn}`,
       input: { system: systemText, tools, messages },
-      inputChars: approxInputChars({ system: systemText, tools, messages })
+      inputChars: estimatePromptInputChars({ system: systemText, tools, dynamic: messages })
     })
 
     let assistant: StreamedTurn

@@ -94,6 +94,7 @@ export class KeyStore {
       anthropic: !!this.keys.get('anthropic'),
       google: !!this.keys.get('google'),
       codex: false,
+      cursor: false,
       openai: !!this.keys.get('openai'),
       grok: !!this.keys.get('grok')
     }

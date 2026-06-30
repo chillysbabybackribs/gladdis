@@ -18,6 +18,7 @@ const KEYED: KeyStatus = {
   anthropic: false,
   google: false,
   codex: true, // pick cheapest → first codex entry
+  cursor: false,
   openai: false,
   grok: false
 }

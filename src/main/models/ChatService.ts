@@ -261,8 +261,11 @@ export class ChatService {
 
   private emit = (event: ChatStreamEvent): void => {
     if (event.type === 'tool_call') {
-      const startedAt = event.startedAt ?? Date.now()
       const key = `${event.requestId}:${event.callId}`
+      // A provider may re-emit tool_call for the same callId at a tool boundary
+      // (e.g. Cursor). Anchor timing to the FIRST emission so a late duplicate
+      // doesn't reset the recorded start and report a near-zero duration.
+      const startedAt = this.toolStarts.get(key) ?? event.startedAt ?? Date.now()
       this.toolStarts.set(key, startedAt)
       this.toolNames.set(key, event.tool)
       event = { ...event, startedAt }
@@ -301,6 +304,12 @@ export class ChatService {
     const validation = this.cursorValidationStates.get(req.requestId)
     if (!validation || !needsValidationBeforeFinal(validation, [{ name: 'verify_change' }])) {
       return { ok: true, summary: null }
+    }
+    const nativeFailure = validation.lastValidationFailure?.trim()
+    if (nativeFailure) {
+      // Cursor already ran native validation and it failed — reuse that result
+      // for the repair loop instead of duplicating Gladdis verify_change.
+      return { ok: false, summary: nativeFailure }
     }
     const workspaceRoot = this.tools.getWorkspaceRoot?.()
     if (!workspaceRoot) return { ok: true, summary: null }
@@ -356,6 +365,14 @@ export class ChatService {
     let lastResult: { text: string; usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } } | null = null
 
     for (let attempt = 0; attempt < CURSOR_POST_ACTION_MAX_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) {
+        const validation = this.cursorValidationStates.get(args.req.requestId)
+        if (validation) {
+          validation.lastValidationFailure = null
+          validation.reminderSent = false
+          validation.autoValidationAttempted = false
+        }
+      }
       lastResult = await this.cursor().send(
         args.req,
         args.signal,
@@ -919,7 +936,9 @@ export class ChatService {
     const waitWhilePaused = (signal: AbortSignal): Promise<void> =>
       this.pauseGates.get(req.requestId)?.wait(signal) ?? Promise.resolve()
     try {
-      const policy = resolveTurnContextPolicy(req)
+      const policy = resolveTurnContextPolicy(req, {
+        hasWorkspaceFolder: !!this.tools.getWorkspaceRoot()
+      })
       stripStaleActivePageContext(req, policy)
       this.emitContractTrace(req, policy, model.provider)
       const { profile: initialProfile } = policy

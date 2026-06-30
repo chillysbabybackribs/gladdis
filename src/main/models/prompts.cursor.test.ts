@@ -64,5 +64,6 @@ describe('CURSOR_BROWSER_INSTRUCTIONS', () => {
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('validation abilities')
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('run the narrowest relevant local verification command')
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('failed post-action verification result')
+    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('read_a11y')
   })
 })

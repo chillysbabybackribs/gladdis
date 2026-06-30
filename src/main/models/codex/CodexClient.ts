@@ -173,15 +173,18 @@ export class CodexClient {
         lastToolEndAt: this.lastToolEndAt
       })
     )
-    server.on('serverRequest', (m: ServerRequest) =>
-      void routeServerRequest(m, {
+    server.on('serverRequest', (m: ServerRequest) => {
+      // routeServerRequest is total (always responds, never rejects); the catch is
+      // a last-resort backstop so a stray failure can never become an
+      // UnhandledPromiseRejectionWarning out of this fire-and-forget handler.
+      routeServerRequest(m, {
         emit: this.emit,
         server: () => this.server,
         turnForThread: (id) => this.turnForThread(id),
         browserTools: this.browserTools,
         completeWithModel: (modelId, system, user) => this.complete(modelId, system, user)
-      })
-    )
+      }).catch(() => {})
+    })
     server.on('exit', () => {
       // The process died; drop cached threads so the next turn starts fresh.
       this.threadStore.clear()

@@ -101,6 +101,7 @@ describe('ClaudeCodeBridgeServer', () => {
 
     const tools = await client.listTools()
     expect(tools.tools.map((tool) => tool.name)).toContain('read_page')
+    expect(tools.tools.map((tool) => tool.name)).toContain('read_a11y')
     expect(tools.tools.find((tool) => tool.name === 'recall_history')).toEqual(
       expect.objectContaining({
         outputSchema: expect.objectContaining({
@@ -302,14 +303,20 @@ describe('ClaudeCodeBridgeServer', () => {
     const tools = await client.listTools()
     const names = tools.tools.map((tool) => tool.name)
     expect(names).toContain('read_page')
+    expect(names).toContain('read_a11y')
     expect(names).toContain('memory_read')
-    expect(names).not.toContain('repo_overview')
-    expect(names).not.toContain('search_repo')
-    expect(names).not.toContain('verify_change')
+    // Gladdis-native repo intelligence is now attached (it is not redundant with
+    // Cursor's native grep — it returns bounded, architecture-aware digests).
+    expect(names).toContain('repo_overview')
+    expect(names).toContain('search_repo')
+    expect(names).toContain('verify_change')
+    // Raw FS/shell stays off this surface — the CLI runtime supplies it natively.
+    expect(names).not.toContain('read_file')
+    expect(names).not.toContain('run_command')
 
     const result = await client.callTool({
-      name: 'repo_overview',
-      arguments: { focus: 'should fail' }
+      name: 'read_file',
+      arguments: { path: 'should-not-be-exposed.ts' }
     })
     expect(result.isError).toBe(true)
     expect(run).not.toHaveBeenCalled()

@@ -175,6 +175,7 @@ export class ChatStore {
   setCodexThreadId(id: string, threadId: string | null): void {
     const conv = this.convos.get(id)
     if (!conv) return
+    if ((conv.codexThreadId ?? null) === (threadId ?? null)) return
     conv.codexThreadId = threadId
     this.persist()
   }
@@ -183,7 +184,17 @@ export class ChatStore {
   setClaudeCodeSessionId(id: string, sessionId: string | null): void {
     const conv = this.convos.get(id)
     if (!conv) return
+    if ((conv.claudeCodeSessionId ?? null) === (sessionId ?? null)) return
     conv.claudeCodeSessionId = sessionId
+    this.persist()
+  }
+
+  /** Bind a saved Gladdis conversation to its Cursor Agent session id. */
+  setCursorSessionId(id: string, sessionId: string | null): void {
+    const conv = this.convos.get(id)
+    if (!conv) return
+    if ((conv.cursorSessionId ?? null) === (sessionId ?? null)) return
+    conv.cursorSessionId = sessionId
     this.persist()
   }
 
@@ -209,6 +220,9 @@ export class ChatStore {
       d.claudeCodeSessionId = conv.claudeCodeSessionId === undefined
         ? (prev?.claudeCodeSessionId ?? null)
         : (conv.claudeCodeSessionId ?? null)
+      d.cursorSessionId = conv.cursorSessionId === undefined
+        ? (prev?.cursorSessionId ?? null)
+        : (conv.cursorSessionId ?? null)
       d.continuesFromId = conv.continuesFromId === undefined
         ? (prev?.continuesFromId ?? null)
         : conv.continuesFromId

@@ -10,7 +10,7 @@ import {
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 import { withDateContext } from './dateContext'
-import { approxInputChars } from '../ModelCallLedger'
+import { estimatePromptInputChars } from './promptAuditCache'
 import { toAnthropicTools } from './toolPromptCache'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
@@ -264,7 +264,7 @@ export async function runAnthropicToolLoop(args: {
       modelId: args.modelId,
       stage: `chat:browser:${turn}`,
       input: { system: args.agentSystem, tools: anthropicTools, messages },
-      inputChars: approxInputChars({ system: args.agentSystem, tools: anthropicTools, messages })
+      inputChars: estimatePromptInputChars({ system: args.agentSystem, tools: anthropicTools, dynamic: messages })
     })
     let final: any
     try {

@@ -14,7 +14,7 @@ import type {
 } from './protocol'
 import { TOOL_ITEM_TYPES, codexToolName, isGladdisDynamicToolCall, toolArgs, toolOk, toolPreview } from './toolItems'
 import { findCodexToolPolicyViolation } from './toolPolicy'
-import { respondToCodexBrowserToolCall } from './dynamicBrowserTools'
+import { codexDynamicToolResponse, respondToCodexBrowserToolCall } from './dynamicBrowserTools'
 import type { BrowserTools } from '../browserTools'
 
 /** Mutable per-request turn state owned by CodexClient. */
@@ -273,14 +273,36 @@ function blockPolicyViolation(
   }
 }
 
-/** Route a server-initiated request (tool calls, approvals) to the right handler. */
+/**
+ * Route a server-initiated request (tool calls, approvals) to the right handler.
+ *
+ * This is invoked as a fire-and-forget event handler (`void routeServerRequest`),
+ * so it MUST be total: it can never reject (that surfaces as an
+ * UnhandledPromiseRejectionWarning) and must always send exactly one response to
+ * `msg.id`. The Codex app server blocks the turn until it gets that response, so a
+ * handler that throws mid-flight — e.g. `Unknown tab` when a tab closes during a
+ * fetch_page — would otherwise both crash the process warning AND hang the turn.
+ * On any error we respond with a tool-error envelope so the turn can proceed.
+ */
 export async function routeServerRequest(msg: ServerRequest, ctx: ServerRequestContext): Promise<void> {
   const server = ctx.server()
   if (!server) return
+  try {
+    await dispatchServerRequest(msg, ctx, server)
+  } catch (err) {
+    // Only the `item/tool/call` branch awaits work that can throw, and it does so
+    // BEFORE its single respond() (e.g. `Unknown tab` while a tab closes during a
+    // fetch_page) — so no response has gone out yet and this cannot double-respond.
+    // We answer with a tool-error envelope so the blocked Codex turn proceeds.
+    const text = err instanceof Error ? err.message : String(err)
+    server.respond(msg.id, codexDynamicToolResponse({ ok: false, text: `Gladdis browser tool failed: ${text}` }))
+  }
+}
+
+function dispatchServerRequest(msg: ServerRequest, ctx: ServerRequestContext, server: CodexAppServer): Promise<void> | void {
   const method = msg.method
   if (method === 'item/tool/call') {
-    await respondToBrowserTool(msg, ctx)
-    return
+    return respondToBrowserTool(msg, ctx)
   }
   if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
     server.respond(msg.id, { decision: 'accept' })

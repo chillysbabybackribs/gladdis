@@ -1,5 +1,55 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment jsdom
+
+import { act, createElement, useRef } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { classifyScrollKey, decideFollowOnScroll, isScrolledToBottom } from './useAutoScroll'
+import { useAutoScroll } from './useAutoScroll'
+
+class MockResizeObserver {
+  static instances: MockResizeObserver[] = []
+  observed = new Set<Element>()
+  callback: ResizeObserverCallback
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback
+    MockResizeObserver.instances.push(this)
+  }
+
+  observe(target: Element) {
+    this.observed.add(target)
+  }
+
+  unobserve(target: Element) {
+    this.observed.delete(target)
+  }
+
+  disconnect() {
+    this.observed.clear()
+  }
+}
+
+function triggerResize(target: Element) {
+  for (const observer of MockResizeObserver.instances) {
+    if (!observer.observed.has(target)) continue
+    observer.callback([{ target } as ResizeObserverEntry], observer as unknown as ResizeObserver)
+  }
+}
+
+function flushAnimationFrame() {
+  vi.advanceTimersByTime(16)
+}
+
+function Harness() {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  useAutoScroll(scrollRef, { contentRef })
+  return createElement(
+    'div',
+    { ref: scrollRef, tabIndex: 0 },
+    createElement('div', { ref: contentRef }, 'content')
+  )
+}
 
 describe('isScrolledToBottom', () => {
   it('reports true when the scroller is exactly anchored at the bottom', () => {
@@ -96,5 +146,130 @@ describe('classifyScrollKey', () => {
     expect(classifyScrollKey('Enter')).toBe('ignore')
     expect(classifyScrollKey('Escape')).toBe('ignore')
     expect(classifyScrollKey('Shift')).toBe('ignore')
+  })
+})
+
+describe('useAutoScroll', () => {
+  let host: HTMLDivElement
+  let root: Root
+  let rafId = 0
+  let rafQueue = new Map<number, FrameRequestCallback>()
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    MockResizeObserver.instances = []
+    rafId = 0
+    rafQueue = new Map()
+    vi.stubGlobal('ResizeObserver', MockResizeObserver)
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      const id = ++rafId
+      rafQueue.set(id, callback)
+      setTimeout(() => {
+        const cb = rafQueue.get(id)
+        if (!cb) return
+        rafQueue.delete(id)
+        cb(performance.now())
+      }, 16)
+      return id
+    })
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      rafQueue.delete(id)
+    })
+
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    host.remove()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('re-pins when the transcript content grows while follow mode is still on', () => {
+    act(() => {
+      root.render(createElement(Harness))
+    })
+
+    const scrollEl = host.firstElementChild as HTMLDivElement
+    const contentEl = scrollEl.firstElementChild as HTMLDivElement
+    let scrollHeight = 400
+    let scrollTop = 200
+
+    Object.defineProperty(scrollEl, 'clientHeight', {
+      configurable: true,
+      get: () => 200
+    })
+    Object.defineProperty(scrollEl, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight
+    })
+    Object.defineProperty(scrollEl, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      }
+    })
+
+    act(() => {
+      triggerResize(contentEl)
+      flushAnimationFrame()
+    })
+    expect(scrollTop).toBe(400)
+
+    scrollHeight = 560
+    act(() => {
+      triggerResize(contentEl)
+      flushAnimationFrame()
+    })
+    expect(scrollTop).toBe(560)
+  })
+
+  it('does not fight the user after an upward scroll gesture', () => {
+    act(() => {
+      root.render(createElement(Harness))
+    })
+
+    const scrollEl = host.firstElementChild as HTMLDivElement
+    const contentEl = scrollEl.firstElementChild as HTMLDivElement
+    let scrollHeight = 400
+    let scrollTop = 200
+
+    Object.defineProperty(scrollEl, 'clientHeight', {
+      configurable: true,
+      get: () => 200
+    })
+    Object.defineProperty(scrollEl, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight
+    })
+    Object.defineProperty(scrollEl, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value: number) => {
+        scrollTop = value
+      }
+    })
+
+    act(() => {
+      triggerResize(contentEl)
+      flushAnimationFrame()
+    })
+    expect(scrollTop).toBe(400)
+
+    scrollTop = 120
+    act(() => {
+      scrollEl.dispatchEvent(new WheelEvent('wheel', { deltaY: -24 }))
+    })
+
+    scrollHeight = 580
+    act(() => {
+      triggerResize(contentEl)
+      flushAnimationFrame()
+    })
+    expect(scrollTop).toBe(120)
   })
 })

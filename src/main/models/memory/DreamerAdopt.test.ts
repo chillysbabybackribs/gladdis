@@ -12,6 +12,7 @@ const KEYED: KeyStatus = {
   anthropic: false,
   google: false,
   codex: true,
+  cursor: false,
   openai: false,
   grok: false
 }

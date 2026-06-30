@@ -1,6 +1,7 @@
 import type {
   ClaudeCodeStatus,
   CodexStatus,
+  CursorStatus,
   KeyStatus,
   ModelOption,
   SavedAgent,
@@ -29,6 +30,7 @@ export function TurnControls({
   keyStatus,
   codexStatus,
   claudeCodeStatus,
+  cursorStatus,
   workspace,
   onPickWorkspace
 }: {
@@ -44,6 +46,7 @@ export function TurnControls({
   keyStatus: KeyStatus
   codexStatus: CodexStatus | null
   claudeCodeStatus: ClaudeCodeStatus | null
+  cursorStatus: CursorStatus | null
   workspace: Workspace
   onPickWorkspace: () => void
 }) {
@@ -65,6 +68,7 @@ export function TurnControls({
         keyStatus={keyStatus}
         codexStatus={codexStatus}
         claudeCodeStatus={claudeCodeStatus}
+        cursorStatus={cursorStatus}
       />
       <button
         className={`workspace-btn ${workspace.folder ? 'set' : ''}`}

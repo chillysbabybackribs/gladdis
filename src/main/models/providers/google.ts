@@ -8,7 +8,7 @@ import {
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 import { withDateContext } from './dateContext'
-import { approxInputChars } from '../ModelCallLedger'
+import { estimatePromptInputChars } from './promptAuditCache'
 
 interface CacheEntry {
   name: string
@@ -335,7 +335,7 @@ export async function runGoogleToolLoop(args: {
       modelId: args.modelId,
       stage: `chat:browser:${turn}`,
       input: { system: args.agentSystem, tools: functionDeclarations, contents },
-      inputChars: approxInputChars({ system: args.agentSystem, tools: functionDeclarations, contents })
+      inputChars: estimatePromptInputChars({ system: args.agentSystem, tools: functionDeclarations, dynamic: contents })
     })
     // TEMP token-bloat probe — remove after one diagnostic run.
     {

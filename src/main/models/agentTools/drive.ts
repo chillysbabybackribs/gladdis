@@ -44,16 +44,25 @@ export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'click_xy',
     description:
-      'Trusted mouse click at viewport coordinates (x, y). ' +
-      'Get coordinates from the ACTIONS table in the last read_page digest.',
+      'Trusted mouse click at viewport coordinates (x, y) or a read_a11y @aN ref. ' +
+      'Use x,y from read_page ACTIONS, grep_page coordinates, or pass ref after read_a11y.',
     parameters: {
       type: 'object',
-      properties: { x: { type: 'number' }, y: { type: 'number' } },
-      required: ['x', 'y']
+      properties: {
+        x: { type: 'number', description: 'Viewport X. Omit when using ref.' },
+        y: { type: 'number', description: 'Viewport Y. Omit when using ref.' },
+        ref: { type: 'string', description: 'read_a11y ref like @a1. Resolves to live coordinates.' }
+      }
     },
     outputSchema: {
       type: 'object',
-      properties: { x: { type: 'number' }, y: { type: 'number' } },
+      properties: {
+        x: { type: 'number' },
+        y: { type: 'number' },
+        ref: { type: 'string' },
+        role: { type: 'string' },
+        name: { type: 'string' }
+      },
       required: ['x', 'y']
     }
   },
@@ -137,18 +146,18 @@ export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'grep_click',
     description:
-      'Find a selector/XPath/text match and click it in one step.',
+      'Find a selector/XPath/text match or read_a11y ref (@a1) and click it in one step.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'CSS selector, XPath, or unique text to match.'
+          description: 'CSS selector, XPath, unique text, or read_a11y ref like @a1.'
         },
         type: {
           type: 'string',
-          enum: ['text', 'regex', 'selector'],
-          description: 'Search mode. Use "text" for literal page text, "regex" for text patterns, or "selector" for CSS selectors/XPath. Defaults to "text".'
+          enum: ['text', 'regex', 'selector', 'ref'],
+          description: 'Search mode. Use "ref" or pass @aN directly after read_a11y. Defaults to "text".'
         },
         caseSensitive: {
           type: 'boolean',
@@ -186,13 +195,13 @@ export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'grep_type',
     description:
-      'Find an input/textarea by selector or text, focus it, and type in one step.',
+      'Find an input/textarea by selector, text, or read_a11y ref (@a1), focus it, and type in one step.',
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'CSS selector, XPath, or nearby/placeholder text to match the input.'
+          description: 'CSS selector, XPath, nearby/placeholder text, or read_a11y ref like @a1.'
         },
         text: {
           type: 'string',
@@ -200,8 +209,8 @@ export const DRIVE_TOOLS: ToolDef[] = [
         },
         type: {
           type: 'string',
-          enum: ['text', 'regex', 'selector'],
-          description: 'Search mode. Use "text" for literal page text, "regex" for text patterns, or "selector" for CSS selectors/XPath. Defaults to "text".'
+          enum: ['text', 'regex', 'selector', 'ref'],
+          description: 'Search mode. Use "ref" or pass @aN directly after read_a11y. Defaults to "text".'
         },
         caseSensitive: {
           type: 'boolean',

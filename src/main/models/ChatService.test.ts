@@ -152,6 +152,7 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_BROWSER_TOOL_NAMES.has('navigate')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('fetch_page')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('watch_network')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('read_a11y')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_click')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_type')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('click_xy')).toBe(true)
@@ -162,6 +163,30 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_BROWSER_TOOL_NAMES.has('background_web_search')).toBe(false)
     expect(CODEX_BROWSER_TOOL_NAMES.has('search_task')).toBe(false)
     expect(CODEX_BROWSER_TOOL_NAMES.has('check_page')).toBe(false)
+  })
+
+  it('upgrades the toolless conversation baseline to filesystem when a workspace folder is open', () => {
+    // No folder: a non-actionable prompt stays lean conversation.
+    const noFolder = selectAgentToolProfile('make the settings copy sound more official')
+    expect(noFolder.name).toBe('conversation')
+    expect(noFolder.tools.map((tool) => tool.name)).not.toContain('read_file')
+
+    // Folder open: the same prompt now starts with file/coding tools present,
+    // so the model never has to request_tools("filesystem") before acting.
+    const withFolder = selectAgentToolProfile('make the settings copy sound more official', {
+      hasWorkspaceFolder: true
+    })
+    expect(withFolder.name).toBe('filesystem')
+    expect(withFolder.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(['read_file', 'edit_file', 'search_files', 'run_command'])
+    )
+
+    // Explicit browser intent still wins even with a folder open (request_tools
+    // bridges to filesystem if that turn also needs it).
+    const browserWithFolder = selectAgentToolProfile('click the login button on the active page', {
+      hasWorkspaceFolder: true
+    })
+    expect(browserWithFolder.name).toBe('browser')
   })
 
   it('selects lean tool profiles for obvious filesystem and browser tasks', () => {
@@ -175,7 +200,7 @@ describe('ChatService provider hardening', () => {
     const browserProfile = selectAgentToolProfile('click the login button on the active page')
     expect(browserProfile.name).toBe('browser')
     expect(browserProfile.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(['read_page', 'click_xy', 'browse_task'])
+      expect.arrayContaining(['read_page', 'read_a11y', 'click_xy', 'browse_task'])
     )
     expect(browserProfile.tools.map((tool) => tool.name)).not.toContain('write_file')
 
@@ -775,6 +800,8 @@ describe('ChatService provider hardening', () => {
     expect(conversationSystem).toContain('Resume process:')
     expect(conversationSystem).toContain('A bare resume request such as "pick up where we were"')
     expect(conversationSystem).toContain('not permission to edit files')
+    expect(conversationSystem).toContain('look for opened doors')
+    expect(conversationSystem).toContain('After each state-changing action, re-read the affected source or UI')
     expect(conversationSystem).not.toContain('[NEED_MORE_CONTEXT]')
     expect(conversationSystem).not.toContain('## Browser tools')
     expect(conversationSystem).not.toContain('## Filesystem')
@@ -788,6 +815,8 @@ describe('ChatService provider hardening', () => {
     expect(filesystemSystem).toContain('## Validation')
     expect(filesystemSystem).toContain('run_validation')
     expect(filesystemSystem).toContain('- run_validation:')
+    expect(filesystemSystem).toContain('Choose the shortest trustworthy path')
+    expect(filesystemSystem).toContain('use a neighboring capability already available')
     expect(filesystemSystem).not.toContain('## Browser tools')
     expect(filesystemSystem).not.toContain('- read_page:')
   })
@@ -1161,6 +1190,94 @@ describe('ChatService provider hardening', () => {
       messages: [{ role: 'user', content: 'fix the typing issue and validate it' }]
     } as any)
 
+    expect(verifyChange).not.toHaveBeenCalled()
+  })
+
+  it('feeds failed native validation into repair without duplicating Gladdis verify_change', async () => {
+    const { service } = makeService('/tmp/selected-project')
+    const verifyChange = vi.fn()
+    ;(service as any).capabilityBroker.verifyChange = verifyChange
+    const cursorSend = vi.fn(async (_req, _signal, _system, userText) => {
+      if (cursorSend.mock.calls.length === 1) {
+        ;(service as any).emit({
+          requestId: 'req-cursor-native-fail',
+          type: 'tool_call',
+          tool: 'edit_file',
+          args: { path: 'src/main/index.ts' },
+          callId: 'cursor-edit-1'
+        })
+        ;(service as any).emit({
+          requestId: 'req-cursor-native-fail',
+          type: 'tool_result',
+          callId: 'cursor-edit-1',
+          ok: true,
+          preview: 'Updated src/main/index.ts'
+        })
+        ;(service as any).emit({
+          requestId: 'req-cursor-native-fail',
+          type: 'tool_call',
+          tool: 'run_validation',
+          args: { check: 'typecheck' },
+          callId: 'cursor-validate-1'
+        })
+        ;(service as any).emit({
+          requestId: 'req-cursor-native-fail',
+          type: 'tool_result',
+          callId: 'cursor-validate-1',
+          ok: false,
+          preview: '[tool error] typecheck: src/main/index.ts:42 error TS2322'
+        })
+        return { text: 'first pass' }
+      }
+
+      expect(userText).toContain('Gladdis post-action verification failed after your last pass')
+      expect(userText).toContain('typecheck: src/main/index.ts:42 error TS2322')
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-fail',
+        type: 'tool_call',
+        tool: 'edit_file',
+        args: { path: 'src/main/index.ts' },
+        callId: 'cursor-edit-2'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-fail',
+        type: 'tool_result',
+        callId: 'cursor-edit-2',
+        ok: true,
+        preview: 'Fixed src/main/index.ts'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-fail',
+        type: 'tool_call',
+        tool: 'run_validation',
+        args: { check: 'typecheck' },
+        callId: 'cursor-validate-2'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-fail',
+        type: 'tool_result',
+        callId: 'cursor-validate-2',
+        ok: true,
+        preview: 'typecheck: pass'
+      })
+      return { text: 'second pass' }
+    })
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-native-fail',
+      modelId: 'composer-2.5',
+      conversationId: 'conv-cursor-native-fail',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'fix the typing issue in src/main/index.ts' }]
+    } as any)
+
+    expect(cursorSend).toHaveBeenCalledTimes(2)
     expect(verifyChange).not.toHaveBeenCalled()
   })
 

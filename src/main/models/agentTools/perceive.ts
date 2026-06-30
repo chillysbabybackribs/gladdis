@@ -46,6 +46,75 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
     }
   },
   {
+    name: 'read_a11y',
+    description:
+      'Read a compact accessibility-tree snapshot of the active tab via CDP ' +
+      'Accessibility.getFullAXTree. Returns semantic role + name + state for ' +
+      'interactive controls, with stable refs (@a1, @a2, …) and live coordinates ' +
+      'when available. Prefer this over read_page when you need control discovery ' +
+      'on refactored or component-heavy UIs where CSS selectors churn. Returned ' +
+      '@a1-style refs can be passed directly to grep_click, grep_type, or click_xy. Still use ' +
+      'grep_page for exact text passages.',
+    parameters: {
+      type: 'object',
+      properties: {
+        focus: {
+          type: 'string',
+          description: 'Keyword to rank matching nodes higher (e.g. "login", "submit").'
+        },
+        viewportOnly: {
+          type: 'boolean',
+          description: 'If true, only include nodes whose bounds intersect the viewport.'
+        },
+        interactiveOnly: {
+          type: 'boolean',
+          description: 'If false, include named non-interactive nodes too. Default true.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        pageUrl: { type: 'string' },
+        title: { type: 'string' },
+        focus: { type: 'string' },
+        viewportOnly: { type: 'boolean' },
+        interactiveOnly: { type: 'boolean' },
+        totalSeen: { type: 'number' },
+        truncated: { type: 'boolean' },
+        cache: READ_PAGE_CACHE_SCHEMA,
+        nodes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              ref: { type: 'string' },
+              role: { type: 'string' },
+              name: { type: 'string' },
+              value: { type: 'string' },
+              states: { type: 'array', items: { type: 'string' } },
+              inViewport: { type: 'boolean' },
+              bounds: {
+                type: 'object',
+                properties: {
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  width: { type: 'number' },
+                  height: { type: 'number' },
+                  top: { type: 'number' },
+                  left: { type: 'number' }
+                },
+                required: ['x', 'y', 'width', 'height', 'top', 'left']
+              }
+            },
+            required: ['ref', 'role', 'name', 'states', 'inViewport']
+          }
+        }
+      },
+      required: ['pageUrl', 'title', 'totalSeen', 'truncated', 'nodes', 'cache']
+    }
+  },
+  {
     name: 'grep_page',
     description:
       'Find a specific element or text section on the live page — fast and precise, ' +

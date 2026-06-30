@@ -293,6 +293,61 @@ Tip: use --model <id> to switch.
       })
     ).toBe('Search found 2 hit(s) for runCursorWithRepairLoop')
   })
+
+  it('summarizes Gladdis MCP tool results from MCP content blocks', () => {
+    expect(
+      cursorToolPreview({
+        mcpToolCall: {
+          serverName: 'gladdis',
+          toolName: 'read_page',
+          args: { tabId: 'tab-1' },
+          result: {
+            content: [{ type: 'text', text: 'Page title: Example Domain\nURL: https://example.com' }]
+          }
+        }
+      })
+    ).toBe('Page title: Example Domain URL: https://example.com')
+  })
+
+  it('surfaces failed Gladdis MCP tool results as actionable tool errors', () => {
+    expect(
+      cursorToolPreview({
+        mcpToolCall: {
+          serverName: 'gladdis',
+          toolName: 'grep_click',
+          args: { query: 'Sign in' },
+          result: {
+            isError: true,
+            content: [{ type: 'text', text: 'No visible match for "Sign in".' }]
+          }
+        }
+      })
+    ).toBe('[tool error] Sign in: No visible match for "Sign in".')
+    expect(
+      cursorToolOk({
+        mcpToolCall: {
+          serverName: 'gladdis',
+          toolName: 'grep_click',
+          args: { query: 'Sign in' },
+          result: { isError: true, content: [{ type: 'text', text: 'No visible match for "Sign in".' }] }
+        }
+      })
+    ).toBe(false)
+  })
+
+  it('keeps long MCP read_page output compact in the UI preview', () => {
+    const longBody = 'A'.repeat(400)
+    const preview = cursorToolPreview({
+      mcpToolCall: {
+        serverName: 'gladdis',
+        toolName: 'read_page',
+        args: {},
+        result: { content: [{ type: 'text', text: longBody }] }
+      }
+    })
+    expect(preview.length).toBeLessThanOrEqual(280)
+    expect(preview.endsWith('…')).toBe(true)
+  })
 })
 
 describe('isMcpConfigWarm', () => {

@@ -7,6 +7,20 @@ const noop = () => {}
 const STREAM_SEGMENT_SOFT_LIMIT = 1200
 const STREAM_SEGMENT_MIN_BREAK = 300
 
+/**
+ * Upper bound (ms) on how long buffered stream events wait before they paint.
+ * `requestAnimationFrame` is the primary trigger — it coalesces a burst of
+ * tokens into one commit per display frame while the panel is painting. But
+ * Chromium pauses/heavily-throttles rAF when the window is minimized, hidden,
+ * or fully occluded. Without a timer fallback the stream would visibly freeze
+ * in a backgrounded panel and — worse — a buffered `done`/`error` would never
+ * reach `finishTurn`, leaving the spinner stuck and the request id uncleared
+ * until the user refocused. The timer guarantees forward progress regardless
+ * of paint state; whichever of rAF/timer fires first flushes and cancels the
+ * other, so the foreground fast-path still commits at ~60fps.
+ */
+const FALLBACK_FLUSH_MS = 100
+
 function liveSegments(message: Message): string[] {
   if (message.liveTextSegments?.length) return message.liveTextSegments
   if (message.liveText) return [message.liveText]
@@ -69,6 +83,13 @@ function resolveAssistantIndex(
     }
   }
   return findAssistantIndex(messages, assistantMessageId)
+}
+
+/** Best-effort label when a tool_result arrives without a matching tool_call. */
+function inferToolNameFromCallId(callId: string): string {
+  const hyphen = callId.indexOf('-')
+  if (hyphen > 0) return callId.slice(0, hyphen)
+  return callId
 }
 
 function commitLiveText(message: Message): Message {
@@ -206,8 +227,9 @@ export function applyStreamEventToMessages(
   }
   if (event.type === 'tool_call') {
     // Guard against duplicate tool_call events for the same callId (Cursor emits
-    // these at tool boundaries). Only add if we haven't seen this callId yet.
-    if (parts.some((p) => p.kind === 'tool' && p.tool.callId === event.callId)) return out
+    // these at tool boundaries). Return the original list reference (not the
+    // slice) so a redundant event doesn't trigger a no-op React commit.
+    if (parts.some((p) => p.kind === 'tool' && p.tool.callId === event.callId)) return messages
     const tool: ToolActivity = {
       callId: event.callId,
       tool: event.tool,
@@ -219,24 +241,40 @@ export function applyStreamEventToMessages(
     return out
   }
   if (event.type === 'tool_result') {
-    out[index] = {
-      ...message,
-      parts: parts.map((part) =>
-        part.kind === 'tool' && part.tool.callId === event.callId
-          ? {
-              kind: 'tool',
-              tool: {
-                ...part.tool,
-                status: event.ok ? ('ok' as const) : ('error' as const),
-                endedAt: event.endedAt,
-                durationMs: event.durationMs,
-                preview: event.preview,
-                imageDataUrl: event.imageDataUrl
+    const hasMatch = parts.some((part) => part.kind === 'tool' && part.tool.callId === event.callId)
+    if (hasMatch) {
+      out[index] = {
+        ...message,
+        parts: parts.map((part) =>
+          part.kind === 'tool' && part.tool.callId === event.callId
+            ? {
+                kind: 'tool',
+                tool: {
+                  ...part.tool,
+                  status: event.ok ? ('ok' as const) : ('error' as const),
+                  endedAt: event.endedAt,
+                  durationMs: event.durationMs,
+                  preview: event.preview,
+                  imageDataUrl: event.imageDataUrl
+                }
               }
-            }
-          : part
-      )
+            : part
+        )
+      }
+      return out
     }
+    // Some providers emit only a completed event (or the started event was dropped).
+    const tool: ToolActivity = {
+      callId: event.callId,
+      tool: inferToolNameFromCallId(event.callId),
+      args: {},
+      status: event.ok ? 'ok' : 'error',
+      endedAt: event.endedAt,
+      durationMs: event.durationMs,
+      preview: event.preview,
+      imageDataUrl: event.imageDataUrl
+    }
+    out[index] = { ...message, parts: [...parts, { kind: 'tool', tool }] }
     return out
   }
 
@@ -294,6 +332,8 @@ interface StreamConsumerArgs {
    * scroll policy.
    */
   onCommit?: () => void
+  /** Called when a turn finishes (done/error), after state has been committed. */
+  onTurnEnd?: () => void
 }
 
 /**
@@ -306,8 +346,8 @@ interface StreamConsumerArgs {
  * forced a scroll reflow. Buffering a frame's worth of tokens and flushing once
  * caps that work at the display's refresh rate (rendering faster than ~60fps is
  * wasted work that causes the jank, not smoothness). Non-delta events
- * (tool_call/result/error/done) flush the pending buffer first, then apply
- * immediately, so ordering against the streamed text is preserved.
+ * (tool_call/result/error/done) flush the pending buffer first, then apply in
+ * the same frame batch so a burst of tool events costs one React commit.
  *
  * Scroll behavior is delegated to the `onCommit` callback. The hook does not
  * touch the DOM directly — that keeps streaming logic separate from the
@@ -322,33 +362,48 @@ export function useStreamConsumer({
   setMessages,
   setStreaming,
   setPaused,
-  onCommit
+  onCommit,
+  onTurnEnd
 }: StreamConsumerArgs): void {
-  const pendingDelta = useRef('')
-  const rafRef = useRef<number | null>(null)
+  const receivedText = useRef('')
+  const typedText = useRef('')
+  const isNetworkDone = useRef(false)
+  const terminalEvent = useRef<ChatStreamEvent | null>(null)
+  const lastActiveRequestId = useRef<string | null>(null)
+  const lastRequestId = useRef<string | null>(null)
+
+  const typewriterRaf = useRef<number | null>(null)
+  const typewriterTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const onCommitRef = useRef<() => void>(noop)
+  const onTurnEndRef = useRef<() => void>(noop)
   onCommitRef.current = onCommit ?? noop
+  onTurnEndRef.current = onTurnEnd ?? noop
 
   useEffect(() => {
-    // Drain buffered delta text into the trailing assistant message in a single
-    // state update. Called on the next frame after deltas arrive.
-    const flushDeltas = () => {
-      rafRef.current = null
-      const text = pendingDelta.current
-      if (!text) return
-      pendingDelta.current = ''
+    const finishTurn = (event: ChatStreamEvent) => {
+      if (event.type === 'done') void ttsRef.current.flush()
+      activeReq.current = null
+      activeAssistantMessageId.current = null
+      activeAssistantIndex.current = null
+      lastActiveRequestId.current = null
+      setStreaming(false)
+      setPaused?.(false)
+      onTurnEndRef.current()
+    }
+
+    const applyEvents = (events: ChatStreamEvent[]) => {
+      if (!events.length) return
       setMessages((msgs) => {
-        const next = applyStreamEventToMessages(
-          msgs,
-          {
-            requestId: activeReq.current ?? '',
-            assistantMessageId: activeAssistantMessageId.current ?? undefined,
-            type: 'delta',
-            text
-          },
-          activeAssistantMessageId.current,
-          activeAssistantIndex.current
-        )
+        let next = msgs
+        for (const event of events) {
+          next = applyStreamEventToMessages(
+            next,
+            event,
+            activeAssistantMessageId.current,
+            activeAssistantIndex.current
+          )
+        }
         const assistantId = activeAssistantMessageId.current
         if (assistantId) {
           activeAssistantIndex.current = resolveAssistantIndex(
@@ -360,62 +415,148 @@ export function useStreamConsumer({
         return next
       })
       onCommitRef.current()
+      const terminal = events.find((event) => event.type === 'done' || event.type === 'error')
+      if (terminal) finishTurn(terminal)
+    }
+
+    const clearTypewriterTimers = () => {
+      if (typewriterRaf.current !== null) {
+        cancelAnimationFrame(typewriterRaf.current)
+        typewriterRaf.current = null
+      }
+      if (typewriterTimer.current !== null) {
+        clearTimeout(typewriterTimer.current)
+        typewriterTimer.current = null
+      }
+    }
+
+    const flushTypewriterInstantly = () => {
+      clearTypewriterTimers()
+      const fullText = receivedText.current
+      const currentLen = typedText.current.length
+      const lag = fullText.length - currentLen
+      if (lag > 0) {
+        const remainingText = fullText.slice(currentLen)
+        typedText.current = fullText
+        applyEvents([{
+          requestId: activeReq.current ?? lastActiveRequestId.current ?? '',
+          assistantMessageId: activeAssistantMessageId.current ?? undefined,
+          type: 'delta',
+          text: remainingText
+        }])
+      }
+    }
+
+    const typewriterTick = () => {
+      typewriterRaf.current = null
+      typewriterTimer.current = null
+
+      const fullText = receivedText.current
+      const currentLen = typedText.current.length
+      const lag = fullText.length - currentLen
+
+      if (lag > 0) {
+        // Dynamic pacing / adaptive speed curves:
+        // Determine how many characters to add in this animation tick.
+        let charsToAdd = 1
+        if (isNetworkDone.current) {
+          // Network completed: flush remaining text rapidly to keep UI responsive
+          charsToAdd = Math.max(15, Math.ceil(lag / 2))
+        } else if (lag > 200) {
+          charsToAdd = Math.max(12, Math.floor(lag / 12))
+        } else if (lag > 100) {
+          charsToAdd = 8
+        } else if (lag > 50) {
+          charsToAdd = 4
+        } else if (lag > 20) {
+          charsToAdd = 2
+        }
+
+        charsToAdd = Math.min(charsToAdd, lag)
+        const nextSlice = fullText.slice(currentLen, currentLen + charsToAdd)
+        typedText.current += nextSlice
+
+        applyEvents([{
+          requestId: activeReq.current ?? lastActiveRequestId.current ?? '',
+          assistantMessageId: activeAssistantMessageId.current ?? undefined,
+          type: 'delta',
+          text: nextSlice
+        }])
+
+        scheduleTypewriterTick()
+      } else {
+        // Caught up: process terminal events if they are waiting
+        if (isNetworkDone.current && terminalEvent.current) {
+          const terminal = terminalEvent.current
+          terminalEvent.current = null
+          applyEvents([terminal])
+        }
+      }
+    }
+
+    const scheduleTypewriterTick = () => {
+      if (typewriterRaf.current === null) {
+        typewriterRaf.current = requestAnimationFrame(typewriterTick)
+      }
+      if (typewriterTimer.current === null) {
+        typewriterTimer.current = setTimeout(typewriterTick, FALLBACK_FLUSH_MS)
+      }
     }
 
     const off = window.gladdis.chat.onStream((e) => {
-      if (e.requestId !== activeReq.current) return
+      const activeId = activeReq.current
+      const isTerminal = e.type === 'done' || e.type === 'error'
+      if (e.requestId !== activeId && !(isTerminal && e.requestId === lastActiveRequestId.current)) {
+        return
+      }
+      if (activeId) lastActiveRequestId.current = activeId
+
+      // Detect a new turn starting and reset typewriter state
+      if (e.requestId !== lastRequestId.current) {
+        lastRequestId.current = e.requestId
+        clearTypewriterTimers()
+        receivedText.current = ''
+        typedText.current = ''
+        isNetworkDone.current = false
+        terminalEvent.current = null
+      }
+
       // Speak deltas here, NOT inside the setMessages updater — React invokes
       // updaters twice in StrictMode, which would double every spoken fragment.
       if (e.type === 'delta') {
         ttsRef.current.speak(e.text)
-        pendingDelta.current += e.text
-        if (rafRef.current === null) rafRef.current = requestAnimationFrame(flushDeltas)
+        receivedText.current += e.text
+        scheduleTypewriterTick()
         return
       }
 
-      // A non-delta event landed: commit any buffered text first so the tool
-      // chip / error / done lands after the prose that preceded it, not before.
-      if (pendingDelta.current) {
-        if (rafRef.current !== null) {
-          cancelAnimationFrame(rafRef.current)
-          rafRef.current = null
-        }
-        flushDeltas()
-      }
+      if (isTerminal) {
+        isNetworkDone.current = true
+        terminalEvent.current = e
 
-      setMessages((msgs) => {
-        const next = applyStreamEventToMessages(
-          msgs,
-          e,
-          activeAssistantMessageId.current,
-          activeAssistantIndex.current
-        )
-        const assistantId = activeAssistantMessageId.current
-        if (assistantId) {
-          activeAssistantIndex.current = resolveAssistantIndex(
-            next,
-            assistantId,
-            activeAssistantIndex.current
-          )
+        const lag = receivedText.current.length - typedText.current.length
+        // If lag is small or the user manually cancelled the request, flush immediately
+        if (lag < 15 || !activeReq.current) {
+          flushTypewriterInstantly()
+          applyEvents([e])
+        } else {
+          scheduleTypewriterTick()
         }
-        return next
-      })
-      onCommitRef.current()
-      if (e.type === 'done' || e.type === 'error') {
-        if (e.type === 'done') void ttsRef.current.flush()
-        activeReq.current = null
-        activeAssistantMessageId.current = null
-        activeAssistantIndex.current = null
-        setStreaming(false)
-        setPaused?.(false)
+      } else {
+        // Any other structural event (tool_call, capability_activity, etc.)
+        // must be applied synchronously on fully-revealed prose.
+        flushTypewriterInstantly()
+        applyEvents([e])
       }
     })
+
     return () => {
       off()
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current)
-        rafRef.current = null
-      }
+      clearTypewriterTimers()
+      receivedText.current = ''
+      typedText.current = ''
+      isNetworkDone.current = false
+      terminalEvent.current = null
     }
     // Refs are stable; setters are stable. Wire once.
     // eslint-disable-next-line react-hooks/exhaustive-deps

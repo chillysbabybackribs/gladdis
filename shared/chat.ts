@@ -395,6 +395,8 @@ export interface Conversation {
   codexThreadId?: string | null
   /** Claude Code session bound to this saved conversation, if any. */
   claudeCodeSessionId?: string | null
+  /** Cursor Agent session bound to this saved conversation, if any. */
+  cursorSessionId?: string | null
   /** Previous conversation this fresh chat continues from, if any. */
   continuesFromId?: string | null
   /** Which dock side owns this chat; sticky once set (defaults to 'left' on load). */
@@ -615,12 +617,13 @@ export type ChatStreamEvent =
  * Which providers are usable (never the keys themselves).
  * - anthropic/google/grok: true once an API key is configured.
  * - codex: true once the codex CLI is installed AND logged in.
- * - claudecode: reported separately via ClaudeCodeStatus (no gladdis-stored key).
+ * - claudecode/cursor: reported separately via CLI status (no gladdis-stored key).
  */
 export interface KeyStatus {
   anthropic: boolean
   google: boolean
   codex: boolean
+  cursor: boolean
   /** OpenAI key, used only for text-to-speech (audible replies), not chat. */
   openai: boolean
   /** xAI (Grok) key, used for chat. */
@@ -643,6 +646,9 @@ export interface CodexStatus {
 
 /** Status of the local Claude Code CLI / session bridge. */
 export type ClaudeCodeStatus = CodexStatus
+
+/** Status of the local Cursor Agent CLI. */
+export type CursorStatus = CodexStatus
 
 /**
  * Working directory for Codex turns, chosen by the user. The folder is only

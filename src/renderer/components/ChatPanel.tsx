@@ -10,7 +10,7 @@ import { Composer, type ComposerInterjectionMode, type ComposerSubmit } from './
 import { TokenCounter } from './TokenCounter'
 import { ChatSettingsModal } from './ChatSettingsModal'
 import { useTts, useTtsSettings } from '../hooks/useTts'
-import { useStreamConsumer } from '../hooks/useStreamConsumer'
+import { useStreamConsumer, applyStreamEventToMessages } from '../hooks/useStreamConsumer'
 import { useAutoScroll } from '../hooks/useAutoScroll'
 import { useAuditRecords } from '../hooks/useAuditRecords'
 import { useEnvironmentStatus } from '../hooks/useEnvironmentStatus'
@@ -87,7 +87,7 @@ export function ChatPanel({
     }
   })
   const auditRecords = useAuditRecords()
-  const { keyStatus, setKeyStatus, codexStatus, claudeCodeStatus, models, workspace, pickWorkspace } =
+  const { keyStatus, setKeyStatus, codexStatus, claudeCodeStatus, cursorStatus, models, workspace, pickWorkspace } =
     useEnvironmentStatus()
   const [streaming, setStreaming] = useState(false)
   const [paused, setPaused] = useState(false)
@@ -120,7 +120,10 @@ export function ChatPanel({
   const activeAssistantMessageId = useRef<string | null>(null)
   const activeAssistantIndex = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const autoScroll = useAutoScroll(scrollRef)
+  const transcriptRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  const autoScroll = useAutoScroll(scrollRef, { contentRef: transcriptRef })
+  const [composerHeight, setComposerHeight] = useState(164)
   const convIdRef = useRef(convId)
   const messagesRef = useRef(messages)
   const modelIdRef = useRef(modelId)
@@ -166,6 +169,17 @@ export function ChatPanel({
     const off = window.gladdis.agents.onUpdated((next) => setAgents(next))
     void window.gladdis.agents.list().then((next) => setAgents(next))
     return off
+  }, [])
+
+  useEffect(() => {
+    const el = composerRef.current
+    if (!el) return
+    const measure = () => setComposerHeight(Math.max(164, Math.ceil(el.getBoundingClientRect().height)))
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => measure())
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
 
   useEffect(() => {
@@ -288,23 +302,39 @@ export function ChatPanel({
     })
   }
 
-  const onSubmit = ({ text }: ComposerSubmit) => {
+  const onSubmit = async ({ text }: ComposerSubmit) => {
     if (streaming) return
 
     const model = models.find((m) => m.id === modelId) ?? MODELS.find((m) => m.id === modelId)
     if (!model) return
-    const usable =
+    let usable =
       model.provider === 'codex'
         ? !!codexStatus?.installed && !!codexStatus?.authenticated
         : model.provider === 'claudecode'
           ? !!claudeCodeStatus?.installed && !!claudeCodeStatus?.authenticated
-        : model.provider === 'anthropic'
-          ? keyStatus.anthropic
-          : model.provider === 'grok'
-            ? keyStatus.grok
-            : model.provider === 'openai'
-              ? keyStatus.openai
-              : keyStatus.google
+          : model.provider === 'cursor'
+            ? !!cursorStatus?.installed && !!cursorStatus?.authenticated
+            : model.provider === 'anthropic'
+              ? keyStatus.anthropic
+              : model.provider === 'grok'
+                ? keyStatus.grok
+                : model.provider === 'openai'
+                  ? keyStatus.openai
+                  : keyStatus.google
+
+    if (!usable) {
+      if (model.provider === 'codex') {
+        const fresh = await window.gladdis.codex.status().catch(() => null)
+        usable = !!fresh?.installed && !!fresh?.authenticated
+      } else if (model.provider === 'claudecode') {
+        const fresh = await window.gladdis.claudeCode.status().catch(() => null)
+        usable = !!fresh?.installed && !!fresh?.authenticated
+      } else if (model.provider === 'cursor') {
+        const fresh = await window.gladdis.cursor.status().catch(() => null)
+        usable = !!fresh?.installed && !!fresh?.authenticated
+      }
+    }
+
     if (!usable) {
       setSettingsTab('keys')
       setShowSettings(true)
@@ -520,7 +550,8 @@ export function ChatPanel({
     '--chat-tiny-size': px(10 * zoom),
     '--chat-message-gap': px(Math.min(20, Math.max(10, 14 * zoom))),
     '--chat-pad-y': px(Math.min(22, Math.max(12, 16 * zoom))),
-    '--chat-pad-x': px(Math.min(20, Math.max(12, 16 * zoom)))
+    '--chat-pad-x': px(Math.min(20, Math.max(12, 16 * zoom))),
+    '--chat-composer-safe-h': px(composerHeight)
   } as CSSProperties
 
   const turnControls = (
@@ -537,6 +568,7 @@ export function ChatPanel({
       keyStatus={keyStatus}
       codexStatus={codexStatus}
       claudeCodeStatus={claudeCodeStatus}
+      cursorStatus={cursorStatus}
       workspace={workspace}
       onPickWorkspace={pickWorkspace}
     />
@@ -557,11 +589,13 @@ export function ChatPanel({
     <>
       <div className="chat" style={chatStyle}>
         <div className="chat-messages" ref={scrollRef}>
-          <ChatMessageList
-            messages={messages}
-            streaming={streaming}
-            streamingAssistantMessageId={activeAssistantMessageId.current}
-          />
+          <div className="chat-transcript" ref={transcriptRef}>
+            <ChatMessageList
+              messages={messages}
+              streaming={streaming}
+              streamingAssistantMessageId={activeAssistantMessageId.current}
+            />
+          </div>
         </div>
 
         {!autoScroll.isAtBottom && messages.length > 0 && (
@@ -584,31 +618,34 @@ export function ChatPanel({
           </button>
         )}
 
-        <Composer
-          activeId={activeId}
-          busy={streaming}
-          onSubmit={onSubmit}
-          onInterject={onInterject}
-          onStop={stop}
-          onPause={pauseSupported ? pause : undefined}
-          onResume={pauseSupported ? resume : undefined}
-          paused={paused}
-          audioOn={audioOn}
-          onToggleAudio={toggleAudio}
-          voice={voice}
-          onVoiceChange={persistVoice}
-          speed={speed}
-          onSpeedChange={persistSpeed}
-          turnControls={turnControls}
-          onNewChat={newChat}
-          newDisabled={messages.length === 0 && !streaming}
-        />
+        <div ref={composerRef}>
+          <Composer
+            activeId={activeId}
+            busy={streaming}
+            onSubmit={onSubmit}
+            onInterject={onInterject}
+            onStop={stop}
+            onPause={pauseSupported ? pause : undefined}
+            onResume={pauseSupported ? resume : undefined}
+            paused={paused}
+            audioOn={audioOn}
+            onToggleAudio={toggleAudio}
+            voice={voice}
+            onVoiceChange={persistVoice}
+            speed={speed}
+            onSpeedChange={persistSpeed}
+            turnControls={turnControls}
+            onNewChat={newChat}
+            newDisabled={messages.length === 0 && !streaming}
+          />
+        </div>
 
         {showSettings && (
           <ChatSettingsModal
             auditRecords={auditRecords}
             codexStatus={codexStatus}
             claudeCodeStatus={claudeCodeStatus}
+            cursorStatus={cursorStatus}
             currentId={convId}
             initialTab={settingsTab}
             keyStatus={keyStatus}

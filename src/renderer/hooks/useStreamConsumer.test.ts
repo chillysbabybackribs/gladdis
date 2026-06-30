@@ -136,6 +136,35 @@ describe('applyStreamEventToMessages', () => {
     expect(withTool[0].liveTextSegments).toBeUndefined()
   })
 
+  it('treats a duplicate tool_call as a no-op and preserves the list reference', () => {
+    const messages: Message[] = [
+      { id: 'assistant-a', role: 'assistant', text: '', parts: [] }
+    ]
+
+    const withCall = applyStreamEventToMessages(messages, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'tool_call',
+      tool: 'read_file',
+      args: { path: 'a.ts' },
+      callId: 'call-1',
+      startedAt: 1000
+    })
+
+    const duplicate = applyStreamEventToMessages(withCall, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'tool_call',
+      tool: 'read_file',
+      args: { path: 'a.ts' },
+      callId: 'call-1',
+      startedAt: 5000
+    })
+
+    // Same reference back: a redundant tool_call must not force a fresh commit.
+    expect(duplicate).toBe(withCall)
+  })
+
   it('keeps tool timing on the matching assistant message', () => {
     const messages: Message[] = [
       { id: 'assistant-a', role: 'assistant', text: '', parts: [] }

@@ -95,6 +95,13 @@ export interface AutoScrollHandle {
 interface Options {
   threshold?: number
   /**
+   * Optional inner content node whose height changes should also keep the view
+   * pinned while following. This catches post-render growth such as expanding
+   * tool cards, screenshots, and markdown reflow that increase scrollHeight
+   * without resizing the scroll container itself.
+   */
+  contentRef?: RefObject<HTMLElement | null>
+  /**
    * Called when follow-mode flips. Useful for analytics or for callers that
    * want to clear other UI (e.g. dismiss a "new messages" toast).
    */
@@ -134,6 +141,7 @@ export function useAutoScroll(
   options?: Options
 ): AutoScrollHandle {
   const threshold = options?.threshold ?? DEFAULT_THRESHOLD_PX
+  const contentRef = options?.contentRef
   const onFollowChange = options?.onFollowChange
 
   // We keep mirror refs alongside React state so the event handlers and the
@@ -206,6 +214,7 @@ export function useAutoScroll(
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
+    const contentEl = contentRef?.current
 
     const yieldToUser = () => {
       cancelPendingScroll()
@@ -274,6 +283,7 @@ export function useAutoScroll(
 
     const resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(onResize) : null
     resizeObserver?.observe(el)
+    if (contentEl && contentEl !== el) resizeObserver?.observe(contentEl)
 
     // Initial read in case the container starts mid-scroll (e.g. restored
     // conversation render painted before this effect bound).
@@ -287,7 +297,7 @@ export function useAutoScroll(
       resizeObserver?.disconnect()
       cancelPendingScroll()
     }
-  }, [scrollRef, threshold, cancelPendingScroll, scheduleScroll, setAtBottom, setFollowing])
+  }, [scrollRef, contentRef, threshold, cancelPendingScroll, scheduleScroll, setAtBottom, setFollowing])
 
   return { scheduleScroll, scrollToBottom, isAtBottom, isFollowing }
 }

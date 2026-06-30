@@ -4,6 +4,7 @@ import { openImageInTab } from '../../lib/openImageInTab'
 
 const TOOL_LABEL: Record<string, string> = {
   execute_in_browser: 'Running script',
+  shell: 'Running shell',
   search: 'Searching',
   fetch_page: 'Opening page',
   browse_task: 'Running task',
@@ -18,6 +19,7 @@ const TOOL_LABEL: Record<string, string> = {
   write_file: 'Writing file',
   edit_file: 'Editing file',
   list_dir: 'Listing dir',
+  grep: 'Searching files',
   search_files: 'Searching files',
   read_clipboard: 'Reading clipboard',
   write_clipboard: 'Writing clipboard',
@@ -28,6 +30,7 @@ const TOOL_LABEL: Record<string, string> = {
 /** Verb pair for a tool: [present-continuous (running), past (settled)]. */
 const TOOL_VERB: Record<string, [string, string]> = {
   execute_in_browser: ['Running script', 'Ran script'],
+  shell: ['Running shell', 'Ran shell'],
   search: ['Searching the web for', 'Searched the web for'],
   fetch_page: ['Opening', 'Opened'],
   browse_task: ['Running task', 'Ran task'],
@@ -44,6 +47,7 @@ const TOOL_VERB: Record<string, [string, string]> = {
   write_file: ['Writing', 'Wrote'],
   edit_file: ['Editing', 'Edited'],
   list_dir: ['Listing', 'Listed'],
+  grep: ['Searching files for', 'Searched files for'],
   search_files: ['Searching files for', 'Searched files for'],
   read_clipboard: ['Reading clipboard', 'Read clipboard'],
   write_clipboard: ['Writing clipboard', 'Wrote to clipboard'],
@@ -85,7 +89,7 @@ function toolSentence(tool: ToolActivity): string {
   let object = ''
   if (name === 'read_file' || name === 'write_file' || name === 'edit_file' || name === 'list_dir') {
     object = a.path ? baseName(String(a.path)) : ''
-  } else if (name === 'search' || name === 'search_files') {
+  } else if (name === 'search' || name === 'search_files' || name === 'grep') {
     object = a.query ? `“${String(a.query).slice(0, 60)}”` : ''
   } else if (name === 'fetch_page' || name === 'navigate' || name === 'screenshot_confirmation') {
     object = a.url ? normalizeDisplayUrl(String(a.url)).replace(/^https?:\/\//, '') : ''
@@ -99,6 +103,8 @@ function toolSentence(tool: ToolActivity): string {
     object = a.method ?? ''
   } else if (name === 'run_validation') {
     object = a.check ?? ''
+  } else if (name === 'execute_in_browser' || name === 'shell') {
+    object = a.command ? `“${String(a.command).slice(0, 60)}”` : ''
   } else if (name === 'read_clipboard') {
     object = `(${String(a.selection || 'clipboard')})`
   } else if (name === 'write_clipboard') {
@@ -113,7 +119,13 @@ function toolSentence(tool: ToolActivity): string {
 }
 
 function baseToolName(name: string): string {
-  return name.startsWith('copilot.') ? name.slice('copilot.'.length) : name
+  const stripped = name.startsWith('copilot.')
+    ? name.slice('copilot.'.length)
+    : name.startsWith('cursor.')
+      ? name.slice('cursor.'.length)
+      : name
+  const parts = stripped.split('.').filter(Boolean)
+  return parts.length > 1 ? parts[parts.length - 1] : stripped
 }
 
 function formatMs(ms: number): string {
@@ -135,7 +147,7 @@ function groupBadge(group: ToolActivity[]): string | null {
   const tool = group[0]
   const name = baseToolName(tool.tool)
   if (name === 'edit_file' || name === 'write_file') return 'edit'
-  if (name === 'search' || name === 'search_files') return 'query'
+  if (name === 'search' || name === 'search_files' || name === 'grep') return 'query'
   return null
 }
 
@@ -297,8 +309,13 @@ export const ToolRun = memo(function ToolRun({ tools }: { tools: ToolActivity[] 
     }
   })
 
+  // Auto-expand only what carries content worth surfacing unprompted: failures
+  // (so the error is visible) and image results (screenshots). A running group
+  // is deliberately NOT auto-expanded — its body is empty until the result
+  // lands, and the add-only expansion effect would otherwise leave every
+  // settled-OK tool expanded, cluttering the transcript during multi-tool tasks.
   const defaultExpandedIds = groups
-    .filter((group) => group.some((tool) => tool.status !== 'ok' || !!toolImageSrc(tool)))
+    .filter((group) => group.some((tool) => tool.status === 'error' || !!toolImageSrc(tool)))
     .map((group) => group[0].callId)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(defaultExpandedIds))
 

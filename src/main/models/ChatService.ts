@@ -9,6 +9,7 @@ import {
   type ChatStreamEvent,
   type CodexStatus,
   type CodexWorkspace,
+  type CursorStatus,
   type DreamAdoptResult,
   type DreamDiff,
   type DreamDiscardResult,
@@ -31,13 +32,15 @@ import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
 import { ClaudeCodeBridgeServer } from './claudeCode/ClaudeCodeBridgeServer'
 import { ClaudeCodeClient } from './claudeCode/ClaudeCodeClient'
+import { CursorClient } from './cursor/CursorClient'
+import { formatCursorConversationPrompt } from './cursor/cursorPrompt'
 import { CapabilityBroker } from './capabilities/CapabilityBroker'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 import { ResearchDossierService } from './capabilities/ResearchDossierService'
 import { ValidationService } from './capabilities/ValidationService'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
 import type { ModelCallLedger } from './ModelCallLedger'
-import { ASK_SYSTEM, CLAUDE_CODE_SYSTEM, CODEX_SYSTEM, buildAgentSystem } from './prompts'
+import { ASK_SYSTEM, CLAUDE_CODE_SYSTEM, CODEX_SYSTEM, CURSOR_SYSTEM, buildAgentSystem } from './prompts'
 import { stripActivePagePreamble } from './routing'
 import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
 import { generateChatTitle } from './chatTitleService'
@@ -47,6 +50,7 @@ import { dispatchAgenticTurn, dispatchStreamPlain } from './providerRouting'
 import {
   buildContractTrace,
   resolveTurnContextPolicy,
+  shouldEnableCursorMcpBridge,
   stripStaleActivePageContext,
   type TurnContextPolicy
 } from './turnContextPolicy'
@@ -86,6 +90,17 @@ const VERBATIM_TOOL_RESULTS = 4
 const MAX_OUTPUT_TOKENS = 32_000
 const ANTHROPIC_MAX_TOKENS = MAX_OUTPUT_TOKENS
 const DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS = 4_096
+const EMBEDDED_BROWSER_LLM_MODEL_ORDER = [
+  'gemini-3.5-flash',
+  'gemini-2.5-flash',
+  'gemini-3.1-flash-lite',
+  'openai-gpt-4o-mini',
+  'openai-gpt-4-1-mini',
+  'openai-gpt-5.4-mini',
+  'grok-build-0.1',
+  'claude-haiku-4-5',
+  'claude-sonnet-4-6'
+] as const
 
 // The agent loop is NOT capped by a turn count — it runs until the model stops
 // calling tools (goal reached) or the user hits stop (abort signal). Both loops
@@ -168,6 +183,8 @@ export class ChatService {
   private codexClient: CodexClient | null = null
   /** Lazily-created Claude Code driver (spawns the local CLI per turn). */
   private claudeCodeClient: ClaudeCodeClient | null = null
+  /** Lazily-created Cursor Agent driver (spawns the local CLI per turn). */
+  private cursorClient: CursorClient | null = null
   /** Lazily-created local HTTP MCP server for Claude Code browser/context tools. */
   private claudeCodeBridgeServer: ClaudeCodeBridgeServer | null = null
   private dynamicModels = new Map<string, ModelOption>()
@@ -311,6 +328,11 @@ export class ChatService {
     return this.claudeCode().status()
   }
 
+  /** Install + auth status of the local Cursor Agent CLI (for the UI). */
+  cursorStatus(): Promise<CursorStatus> {
+    return this.cursor().status()
+  }
+
   /**
    * Live Codex model catalog from the app-server's `model/list`, so the picker
    * always matches the installed CLI. Returns [] if Codex isn't reachable; the
@@ -345,7 +367,7 @@ export class ChatService {
               modelId: args.modelId,
               requestId: args.requestId,
               browserLlm: (system, user, options) =>
-                this.complete(args.modelId, system, user, {
+                this.embeddedBrowserLlm(system, user, {
                   ...options,
                   conversationId: null
                 })
@@ -354,6 +376,37 @@ export class ChatService {
       )
     }
     return this.claudeCodeClient
+  }
+
+  /** Lazily build the Cursor Agent client. */
+  private cursor(): CursorClient {
+    if (!this.cursorClient) {
+      this.cursorClient = new CursorClient(
+        this.emit,
+        () => this.tools.getWorkspaceRoot(),
+        {
+          get: (conversationId) => this.chats.get(conversationId)?.cursorSessionId ?? null,
+          set: (conversationId, sessionId) => this.chats.setCursorSessionId(conversationId, sessionId)
+        },
+        (args) => {
+          const workdir = this.tools.getWorkspaceRoot() ?? process.cwd()
+          return this.claudeCodeBridge().registerSession(
+            {
+              conversationId: args.conversationId,
+              modelId: args.modelId,
+              requestId: args.requestId,
+              browserLlm: (system, user, options) =>
+                this.embeddedBrowserLlm(system, user, {
+                  ...options,
+                  conversationId: null
+                })
+            },
+            { persistTokenKey: workdir }
+          )
+        }
+      )
+    }
+    return this.cursorClient
   }
 
   private claudeCodeBridge(): ClaudeCodeBridgeServer {
@@ -464,7 +517,8 @@ export class ChatService {
     const gateResumed = gate?.resume() ?? false
     const codexResumed = this.codexClient?.resumeRequest(requestId) ?? false
     const claudeCodeResumed = this.claudeCodeClient?.resumeRequest(requestId) ?? false
-    if (!gateResumed && !codexResumed && !claudeCodeResumed) return false
+    const cursorResumed = this.cursorClient?.resumeRequest(requestId) ?? false
+    if (!gateResumed && !codexResumed && !claudeCodeResumed && !cursorResumed) return false
     this.emit({
       requestId,
       type: 'loop_state',
@@ -473,10 +527,12 @@ export class ChatService {
       phase: 'act',
       iteration: 0,
       summary: codexResumed
-        ? 'Task resumed — Codex is picking up the same step it was on when paused.'
+        ? 'Task resumed - Codex is picking up the same step it was on when paused.'
         : claudeCodeResumed
-          ? 'Task resumed — Claude Code is picking up from the same session.'
-          : 'Task resumed — the agent is picking up where it left off.'
+          ? 'Task resumed - Claude Code is picking up from the same session.'
+          : cursorResumed
+            ? 'Task resumed - Cursor Agent is picking up from the same session.'
+            : 'Task resumed - the agent is picking up where it left off.'
     })
     return true
   }
@@ -529,7 +585,9 @@ export class ChatService {
         openAiKey: () => this.openAiKey(),
         grokKey: () => this.grokKey(),
         claudeCodeComplete: (providerModelId, system, user) =>
-          this.claudeCode().complete(providerModelId, system, user).then((result) => result.text)
+          this.claudeCode().complete(providerModelId, system, user).then((result) => result.text),
+        cursorComplete: (providerModelId, system, user) =>
+          this.cursor().complete(providerModelId, system, user).then((result) => result.text)
       }
     })
   }
@@ -676,6 +734,23 @@ export class ChatService {
           }
         })
         return result.text
+      } else if (model.provider === 'cursor') {
+        const call = this.audit.begin({
+          provider: model.provider,
+          modelId,
+          stage: options.stage ?? 'complete',
+          input: { system, user }
+        })
+        const result = await this.cursor().complete(model.id, system, user, options.conversationId)
+        call.finish({
+          output: result.text,
+          usage: {
+            inputTokens: result.usage?.inputTokens,
+            outputTokens: result.usage?.outputTokens,
+            cachedInputTokens: result.usage?.cachedInputTokens
+          }
+        })
+        return result.text
       } else {
         throw new Error(`complete() not supported for provider ${model.provider}`)
       }
@@ -773,6 +848,53 @@ export class ChatService {
           call.finish({ status: 'error', error: err })
           throw err
         }
+      } else if (model.provider === 'cursor') {
+        const resume = isBareContinuation(actionableText)
+        const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
+        supervisor.start(
+          resume ? 'Resuming Cursor Agent task.' : 'Starting Cursor Agent task.',
+          'Handing the task to the local Cursor Agent session.'
+        )
+        const call = this.audit.begin({
+          requestId: req.requestId,
+          conversationId: req.conversationId,
+          provider: 'cursor',
+          modelId: model.id,
+          stage: 'chat:cursor',
+          input: req.messages
+        })
+        try {
+          const wsBlock = this.agentConfig.workspaceSystemBlock(initialProfile)
+          const cursorSystem = [
+            CURSOR_SYSTEM,
+            this.agentConfig.customAgentSystemBlock(req),
+            wsBlock
+          ].filter(Boolean).join('\n\n')
+          this.logSystemPrompt('cursor', agentic ? 'agent' : 'ask', cursorSystem)
+          const cursorPrompt = formatCursorConversationPrompt(req.messages, actionableText)
+          const result = await this.cursor().send(
+            req,
+            controller.signal,
+            cursorSystem,
+            cursorPrompt,
+            agentic ? 'agent' : 'ask',
+            { enableBrowserTools: shouldEnableCursorMcpBridge(policy) }
+          )
+          supervisor.complete('Cursor Agent task completed.')
+          call.finish({
+            output: result.text,
+            usage: {
+              inputTokens: result.usage?.inputTokens,
+              outputTokens: result.usage?.outputTokens,
+              cachedInputTokens: result.usage?.cachedInputTokens
+            }
+          })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          supervisor.blocked(message, controller.signal.aborted)
+          call.finish({ status: 'error', error: err })
+          throw err
+        }
       } else {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         const client = this.getModelClient(model.provider)
@@ -849,6 +971,28 @@ export class ChatService {
           conversationId: options?.conversationId ?? conversationId
         })
     }
+  }
+
+  private embeddedBrowserLlm(
+    system: string,
+    user: string,
+    options?: LlmCompleteOptions
+  ): Promise<string> {
+    const model = this.preferredEmbeddedBrowserModel()
+    return this.complete(model.id, system, user, options)
+  }
+
+  private preferredEmbeddedBrowserModel(): ModelOption {
+    const keyStatus = this.keys.status()
+    for (const modelId of EMBEDDED_BROWSER_LLM_MODEL_ORDER) {
+      const model = this.model(modelId)
+      if (!model) continue
+      if (model.provider === 'anthropic' && keyStatus.anthropic) return model
+      if (model.provider === 'google' && keyStatus.google) return model
+      if (model.provider === 'openai' && keyStatus.openai) return model
+      if (model.provider === 'grok' && keyStatus.grok) return model
+    }
+    throw new Error('No API-backed browser helper model is available for embedded MCP tool work')
   }
 
   /* ============================ ASK MODE ============================ */
@@ -956,3 +1100,4 @@ function normalizeMaxOutputTokens(value: number): number {
 function estimateTokens(system: string, user: string): number {
   return Math.ceil((system.length + user.length) / 4)
 }
+

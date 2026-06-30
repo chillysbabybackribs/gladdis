@@ -1,6 +1,6 @@
 {
   "name": "gladdis",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "CDP-owned browser + chat desktop app (Cursor-dark themed)",
   "desktopName": "gladys",
   "main": "out/main/index.js",

@@ -3,12 +3,12 @@
 Date: 2026-06-29
 
 ## Goal
-Design an upgraded agent creation flow for the header `Agents` dropdown that does more than rewrite a prompt. The builder should let a user describe what they want, then run a deep optimization pass that uses the best available model to discover the optimal execution process for the current workspace, and finally save a reviewable blueprint with the distilled findings.
+Document the current Agent Builder direction: it does more than rewrite a prompt. The builder lets a user describe what they want, optionally run quick or deep optimization with the best available usable model, inspect a generated blueprint, edit the final prompt/test task, and save the distilled findings with the agent.
 
 ## What “done” means
 1. The blueprint clearly distinguishes between the current behavior and the proposed behavior.
 2. The blueprint defines the new optimize flow, including quick vs deep optimize.
-3. The blueprint lists the exact artifact shape that should be saved for review.
+3. The blueprint lists the exact artifact shape that is saved for review.
 4. The blueprint calls out risks, guardrails, and rollout suggestions.
 
 ## Live repo facts observed
@@ -33,6 +33,7 @@ The builder now behaves as a lightweight distillation system:
 - custom agents can constrain runtime tool profile from preferred/disallowed tool lists.
 - remaining work now is mostly polish:
   - add cross-mode compare UI (quick vs deep outputs)
+  - make generated blueprint fields directly editable, if that becomes a priority
 
 ## Proposed product direction
 
@@ -49,7 +50,7 @@ When the user creates an agent from the `Agents` dropdown:
    - stable repo conventions
    - unnecessary noise to omit
 5. The system then distills that into a compact reusable blueprint.
-6. The user reviews the blueprint before saving.
+6. The user reviews the blueprint before saving; today only the final prompt and test task are directly editable in the modal.
 
 ### Why this is better
 The main value is not better wording. It is removing rediscovery work:
@@ -88,9 +89,9 @@ This should be the default for serious agent creation.
 7. Save only after the user confirms.
 
 ## Blueprint artifact shape
-The saved output should evolve from a single prompt into a structured agent blueprint.
+The saved output has evolved from a single prompt into a structured agent blueprint.
 
-Recommended fields:
+Saved/reviewed fields:
 - `name`
 - `goal`
 - `optimizerModelId`
@@ -132,7 +133,7 @@ Examples:
 - research/web: only if the task needs external information
 - memory: only when the agent should persist or recall durable task facts
 
-The builder should surface tool choices explicitly so the user can edit them.
+The builder surfaces generated tool choices in the review panel; direct editing of those blueprint fields is still future polish.
 
 ## File path policy recommendation
 If the optimizer discovers relevant paths, they should be preserved in the blueprint.

@@ -5,15 +5,16 @@ A CDP-owned browser + chat desktop app. Cursor-dark themed. Split view:
 
 Every tab is a native Electron `WebContentsView` with the Chrome DevTools
 Protocol debugger attached, so the entire browser — DOM tree, network,
-console, runtime, storage, page lifecycle — is programmatically accessible
-(designed to be driven by a model via `window.gladdis.cdp` + `window.gladdis.tabs`).
+console, runtime, storage, page lifecycle — is programmatically accessible.
+Renderer IPC exposes `window.gladdis.tabs`, `window.gladdis.cdp`, and the
+higher-level model tool surface in `src/main/models/browserTools.ts`.
 
 ## Stack
 
 - **Electron 42** — stable `WebContentsView` API
 - **electron-vite 5** — main / preload / renderer bundling + HMR
 - **React 19 + TypeScript** — renderer UI
-- **Custom React split layout** — dual chat drawers around a native browser view
+- **Custom React split layout** — two chat panels around a native browser view
 
 ## Run
 
@@ -72,18 +73,28 @@ for sign-in and return to Gladdis after authentication.
 ```
 src/
   main/                 # Electron main process
-    index.ts            # BaseWindow + root WebContentsView (the UI), IPC wiring
-    TabManager.ts       # owns a WebContentsView per tab, layering & bounds
+    index.ts            # BaseWindow + root WebContentsView (the UI), IPC/menu wiring
+    TabManager.ts       # owns a WebContentsView per tab, layering, zoom & bounds
     cdp/
       CDPSession.ts      # debugger.attach('1.3'), enables CDP domains, event pump
+    extract/
+      PageExtractor.ts   # deterministic page capture used by read_page/search tools
+    models/
+      ChatService.ts     # provider dispatch, agent lifecycle, Codex/Claude Code handoff
+      browserTools.ts    # deterministic tool dispatcher used by all agent runtimes
+      agentTools/        # tool definitions grouped by search/browser/repo/fs/memory
+      codex/             # Codex app-server integration + dynamic gladdis.* tools
+      claudeCode/        # Claude Code CLI integration + local HTTP MCP bridge
+    fs/                  # file/repo/workspace helpers
+    terminal/            # PTY host for the in-app terminal
   preload/
-    index.ts            # contextBridge -> window.gladdis.{tabs, layout, cdp}
-  renderer/             # React UI (chat + tabstrip + url bar)
-    App.tsx             # resizable split (persisted to localStorage)
-    components/         # ChatPanel, BrowserPanel, TabStrip, UrlBar
+    index.ts            # contextBridge -> window.gladdis API
+  renderer/             # React UI (chat panels + browser controls + modals)
+    App.tsx             # top-level app shell
+    components/         # Workspace, ChatPanel, BrowserPanel, AgentBuilder, terminal
     styles/             # Cursor-dark theme
 shared/
-  types.ts              # IPC channel + payload contract, shared all sides
+  types.ts              # shared barrel for IPC, model, chat, browser, agent types
 ```
 
 ### How the browser is layered
@@ -118,13 +129,19 @@ const title = await window.gladdis.cdp.send({
 
 ## Models & chat
 
-The chat panel streams real completions from **Anthropic** and **Google**
-models, selectable from a dropdown:
+The chat panels stream real completions from six provider families:
 
-- Anthropic — `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-haiku-4-5`
-  (via `@anthropic-ai/sdk`, `client.messages.stream(...).on('text', …)`)
-- Google — `gemini-3.5-flash`, `gemini-3.1-pro`, `gemini-2.5-flash`
-  (via `@google/genai`, `ai.models.generateContentStream(...)`)
+- Anthropic — via `@anthropic-ai/sdk`
+- Google — via `@google/genai`
+- OpenAI — via the OpenAI-compatible Responses endpoint wrapper in
+  `src/main/models/providers/openai.ts`
+- Grok/xAI — via the OpenAI-compatible wrapper in
+  `src/main/models/providers/grok.ts`
+- Codex — via a local long-lived `codex app-server`
+- Claude Code — via the local Claude Code CLI plus a Gladdis MCP bridge
+
+The canonical static model catalog lives in `shared/models.ts`; Codex also adds
+live CLI models from `codex app-server model/list` when available.
 
 Completions run in the **main process**, so API keys never reach the renderer —
 only streamed text deltas do (over the `chat:stream` IPC channel, keyed by
@@ -133,37 +150,47 @@ markdown (`marked` + `DOMPurify`).
 
 ### API keys
 
-Set keys via the ⚙ button in the chat header (stored encrypted on-device via the
-OS keychain through Electron `safeStorage`, in `userData/gladdis-keys.json`), or
-via environment variables which take precedence and aren't persisted:
+Set keys via the settings button in the chat header (stored encrypted on-device
+via the OS keychain through Electron `safeStorage`, in
+`userData/gladdis-keys.json`), or via environment variables which take
+precedence and aren't persisted:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 export GEMINI_API_KEY=AIza...
+export OPENAI_API_KEY=sk-...
+export XAI_API_KEY=xai-...   # GROK_API_KEY is also accepted
 ```
 
 Model layer lives in `src/main/models/` (`KeyStore.ts`, `ChatService.ts`,
-`browserTools.ts`).
+`providerRouting.ts`, `browserTools.ts`, and `providers/`).
 
 ### Chat, planning, and execution
 
-The composer no longer asks the user to choose between Ask and Agent. Page
-attachment is the context signal: if a page is attached, the main process can
-route the turn through browser-capable execution; otherwise it streams plain
-chat. The model should be treated as chat, planner, and final responder, while
-deterministic runtime code does the browser and filesystem work.
+The composer sends agent-mode turns by default. `turnContextPolicy` and
+`selectAgentToolProfile` choose a lean starting tool profile from the user text,
+recent context, active page state, and workspace state. Every profile includes
+`request_tools`, so the model can pull in filesystem, browser, or research tools
+mid-turn instead of stopping when the first guess is too narrow.
 
-The current provider-neutral execution registry lives in
-`src/main/models/browserTools.ts`; Anthropic / Google adapters still translate it
-into each SDK's function-calling format during this transition. The next
-refactor step is to move this registry behind an internal deterministic runtime
-so the model emits plans instead of directly seeing a tool menu.
+The shared API-provider loop lives in
+`src/main/models/agentLoopRunner.ts` and is dispatched through
+`src/main/models/providerRouting.ts` for Anthropic, Google, OpenAI, and Grok.
+Codex and Claude Code use their own embedded-runtime paths, but all browser work
+still routes through `BrowserTools.run(...)`.
 
 Tool families:
 
+- **Search / research** — `search`, `search_open`, `deep_search`, `fetch_page`.
+  Web search is intentionally routed through Gladdis so results open in the
+  visible Chromium tab.
 - **Browser** — `browse_task`, `read_page`, `navigate`,
-  `grep_page`, `grep_click`, `grep_type`, `click_xy`, `type_text`, `press_key`, `execute_in_browser`, `cdp_command`.
-  Prefer `grep_page` for discovery and `grep_click` / `grep_type` for direct action when the target is identifiable from page text or selectors. The active tab is still fully owned by CDP; this list is transitional and should collapse behind one deterministic runtime.
+  `grep_page`, `grep_click`, `grep_type`, `click_xy`, `type_text`, `press_key`,
+  `execute_in_browser`, `cdp_command`, `screenshot`, `screenshot_app`.
+  Prefer `grep_page` for discovery and `grep_click` / `grep_type` for direct
+  action when the target is identifiable from page text or selectors.
+- **Repo intelligence** — `repo_overview`, `search_repo`, `read_spans`,
+  `research_dossier`, `verify_change`.
 - **Filesystem** (`src/main/fs/FileTools.ts`) — `read_file`, `write_file`,
   `edit_file` (exact unique string replace, or `replace_all`), `list_dir`, and
   `search_files` (recursive case-insensitive content search with an optional
@@ -173,8 +200,8 @@ Tool families:
   is surfaced in chat. Scope is the whole filesystem the OS user can reach
   (`search_files` skips `node_modules`/`.git`/build dirs). Paths may be absolute
   or relative to the process working directory.
-- **Memory** — `recall_history`. Conversation context the model pulls on demand
-  (see below).
+- **Memory** — `recall_history`, plus working-memory tools for runtimes that
+  expose them.
 
 ### Codex inside Gladdis
 
@@ -184,9 +211,17 @@ button only chooses Codex's starting `cwd`; it is not a write boundary or
 sandbox. Codex is not allowed to become a second browser automation stack.
 Gladdis is the browser owner: page reading, UI preview, screenshots, and visual verification
 must flow through the embedded `WebContentsView` tab via app-server dynamic tools
-(`gladdis.search_task`, `gladdis.browse_task`, `gladdis.read_page`,
-`gladdis.screenshot`) or through Gladdis's own post-Codex
+(`gladdis.search`, `gladdis.fetch_page`, `gladdis.browse_task`,
+`gladdis.read_page`, `gladdis.grep_page`, `gladdis.screenshot`) or through Gladdis's own post-Codex
 preview handoff.
+
+### Claude Code inside Gladdis
+
+Claude Code runs through its local CLI. For browser and Gladdis-specific context
+work, Gladdis registers a local HTTP MCP server named `gladdis` and passes it to
+Claude Code for the active session. The bridge exposes search, page-read,
+browser-drive, repo-intelligence, recall, and working-memory tools; native
+Claude Code shell/file abilities remain available for local code work.
 
 The Codex config disables native web search for Gladdis sessions, and the main
 process blocks external browser commands such as Playwright/Puppeteer visual
@@ -246,6 +281,16 @@ with Anthropic **prompt caching** (`cache_control: ephemeral`), so they aren't
 re-billed each loop iteration. Net effect: prompt size stays roughly flat
 instead of growing with the conversation.
 
+### Custom agents
+
+Saved agents are stored in `userData/gladdis-agents.json`. The Agent Builder can
+run quick or deep optimization: quick uses a compact repo overview, while deep
+adds repo search, targeted span reads, and a research dossier before distilling
+a blueprint. Saved blueprint fields include model preferences, tool constraints,
+known paths/commands, workflow and verification steps, assumptions, fallbacks,
+and validation notes. At runtime those fields are injected into the agent system
+block and tool policy.
+
 > Because writes apply immediately with no per-file confirmation, treat
 > browser-capable/code-capable turns like giving the model a shell: only point it
 > at code you're willing to have changed.
@@ -265,7 +310,7 @@ What the agent can do, by design, on the OS user's behalf:
   machine if the OS user has it).
 - Drive the embedded Chromium via the full Chrome DevTools Protocol — clicks,
   typing, navigation, JavaScript injection.
-- Issue any Anthropic / Google / Grok / Codex / OpenAI API call the
+- Issue any Anthropic / Google / Grok / OpenAI / Codex / Claude Code call the
   configured keys authorize, and keep streaming results into your
   conversation.
 
@@ -281,7 +326,8 @@ chat transcripts.
 
 ## Status
 
-Browser, tabs, layout, full CDP plumbing, streamed multi-provider chat, and the
-current browser/filesystem execution loop are implemented
-and verified (typecheck + build clean; filesystem tool logic unit-tested; SDK
-API surface and Electron boot smoke-tested).
+Browser, tabs, layout, full CDP plumbing, streamed multi-provider chat,
+Codex/Claude Code embedded runtimes, local terminal, saved chats, custom agents,
+memory dreaming, and the current browser/filesystem execution loop are
+implemented. Use `npm run check` for the repo's current typecheck + test gate;
+use `npm run build` for production bundle validation.

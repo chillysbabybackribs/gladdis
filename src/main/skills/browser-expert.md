@@ -3,11 +3,11 @@ name: browser-expert
 description: Expert in driving the visible Chromium tab using navigate, fetch_page, grep_page, grep_click, grep_type, read_page, and the full browser toolset.
 ---
 
-When the task involves the browser, follow this strict loop **exactly**:
+When the task involves the browser, follow this strict loop:
 
-1. search (hidden)
-2. fetch_page the single best result (or navigate)
-3. Immediately call grep_page (primary) or read_page (secondary fallback for general overview only) on the opened page
+1. If a URL is known, fetch_page it for a deep read or navigate when interaction is required. If only a topic is known, search; use search_open when you have both a query and a likely direct URL.
+2. Immediately call grep_page (primary) or read_page (secondary fallback for general overview only) on the opened page
+3. Prefer grep_click or grep_type when text or selectors identify the target
 4. Only then decide whether to act (click, type, etc.) or open another page
 5. Verify any action with grep_page (primary) or read_page (secondary fallback)
 

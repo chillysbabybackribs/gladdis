@@ -10,6 +10,7 @@ import {
 } from './toolValidation'
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 import { withDateContext } from './dateContext'
+import { approxInputChars } from '../ModelCallLedger'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
 type ActiveAuditCall = {
@@ -24,6 +25,7 @@ type ModelAudit = {
     modelId: string
     stage: string
     input: unknown
+    inputChars?: number
   }) => ActiveAuditCall
 }
 
@@ -267,7 +269,8 @@ export async function runAnthropicToolLoop(args: {
       provider: 'anthropic',
       modelId: args.modelId,
       stage: `chat:browser:${turn}`,
-      input: { system: args.agentSystem, tools: anthropicTools, messages }
+      input: { system: args.agentSystem, tools: anthropicTools, messages },
+      inputChars: approxInputChars({ system: args.agentSystem, tools: anthropicTools, messages })
     })
     let final: any
     try {

@@ -171,6 +171,9 @@ export class ChatService {
   /** Lazily-created local HTTP MCP server for Claude Code browser/context tools. */
   private claudeCodeBridgeServer: ClaudeCodeBridgeServer | null = null
   private dynamicModels = new Map<string, ModelOption>()
+  /** Provider SDK clients, cached by their API key so connection pools persist. */
+  private anthropicClient: { key: string; client: Anthropic } | null = null
+  private googleClient: { key: string; client: GoogleGenAI } | null = null
   private readonly toolStarts = new Map<string, number>()
   private readonly capabilityBroker: CapabilityBroker
   private readonly repoIntelligence: RepoIntelligenceService
@@ -865,6 +868,9 @@ export class ChatService {
   }
 
   private logSystemPrompt(provider: string, mode: string, system: string): void {
+    // Dev aid only: dumping the full system prompt (tens of KB) to stderr on
+    // every turn is a blocking sync write on the hot path. Off unless opted in.
+    if (!process.env.GLADDIS_LOG_SYSTEM_PROMPT) return
     const bar = '='.repeat(78)
     process.stderr.write(
       `\n${bar}\n[SYSTEM PROMPT] provider=${provider} mode=${mode} chars=${system.length}\n${bar}\n` +
@@ -911,13 +917,22 @@ export class ChatService {
   private anthropic(): Anthropic {
     const key = this.keys.get('anthropic')
     if (!key) throw new Error('Anthropic API key not found in KeyStore')
-    return new Anthropic({ apiKey: key })
+    // Reuse one client per key so the SDK's HTTP keep-alive pool survives across
+    // calls. The cache key is the secret itself, so a key change rebuilds the
+    // client with no separate invalidation wiring.
+    if (this.anthropicClient?.key !== key) {
+      this.anthropicClient = { key, client: new Anthropic({ apiKey: key }) }
+    }
+    return this.anthropicClient.client
   }
 
   private google(): GoogleGenAI {
     const apiKey = this.keys.get('google')
     if (!apiKey) throw new Error('Google API key not found in KeyStore')
-    return new GoogleGenAI({ apiKey })
+    if (this.googleClient?.key !== apiKey) {
+      this.googleClient = { key: apiKey, client: new GoogleGenAI({ apiKey }) }
+    }
+    return this.googleClient.client
   }
 
   private openAiKey(): string {

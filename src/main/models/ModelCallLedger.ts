@@ -17,6 +17,13 @@ interface BeginModelCall {
   modelId: string
   stage: string
   input: unknown
+  /**
+   * Pre-computed input size in characters. When supplied, the ledger skips
+   * serializing `input` just to measure it — the agentic loop passes this so a
+   * long, growing conversation isn't JSON.stringify'd from scratch every turn
+   * (that was O(turns²) work whose only output was a discarded length).
+   */
+  inputChars?: number
 }
 
 interface FinishModelCall {
@@ -81,7 +88,9 @@ export class ModelCallLedger {
   }
 
   begin(call: BeginModelCall): ActiveModelCall {
-    const inputText = stringifyForAudit(call.input)
+    // Prefer a caller-supplied length; only fall back to serializing the input
+    // when none is given (small one-shot calls where the cost is negligible).
+    const inputChars = call.inputChars ?? stringifyForAudit(call.input).length
     const now = Date.now()
     const id = `mc-${now}-${Math.random().toString(36).slice(2)}`
     const record: ModelCallRecord = {
@@ -93,9 +102,9 @@ export class ModelCallLedger {
       stage: call.stage,
       status: 'running',
       startedAt: now,
-      inputChars: inputText.length,
+      inputChars,
       outputChars: 0,
-      inputTokensEstimate: estimateTokens(inputText.length),
+      inputTokensEstimate: estimateTokens(inputChars),
       outputTokensEstimate: 0
     }
     this.store(record)
@@ -170,6 +179,24 @@ export class ModelCallLedger {
 
 function estimateTokens(chars: number): number {
   return Math.ceil(chars / 4)
+}
+
+/**
+ * Cheap input-size estimate for the agentic loop's audit record. Walks the
+ * `{ system, tools, messages }` payload summing string lengths instead of
+ * JSON.stringify-ing the whole (growing) conversation every turn. Approximate
+ * by design — the ledger only stores a char count, so exactness isn't needed.
+ */
+export function approxInputChars(value: unknown): number {
+  if (value == null) return 0
+  if (typeof value === 'string') return value.length
+  if (typeof value !== 'object') return String(value).length
+  let total = 0
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    if (Array.isArray(v)) for (const item of v) total += approxInputChars(item)
+    else total += approxInputChars(v)
+  }
+  return total
 }
 
 function stringifyForAudit(value: unknown): string {

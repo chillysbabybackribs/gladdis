@@ -11,6 +11,7 @@ import {
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
+import { approxInputChars } from '../ModelCallLedger'
 
 // xAI exposes an OpenAI-compatible Chat Completions API. We talk to it with
 // plain fetch + SSE — no SDK — matching the repo's existing OpenAI-compatible
@@ -37,6 +38,7 @@ type ModelAudit = {
     modelId: string
     stage: string
     input: unknown
+    inputChars?: number
   }) => ActiveAuditCall
 }
 
@@ -450,7 +452,8 @@ export async function runGrokToolLoop(args: {
       provider: 'grok',
       modelId: args.modelId,
       stage: `chat:browser:${turn}`,
-      input: { system: systemText, tools, messages }
+      input: { system: systemText, tools, messages },
+      inputChars: approxInputChars({ system: systemText, tools, messages })
     })
     let assistant: StreamedTurn
     try {

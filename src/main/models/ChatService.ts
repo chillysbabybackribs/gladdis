@@ -357,6 +357,18 @@ export class ChatService {
     })
   }
 
+  /**
+   * Live Cursor model catalog from `agent models`, so the picker matches the
+   * installed account/CLI when available. Returns [] on failure and the
+   * renderer falls back to the static cursor entries in MODELS.
+   */
+  cursorModels(): Promise<ModelOption[]> {
+    return this.cursor().listModels().then((models) => {
+      for (const model of models) this.dynamicModels.set(model.id, model)
+      return models
+    })
+  }
+
   /** Current Codex starting cwd choice. */
   getCodexWorkspace(): CodexWorkspace {
     return this.codexWorkspace

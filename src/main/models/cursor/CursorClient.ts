@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
-import type { ChatRequest, ChatStreamEvent, CursorStatus } from '../../../../shared/types'
+import type { ChatRequest, ChatStreamEvent, CursorStatus, ModelOption } from '../../../../shared/types'
 import type { ChatMessage } from '../../../../shared/chat'
 import type { BridgeRegistration } from '../claudeCode/ClaudeCodeBridgeServer'
 import { CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from '../claudeCode/browserTools'
@@ -127,6 +127,22 @@ export class CursorClient {
       return status
     } finally {
       activeStatus = null
+    }
+  }
+
+  /**
+   * Live model catalog from `agent models`. Returns [] if Cursor isn't
+   * installed/reachable so the caller can fall back to static picker entries.
+   */
+  async listModels(): Promise<ModelOption[]> {
+    const probe = await probeCursorBinary()
+    if (!probe.installed) return []
+    try {
+      const { stdout, stderr } = await execFileAsync(CURSOR_BIN, ['models'], { timeout: 8000 })
+      return parseCursorModels(stdout + '\n' + stderr)
+    } catch (error) {
+      console.warn('[cursor] models failed:', error instanceof Error ? error.message : error)
+      return []
     }
   }
 
@@ -566,6 +582,28 @@ function mergeCursorUsage(base: CursorUsage | undefined, next: CursorUsage | und
     outputTokens: (base.outputTokens ?? 0) + (next.outputTokens ?? 0),
     cachedInputTokens: (base.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0)
   }
+}
+
+export function parseCursorModels(text: string): ModelOption[] {
+  const models: ModelOption[] = []
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line === 'Available models' || line.startsWith('Tip:') || line.startsWith('Usage:')) {
+      continue
+    }
+    const match = /^([^\s]+)\s+-\s+(.+)$/.exec(line)
+    if (!match) continue
+    const id = match[1]?.trim()
+    const rawLabel = match[2]?.trim()
+    if (!id || !rawLabel) continue
+    const label = rawLabel.replace(/\s+\((?:default|current)\)\s*$/i, '').trim()
+    models.push({
+      id,
+      label: `Cursor · ${label}`,
+      provider: 'cursor'
+    })
+  }
+  return models
 }
 
 function gladdisMcpFingerprint(mcpConfigJson: string): string | null {

@@ -93,6 +93,10 @@ const api: GladdisApi = {
   claudeCode: {
     status: () => ipcRenderer.invoke(IPC.CLAUDE_CODE_STATUS)
   },
+  cursor: {
+    status: () => ipcRenderer.invoke(IPC.CURSOR_STATUS),
+    models: () => ipcRenderer.invoke(IPC.CURSOR_MODELS)
+  },
   workspace: {
     get: () => ipcRenderer.invoke(IPC.WORKSPACE_GET),
     setFolder: (folder: string | null) => ipcRenderer.invoke(IPC.WORKSPACE_SET_FOLDER, folder),

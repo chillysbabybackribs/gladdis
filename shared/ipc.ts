@@ -26,6 +26,8 @@ export const IPC = {
   CODEX_STATUS: 'codex:status',
   CODEX_MODELS: 'codex:models',
   CLAUDE_CODE_STATUS: 'claudeCode:status',
+  CURSOR_STATUS: 'cursor:status',
+  CURSOR_MODELS: 'cursor:models',
   WORKSPACE_GET: 'workspace:get',
   WORKSPACE_SET_FOLDER: 'workspace:setFolder',
   WORKSPACE_PICK_FOLDER: 'workspace:pickFolder',

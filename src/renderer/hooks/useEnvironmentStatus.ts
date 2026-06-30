@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type {
   ClaudeCodeStatus,
   CodexStatus,
+  CursorStatus,
   KeyStatus,
   ModelOption,
   Workspace
@@ -22,6 +23,7 @@ export interface EnvironmentStatus {
   setKeyStatus: (next: KeyStatus) => void
   codexStatus: CodexStatus | null
   claudeCodeStatus: ClaudeCodeStatus | null
+  cursorStatus: CursorStatus | null
   models: ModelOption[]
   workspace: Workspace
   setWorkspace: (next: Workspace) => void
@@ -33,13 +35,28 @@ export function useEnvironmentStatus(): EnvironmentStatus {
     anthropic: false,
     google: false,
     codex: false,
+    cursor: false,
     openai: false,
     grok: false
   })
   const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null)
   const [claudeCodeStatus, setClaudeCodeStatus] = useState<ClaudeCodeStatus | null>(null)
+  const [cursorStatus, setCursorStatus] = useState<CursorStatus | null>(null)
   const [models, setModels] = useState<ModelOption[]>(MODELS)
   const [workspace, setWorkspace] = useState<Workspace>({ folder: null })
+
+  const mergeLiveModels = (codexModels: ModelOption[], cursorModels: ModelOption[]) => {
+    const base = MODELS.filter((m) => {
+      if (m.provider === 'codex') return codexModels.length === 0
+      if (m.provider === 'cursor') return cursorModels.length === 0
+      return true
+    })
+    return [
+      ...base,
+      ...codexModels,
+      ...cursorModels
+    ]
+  }
 
   useEffect(() => {
     void Promise.all([
@@ -47,16 +64,24 @@ export function useEnvironmentStatus(): EnvironmentStatus {
       window.gladdis.workspace.get(),
       window.gladdis.codex.status().catch(() => null), // Handle potential error for codex.status
       window.gladdis.claudeCode.status().catch(() => null),
-      window.gladdis.codex.models().catch(() => []) // Handle potential error for codex.models
-    ]).then(([keyStatus, workspace, codexStatus, claudeCodeStatus, codexModels]) => {
+      window.gladdis.cursor.status().catch(() => null),
+      window.gladdis.codex.models().catch(() => []), // Handle potential error for codex.models
+      window.gladdis.cursor.models().catch(() => [])
+    ]).then(([
+      keyStatus,
+      workspace,
+      codexStatus,
+      claudeCodeStatus,
+      cursorStatus,
+      codexModels,
+      cursorModels
+    ]) => {
       setKeyStatus(keyStatus)
       setWorkspace(workspace)
       setCodexStatus(codexStatus)
       setClaudeCodeStatus(claudeCodeStatus)
-      if (codexModels.length) {
-        const nonCodex = MODELS.filter((m) => m.provider !== 'codex')
-        setModels([...nonCodex, ...codexModels])
-      }
+      setCursorStatus(cursorStatus)
+      setModels(mergeLiveModels(codexModels, cursorModels))
     })
 
     const offWorkspace = window.gladdis.workspace.onUpdated(setWorkspace)
@@ -73,6 +98,7 @@ export function useEnvironmentStatus(): EnvironmentStatus {
     setKeyStatus,
     codexStatus,
     claudeCodeStatus,
+    cursorStatus,
     models,
     workspace,
     setWorkspace,

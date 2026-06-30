@@ -1,23 +1,41 @@
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 
 const spawnMock = vi.fn()
+const execFileMock = vi.fn()
 vi.mock('node:child_process', () => ({
   spawn: (...args: unknown[]) => spawnMock(...args),
-  // probeCursorBinary() shells out to `agent --version`; succeed so runTurn proceeds.
-  execFile: (...args: unknown[]) => {
-    const cb = args[args.length - 1] as (err: unknown, res: { stdout: string; stderr: string }) => void
-    cb(null, { stdout: '2026.1.0', stderr: '' })
-    return new EventEmitter()
-  }
+  execFile: (...args: unknown[]) => execFileMock(...args)
 }))
 
-import { classifyAssistantEvent, computeCursorEmitDelta, ensureWorkspaceMcpConfig, isMcpConfigWarm, probeMcpConfigWarm, shouldEmitAssistantStreamText, CursorClient } from './CursorClient'
+import { classifyAssistantEvent, computeCursorEmitDelta, ensureWorkspaceMcpConfig, isMcpConfigWarm, parseCursorModels, probeMcpConfigWarm, shouldEmitAssistantStreamText, CursorClient } from './CursorClient'
 import { CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from '../claudeCode/browserTools'
+
+beforeEach(() => {
+  execFileMock.mockReset()
+  execFileMock.mockImplementation((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (err: unknown, res: { stdout: string; stderr: string }) => void
+    const cmdArgs = args[1] as string[]
+    if (cmdArgs?.[0] === '--version') {
+      cb(null, { stdout: '2026.1.0', stderr: '' })
+      return new EventEmitter()
+    }
+    if (cmdArgs?.[0] === 'models') {
+      cb(null, { stdout: '', stderr: '' })
+      return new EventEmitter()
+    }
+    if (cmdArgs?.[0] === 'status') {
+      cb(null, { stdout: 'Logged in as test@example.com', stderr: '' })
+      return new EventEmitter()
+    }
+    cb(null, { stdout: '', stderr: '' })
+    return new EventEmitter()
+  })
+})
 
 /** A fake `agent` child that emits a single terminal stream-json `result` then closes 0. */
 function makeFakeCursorChild(resultText: string): import('node:child_process').ChildProcess {
@@ -57,6 +75,24 @@ function makeCursorChildWithJsonLines(
 }
 
 describe('CursorClient assistant stream parsing', () => {
+  it('parses live model catalogs from `agent models` output', () => {
+    const models = parseCursorModels(`
+Available models
+
+composer-2.5 - Composer 2.5 (current)
+composer-2.5-fast - Composer 2.5 Fast (default)
+gpt-5.5-medium - GPT-5.5 1M
+
+Tip: use --model <id> to switch.
+`)
+
+    expect(models).toEqual([
+      { id: 'composer-2.5', label: 'Cursor · Composer 2.5', provider: 'cursor' },
+      { id: 'composer-2.5-fast', label: 'Cursor · Composer 2.5 Fast', provider: 'cursor' },
+      { id: 'gpt-5.5-medium', label: 'Cursor · GPT-5.5 1M', provider: 'cursor' }
+    ])
+  })
+
   it('keeps only true streaming deltas and classifies duplicate flushes', () => {
     expect(
       classifyAssistantEvent({
@@ -606,5 +642,37 @@ describe('CursorClient spawn mode', () => {
     expect(args).toContain('--mode')
     expect(args).toContain('ask')
     expect(args).not.toContain('--force')
+  })
+
+  it('lists live Cursor models from the CLI catalog', async () => {
+    execFileMock.mockImplementation((...args: unknown[]) => {
+      const cb = args[args.length - 1] as (err: unknown, res: { stdout: string; stderr: string }) => void
+      const cmdArgs = args[1] as string[]
+      if (cmdArgs?.[0] === '--version') {
+        cb(null, { stdout: '2026.1.0', stderr: '' })
+        return new EventEmitter()
+      }
+      if (cmdArgs?.[0] === 'models') {
+        cb(null, {
+          stdout: [
+            'Available models',
+            '',
+            'composer-2.5-fast - Composer 2.5 Fast (default)',
+            'gpt-5.5-medium - GPT-5.5 1M',
+            ''
+          ].join('\n'),
+          stderr: ''
+        })
+        return new EventEmitter()
+      }
+      cb(null, { stdout: '', stderr: '' })
+      return new EventEmitter()
+    })
+
+    const client = newClient()
+    await expect(client.listModels()).resolves.toEqual([
+      { id: 'composer-2.5-fast', label: 'Cursor · Composer 2.5 Fast', provider: 'cursor' },
+      { id: 'gpt-5.5-medium', label: 'Cursor · GPT-5.5 1M', provider: 'cursor' }
+    ])
   })
 })

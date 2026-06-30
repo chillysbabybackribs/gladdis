@@ -15,6 +15,7 @@ import type {
   ClaudeCodeStatus,
   CodexStatus,
   Conversation,
+  CursorStatus,
   ConversationMeta,
   ConversationSearchHit,
   KeyStatus,
@@ -123,6 +124,12 @@ export interface GladdisApi {
   claudeCode: {
     /** Install + auth status of the local Claude Code CLI. */
     status: () => Promise<ClaudeCodeStatus>
+  }
+  cursor: {
+    /** Install + auth status of the local Cursor Agent CLI. */
+    status: () => Promise<CursorStatus>
+    /** Live model catalog from `agent models` ([] if unreachable). */
+    models: () => Promise<ModelOption[]>
   }
   workspace: {
     /** The folder gladdis currently works from. */

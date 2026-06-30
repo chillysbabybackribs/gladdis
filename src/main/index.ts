@@ -42,7 +42,8 @@ import {
   type OptimizeAgentInput,
   type Provider,
   type SaveAgentInput,
-  type ViewBounds
+  type ViewBounds,
+  MODELS
 } from '../../shared/types'
 import { AutoDreamScheduler } from './models/memory/AutoDreamScheduler'
 import { loadDreamHistory } from './models/memory/dreamHistory'
@@ -284,6 +285,11 @@ function registerIpc(): void {
   ipcMain.on(IPC.CHAT_SEND, (_e, req: ChatRequest) => {
     const folder = registry.workspace.get().folder
     if (folder) registry.autoDream.nudge(folder)
+    // Pre-warm Cursor MCP bridge when a Cursor model with browser intent is selected
+    const model = MODELS.find((m) => m.id === req.modelId)
+    if (model?.provider === 'cursor') {
+      registry.chat.warmCursorBridge()
+    }
     void registry.chat.send(req)
   })
   ipcMain.on(IPC.CHAT_INTERJECT, (_e, req: ChatInterjectionRequest) => registry.chat.interject(req))
@@ -300,6 +306,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.CODEX_STATUS, () => registry.chat.codexStatus())
   ipcMain.handle(IPC.CODEX_MODELS, () => registry.chat.codexModels())
   ipcMain.handle(IPC.CLAUDE_CODE_STATUS, () => registry.chat.claudeCodeStatus())
+  ipcMain.handle(IPC.CURSOR_STATUS, () => registry.chat.cursorStatus())
+  ipcMain.handle(IPC.CURSOR_MODELS, () => registry.chat.cursorModels())
 
   ipcMain.handle(IPC.WORKSPACE_GET, () => registry.workspace.get())
   ipcMain.handle(IPC.WORKSPACE_SET_FOLDER, (_e, folder: string | null) => applyWorkspaceFolder(folder))

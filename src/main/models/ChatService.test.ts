@@ -988,6 +988,30 @@ describe('ChatService provider hardening', () => {
     )
   })
 
+  it('loads live Cursor models into the dynamic catalog', async () => {
+    const { service } = makeService()
+    const listModels = vi.fn(async () => [
+      { id: 'auto', label: 'Cursor · Auto', provider: 'cursor' },
+      { id: 'gpt-5.5-medium-fast', label: 'Cursor · GPT-5.5 Fast', provider: 'cursor' }
+    ])
+    ;(service as any).cursorClient = {
+      send: vi.fn(),
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels
+    }
+
+    await expect(service.cursorModels()).resolves.toEqual([
+      { id: 'auto', label: 'Cursor · Auto', provider: 'cursor' },
+      { id: 'gpt-5.5-medium-fast', label: 'Cursor · GPT-5.5 Fast', provider: 'cursor' }
+    ])
+    expect((service as any).model('auto')).toEqual({
+      id: 'auto',
+      label: 'Cursor · Auto',
+      provider: 'cursor'
+    })
+  })
+
   it('passes queued interjection context into Cursor turns for resumed follow-ups', async () => {
     const { service } = makeService()
     const cursorSend = vi.fn(async (_req, _signal, _system, _user, _mode, options) => {

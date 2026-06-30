@@ -40,6 +40,8 @@ import {
   type DreamAutoConfig,
   type DreamRunRequest,
   type OptimizeAgentInput,
+  type PhoneBridgeStartOptions,
+  type PhoneBridgeStatus,
   type Provider,
   type SaveAgentInput,
   type ViewBounds,
@@ -223,7 +225,7 @@ function createWindow(): void {
     const folder = registry.workspace.get().folder
     if (folder) await registry.autoDream.start(folder)
   })()
-  if (enablePhoneBridge) startRemoteChatServer()
+  if (enablePhoneBridge) void startRemoteChatServer()
 
   registerIpc()
   registerApplicationMenu()
@@ -232,33 +234,61 @@ function createWindow(): void {
   registry.tabs.ensureInitialTab()
 }
 
-function startRemoteChatServer(): void {
-  remoteChatServer = new RemoteChatServer(
-    {
-      send: (req) => registry.chat.send(req),
-      abort: (requestId) => registry.chat.abort(requestId),
-      listConversations: () => registry.chats.list(),
-      getConversation: (id) => registry.chats.get(id),
-      saveConversation: (conversation) => registry.chats.save(conversation),
-      subscribeChatStream: (listener) => registry.subscribeChatStream(listener),
-      nudgeWorkspace: () => {
-        const folder = registry.workspace.get().folder
-        if (folder) registry.autoDream.nudge(folder)
-      },
-      warmCursorBridge: () => registry.chat.warmCursorBridge()
+function createRemoteChatBridge() {
+  return {
+    send: (req: ChatRequest) => registry.chat.send(req),
+    abort: (requestId: string) => registry.chat.abort(requestId),
+    listConversations: () => registry.chats.list(),
+    getConversation: (id: string) => registry.chats.get(id),
+    saveConversation: (conversation: Conversation) => registry.chats.save(conversation),
+    subscribeChatStream: (listener: Parameters<ServiceRegistry['subscribeChatStream']>[0]) =>
+      registry.subscribeChatStream(listener),
+    nudgeWorkspace: () => {
+      const folder = registry.workspace.get().folder
+      if (folder) registry.autoDream.nudge(folder)
     },
+    warmCursorBridge: () => registry.chat.warmCursorBridge()
+  }
+}
+
+async function startRemoteChatServer(options: PhoneBridgeStartOptions = {}): Promise<PhoneBridgeStatus> {
+  if (remoteChatServer?.getInfo()) return phoneBridgeStatus()
+  remoteChatServer = new RemoteChatServer(
+    createRemoteChatBridge(),
     {
-      host: phoneBridgeHost,
-      port: phoneBridgePort,
+      host: options.host ?? phoneBridgeHost,
+      port: options.port ?? phoneBridgePort,
       token: phoneBridgeToken,
       corsOrigin: phoneBridgeCorsOrigin
     }
   )
-  void remoteChatServer.start().then((info) => {
+  try {
+    const info = await remoteChatServer.start()
     console.log(`[gladdis] phone bridge listening at ${info.appUrl}`)
-  }).catch((error) => {
+    return phoneBridgeStatus(info)
+  } catch (error) {
+    remoteChatServer = null
     console.warn('[gladdis] phone bridge failed to start:', error)
-  })
+    throw error
+  }
+}
+
+async function stopRemoteChatServer(): Promise<PhoneBridgeStatus> {
+  const server = remoteChatServer
+  remoteChatServer = null
+  await server?.close()
+  return phoneBridgeStatus()
+}
+
+function phoneBridgeStatus(info = remoteChatServer?.getInfo() ?? null): PhoneBridgeStatus {
+  return {
+    running: !!info,
+    host: info?.host ?? phoneBridgeHost,
+    port: info?.port ?? phoneBridgePort ?? null,
+    appUrl: info?.appUrl ?? null,
+    token: info?.token ?? null,
+    corsOrigin: phoneBridgeCorsOrigin ?? null
+  }
 }
 
 function parseOptionalPort(value: string | undefined): number | undefined {
@@ -360,6 +390,12 @@ function registerIpc(): void {
   ipcMain.handle(IPC.CLAUDE_CODE_STATUS, () => registry.chat.claudeCodeStatus())
   ipcMain.handle(IPC.CURSOR_STATUS, () => registry.chat.cursorStatus())
   ipcMain.handle(IPC.CURSOR_MODELS, () => registry.chat.cursorModels())
+
+  ipcMain.handle(IPC.PHONE_STATUS, () => phoneBridgeStatus())
+  ipcMain.handle(IPC.PHONE_START, (_e, options?: PhoneBridgeStartOptions) =>
+    startRemoteChatServer(options)
+  )
+  ipcMain.handle(IPC.PHONE_STOP, () => stopRemoteChatServer())
 
   ipcMain.handle(IPC.WORKSPACE_GET, () => registry.workspace.get())
   ipcMain.handle(IPC.WORKSPACE_SET_FOLDER, (_e, folder: string | null) => applyWorkspaceFolder(folder))

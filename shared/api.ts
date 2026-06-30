@@ -25,6 +25,7 @@ import type {
   TtsResult,
   Workspace
 } from './chat'
+import type { PhoneBridgeStartOptions, PhoneBridgeStatus } from './phone'
 import type {
   OptimizeAgentInput,
   OptimizeAgentResult,
@@ -130,6 +131,14 @@ export interface GladdisApi {
     status: () => Promise<CursorStatus>
     /** Live model catalog from `agent models` ([] if unreachable). */
     models: () => Promise<ModelOption[]>
+  }
+  phone: {
+    /** Status for the opt-in phone/PWA bridge served by the desktop daemon. */
+    status: () => Promise<PhoneBridgeStatus>
+    /** Start the bridge; pass host 0.0.0.0 only for trusted LAN testing. */
+    start: (options?: PhoneBridgeStartOptions) => Promise<PhoneBridgeStatus>
+    /** Stop the bridge and revoke the in-memory token. */
+    stop: () => Promise<PhoneBridgeStatus>
   }
   workspace: {
     /** The folder gladdis currently works from. */

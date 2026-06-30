@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { networkInterfaces } from 'node:os'
 import type {
   ChatRequest,
   ChatStreamEvent,
@@ -74,16 +75,21 @@ export class RemoteChatServer {
           reject(new Error('Remote chat server failed to bind a TCP port'))
           return
         }
+        const appHost = advertisedHost(host)
         this.info = {
           host,
           port: address.port,
           token: this.token,
-          appUrl: `http://${host}:${address.port}/app?token=${encodeURIComponent(this.token)}`
+          appUrl: `http://${appHost}:${address.port}/app?token=${encodeURIComponent(this.token)}`
         }
         resolve(this.info)
       })
     })
     return this.ready
+  }
+
+  getInfo(): RemoteChatServerInfo | null {
+    return this.info
   }
 
   async close(): Promise<void> {
@@ -335,6 +341,16 @@ function safeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a)
   const right = Buffer.from(b)
   return left.length === right.length && timingSafeEqual(left, right)
+}
+
+function advertisedHost(bindHost: string): string {
+  if (bindHost !== '0.0.0.0' && bindHost !== '::') return bindHost
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family === 'IPv4' && !entry.internal) return entry.address
+    }
+  }
+  return 'localhost'
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

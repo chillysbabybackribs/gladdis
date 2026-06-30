@@ -17,6 +17,7 @@ import {
   type GladdisApi,
   type ModelCallEvent,
   type OptimizeAgentInput,
+  type PhoneBridgeStartOptions,
   type Provider,
   type SaveAgentInput,
   type SavedAgent,
@@ -96,6 +97,11 @@ const api: GladdisApi = {
   cursor: {
     status: () => ipcRenderer.invoke(IPC.CURSOR_STATUS),
     models: () => ipcRenderer.invoke(IPC.CURSOR_MODELS)
+  },
+  phone: {
+    status: () => ipcRenderer.invoke(IPC.PHONE_STATUS),
+    start: (options?: PhoneBridgeStartOptions) => ipcRenderer.invoke(IPC.PHONE_START, options),
+    stop: () => ipcRenderer.invoke(IPC.PHONE_STOP)
   },
   workspace: {
     get: () => ipcRenderer.invoke(IPC.WORKSPACE_GET),

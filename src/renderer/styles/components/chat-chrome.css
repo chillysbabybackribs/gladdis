@@ -509,6 +509,49 @@
   padding: 1px 4px;
   border-radius: 3px;
 }
+.phone-pane {
+  min-width: 0;
+}
+.phone-url {
+  min-height: 34px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.phone-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.phone-value {
+  margin-top: 5px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.phone-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.phone-error {
+  padding: 8px 10px;
+  border: 1px solid rgba(220, 80, 80, 0.35);
+  border-radius: var(--radius);
+  background: rgba(220, 80, 80, 0.12);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+}
 .modal-foot {
   display: flex;
   justify-content: flex-end;

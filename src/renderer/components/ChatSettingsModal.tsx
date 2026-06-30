@@ -8,10 +8,11 @@ import type {
   ConversationSearchHit,
   KeyStatus,
   ModelCallRecord,
+  PhoneBridgeStatus,
   Workspace
 } from '../../../shared/types'
 
-type Tab = 'history' | 'keys' | 'calls'
+type Tab = 'history' | 'keys' | 'phone' | 'calls'
 
 interface Props {
   auditRecords: ModelCallRecord[]
@@ -73,6 +74,9 @@ export function ChatSettingsModal({
   const [grok, setGrok] = useState('')
   const [saving, setSaving] = useState(false)
   const [workspace, setWorkspace] = useState<Workspace | null>(null)
+  const [phoneStatus, setPhoneStatus] = useState<PhoneBridgeStatus | null>(null)
+  const [phoneBusy, setPhoneBusy] = useState(false)
+  const [phoneError, setPhoneError] = useState<string | null>(null)
   const totals = auditRecords.reduce(
     (acc, r) => {
       acc.calls += 1
@@ -97,6 +101,9 @@ export function ChatSettingsModal({
   useEffect(() => {
     void window.gladdis.workspace.get().then(setWorkspace)
   }, [])
+  useEffect(() => {
+    void window.gladdis.phone.status().then(setPhoneStatus)
+  }, [])
 
   const remove = async (event: React.MouseEvent, id: string) => {
     event.stopPropagation()
@@ -116,6 +123,36 @@ export function ChatSettingsModal({
     setGoogle('')
     setGrok('')
     setOpenai('')
+  }
+  const refreshPhone = async () => {
+    setPhoneStatus(await window.gladdis.phone.status())
+  }
+  const startPhone = async (host?: string) => {
+    setPhoneBusy(true)
+    setPhoneError(null)
+    try {
+      setPhoneStatus(await window.gladdis.phone.start(host ? { host } : undefined))
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : String(err))
+      await refreshPhone()
+    } finally {
+      setPhoneBusy(false)
+    }
+  }
+  const stopPhone = async () => {
+    setPhoneBusy(true)
+    setPhoneError(null)
+    try {
+      setPhoneStatus(await window.gladdis.phone.stop())
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPhoneBusy(false)
+    }
+  }
+  const copyPhoneUrl = async () => {
+    if (!phoneStatus?.appUrl) return
+    await navigator.clipboard?.writeText(phoneStatus.appUrl)
   }
   const codexLine = !codexStatus
     ? 'Checking...'
@@ -149,9 +186,9 @@ export function ChatSettingsModal({
           </button>
         </div>
         <div className="settings-tabs" role="tablist" aria-label="Chat settings tabs">
-          {(['history', 'keys', 'calls'] as Tab[]).map((t) => (
+          {(['history', 'keys', 'phone', 'calls'] as Tab[]).map((t) => (
             <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-              {t === 'keys' ? 'API keys' : t === 'calls' ? 'Model calls' : 'History'}
+              {t === 'keys' ? 'API keys' : t === 'phone' ? 'Phone' : t === 'calls' ? 'Model calls' : 'History'}
             </button>
           ))}
         </div>
@@ -201,6 +238,18 @@ export function ChatSettingsModal({
               anthropic={anthropic} google={google} grok={grok} openai={openai} setAnthropic={setAnthropic}
               setGoogle={setGoogle} setGrok={setGrok} setOpenai={setOpenai} onSave={saveKeys} />
           )}
+          {tab === 'phone' && (
+            <PhonePane
+              busy={phoneBusy}
+              error={phoneError}
+              status={phoneStatus}
+              onCopy={copyPhoneUrl}
+              onRefresh={refreshPhone}
+              onStartLan={() => startPhone('0.0.0.0')}
+              onStartLocal={() => startPhone()}
+              onStop={stopPhone}
+            />
+          )}
           {tab === 'calls' && (
             <div className="settings-pane">
               <div className="settings-pane-title">{totals.calls} calls · {fmt(totals.in)} in · {fmt(totals.out)} out</div>
@@ -217,6 +266,61 @@ export function ChatSettingsModal({
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function PhonePane(props: {
+  busy: boolean
+  error: string | null
+  status: PhoneBridgeStatus | null
+  onCopy: () => void
+  onRefresh: () => void
+  onStartLan: () => void
+  onStartLocal: () => void
+  onStop: () => void
+}) {
+  const status = props.status
+  const running = !!status?.running
+  return (
+    <div className="settings-pane phone-pane">
+      <div className="settings-pane-title">Phone access <span className={`key-pill ${running ? 'set' : ''}`}>{running ? 'running' : 'off'}</span></div>
+      <p className="modal-note">
+        Start the desktop bridge, then open the install URL from the landing-page phone client or directly in a mobile browser.
+      </p>
+      {status?.appUrl && (
+        <div className="phone-url" title={status.appUrl}>
+          {status.appUrl}
+        </div>
+      )}
+      <div className="phone-grid">
+        <div>
+          <span className="modal-label">Host</span>
+          <div className="phone-value">{status?.host ?? '127.0.0.1'}</div>
+        </div>
+        <div>
+          <span className="modal-label">Port</span>
+          <div className="phone-value">{status?.port ?? 'auto'}</div>
+        </div>
+      </div>
+      {props.error && <div className="phone-error">{props.error}</div>}
+      <div className="phone-actions">
+        {!running ? (
+          <>
+            <button className="btn-primary" onClick={props.onStartLocal} disabled={props.busy}>Start local</button>
+            <button className="btn-ghost" onClick={props.onStartLan} disabled={props.busy}>Start LAN</button>
+          </>
+        ) : (
+          <>
+            <button className="btn-primary" onClick={props.onCopy} disabled={!status?.appUrl}>Copy URL</button>
+            <button className="btn-ghost" onClick={props.onStop} disabled={props.busy}>Stop</button>
+          </>
+        )}
+        <button className="btn-ghost" onClick={props.onRefresh} disabled={props.busy}>Refresh</button>
+      </div>
+      <p className="modal-note">
+        LAN mode binds to 0.0.0.0 for trusted-network testing. The bridge still requires its generated bearer token.
+      </p>
     </div>
   )
 }

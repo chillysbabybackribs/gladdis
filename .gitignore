@@ -4,6 +4,7 @@ node_modules/
 # Electron/Vite build output
 out/
 dist/
+release/
 
 # Runtime/debug artifacts
 pipeline-runs/

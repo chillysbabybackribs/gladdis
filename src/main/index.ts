@@ -54,6 +54,7 @@ let uiView: WebContentsView
 let registry: ServiceRegistry
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
+const appId = process.env.GLADDIS_APP_ID ?? 'com.gladdis.app'
 const trustLocalCertificates = process.env.GLADDIS_TRUST_LOCAL_CERTS === '1'
 const extraTrustedHosts = new Set(
   (process.env.GLADDIS_TRUSTED_LOCAL_CERT_HOSTS ?? '')
@@ -115,6 +116,7 @@ if (!['0', 'off', 'none', 'false'].includes(remoteDebug.toLowerCase())) {
 // Avoid exposing the obvious Selenium/WebDriver fingerprint on login pages that
 // block on embedded-automation surfaces.
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
+app.setAppUserModelId(appId)
 
 if (trustLocalCertificates) {
   // Let localhost / local network admin cert flows through for dev and internal

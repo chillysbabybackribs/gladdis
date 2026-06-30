@@ -1,0 +1,7 @@
+APPLE_ID=developer@example.com
+APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx
+APPLE_TEAM_ID=TEAMID1234
+
+# Windows signing placeholders. Wire these into CI when the certificate plan is finalized.
+WIN_CSC_LINK=
+WIN_CSC_KEY_PASSWORD=

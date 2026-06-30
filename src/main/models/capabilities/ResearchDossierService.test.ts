@@ -38,6 +38,14 @@ describe('ResearchDossierService', () => {
     expect(result.summary).toContain('## Dossier')
     expect(result.structuredPayload.query).toBe('ChatService')
     expect(result.structuredPayload.searchedFiles).toContain('src/chat.ts')
+    expect(result.structuredPayload.context).toEqual(expect.objectContaining({
+      promptChars: expect.any(Number),
+      estimatedPromptTokens: expect.any(Number),
+      readSpanChars: expect.any(Number),
+      estimatedReadSpanTokens: expect.any(Number),
+      suggestedSpanCount: result.structuredPayload.suggestedSpans.length,
+      estimatedTokensSavedBySpans: expect.any(Number)
+    }))
     expect(generateContent).toHaveBeenCalled()
 
     await fs.rm(workspace, { recursive: true, force: true })
@@ -138,6 +146,8 @@ describe('ResearchDossierService', () => {
     const prompt = JSON.stringify(request)
 
     expect(result.structuredPayload.suggestedSpans.map((span) => span.path)).toContain('src/helper.ts')
+    expect(result.structuredPayload.context.selectedFileBytes).toBeGreaterThan(0)
+    expect(result.structuredPayload.context.estimatedFullFileTokens).toBeGreaterThan(0)
     expect(prompt).toContain('=== src/helper.ts')
     expect(prompt).toContain('helperValue')
 

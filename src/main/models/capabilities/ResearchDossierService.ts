@@ -2,7 +2,12 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import type { GoogleGenAI } from '@google/genai'
 import { snapshotDirectoryTree } from '../../fs/repoSnapshot'
-import { RepoIntelligenceService, type ReadSpansResult, type SearchRepoResult } from './RepoIntelligenceService'
+import {
+  estimateContextTokens,
+  RepoIntelligenceService,
+  type ReadSpansResult,
+  type SearchRepoResult
+} from './RepoIntelligenceService'
 
 export interface ResearchDossierInput {
   workspaceRoot: string
@@ -22,6 +27,17 @@ export interface ResearchDossierResult {
       startLine: number
       endLine: number
     }>
+    context: {
+      promptChars: number
+      estimatedPromptTokens: number
+      searchSummaryChars: number
+      readSpanChars: number
+      estimatedReadSpanTokens: number
+      suggestedSpanCount: number
+      selectedFileBytes: number
+      estimatedFullFileTokens: number
+      estimatedTokensSavedBySpans: number
+    }
   }
 }
 
@@ -93,6 +109,7 @@ export class ResearchDossierService {
       suggestedSpans.length > 0
         ? await this.readSpansCached({ workspaceRoot, items: suggestedSpans })
         : null
+    const selectedFileBytes = await this.sumSelectedFileBytes(workspaceRoot, suggestedSpans.map((span) => span.path))
 
     const prompt = [
       `Workspace Root: ${workspaceRoot}`,
@@ -106,6 +123,9 @@ export class ResearchDossierService {
     ]
       .filter((part): part is string => Boolean(part))
       .join('\n')
+    const readSpanChars = spans?.structuredPayload.context?.chars ?? spans?.summary.length ?? 0
+    const estimatedReadSpanTokens = estimateContextTokens(readSpanChars)
+    const estimatedFullFileTokens = estimateContextTokens(selectedFileBytes)
 
     const response = await this.getAi().models.generateContent({
       model: 'gemini-2.5-flash-lite',
@@ -123,7 +143,18 @@ export class ResearchDossierService {
         workspaceRoot,
         query: input.query,
         searchedFiles: search.structuredPayload.hits.map((hit) => hit.path),
-        suggestedSpans
+        suggestedSpans,
+        context: {
+          promptChars: prompt.length,
+          estimatedPromptTokens: estimateContextTokens(prompt.length),
+          searchSummaryChars: search.summary.length,
+          readSpanChars,
+          estimatedReadSpanTokens,
+          suggestedSpanCount: suggestedSpans.length,
+          selectedFileBytes,
+          estimatedFullFileTokens,
+          estimatedTokensSavedBySpans: Math.max(0, estimatedFullFileTokens - estimatedReadSpanTokens)
+        }
       }
     }
     this.setCache(this.dossierCache, dossierKey, result)
@@ -199,6 +230,21 @@ export class ResearchDossierService {
       startLine: span.startLine ?? 1,
       endLine: span.endLine ?? 80
     }))
+  }
+
+  private async sumSelectedFileBytes(workspaceRoot: string, relPaths: string[]): Promise<number> {
+    const uniquePaths = [...new Set(relPaths)]
+    const sizes = await Promise.all(
+      uniquePaths.map(async (relPath) => {
+        try {
+          const stat = await fs.stat(path.join(workspaceRoot, relPath))
+          return stat.isFile() ? stat.size : 0
+        } catch {
+          return 0
+        }
+      })
+    )
+    return sizes.reduce((total, size) => total + size, 0)
   }
 
   private async readOptional(filePath: string, maxChars: number): Promise<string> {

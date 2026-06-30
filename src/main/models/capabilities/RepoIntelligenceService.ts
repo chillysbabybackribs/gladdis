@@ -22,6 +22,11 @@ export interface RepoOverviewResult {
   }
 }
 
+export interface RepoContextAccounting {
+  chars: number
+  estimatedTokens: number
+}
+
 export interface SearchRepoInput {
   workspaceRoot: string
   query: string
@@ -49,6 +54,10 @@ export interface SearchRepoResult {
       startLine: number
       endLine: number
     }>
+    context: RepoContextAccounting & {
+      hitCount: number
+      suggestedSpanCount: number
+    }
   }
 }
 
@@ -76,6 +85,10 @@ export interface ReadSpansResult {
       defaultWindow: boolean
       content: string
     }>
+    context: RepoContextAccounting & {
+      itemCount: number
+      includedLines: number
+    }
   }
 }
 
@@ -201,9 +214,10 @@ export class RepoIntelligenceService {
         suggestedSpans.length > 0
           ? `\nSuggested next read_spans call:\n${JSON.stringify({ items: suggestedSpans })}`
           : ''
+      const summary = `Search query: ${input.query}\nPath: ${searchPath}\nIndex hits:\n${preview}${nextReads}`
 
       return {
-        summary: `Search query: ${input.query}\nPath: ${searchPath}\nIndex hits:\n${preview}${nextReads}`,
+        summary,
         structuredPayload: {
           workspaceRoot,
           query: input.query,
@@ -211,7 +225,13 @@ export class RepoIntelligenceService {
           ...(input.glob ? { glob: input.glob } : {}),
           totalHits: hits.length,
           hits,
-          suggestedSpans
+          suggestedSpans,
+          context: {
+            chars: summary.length,
+            estimatedTokens: estimateContextTokens(summary.length),
+            hitCount: hits.length,
+            suggestedSpanCount: suggestedSpans.length
+          }
         }
       }
     }
@@ -244,12 +264,13 @@ export class RepoIntelligenceService {
       suggestedSpans.length > 0
         ? `\nSuggested next read_spans call:\n${JSON.stringify({ items: suggestedSpans })}`
         : ''
+    const summary =
+      hits.length > 0
+        ? `Search query: ${input.query}\nPath: ${searchPath}\nHits:\n${preview}${nextReads}`
+        : `Search query: ${input.query}\nPath: ${searchPath}\nHits: none`
 
     return {
-      summary:
-        hits.length > 0
-          ? `Search query: ${input.query}\nPath: ${searchPath}\nHits:\n${preview}${nextReads}`
-          : `Search query: ${input.query}\nPath: ${searchPath}\nHits: none`,
+      summary,
       structuredPayload: {
         workspaceRoot,
         query: input.query,
@@ -257,7 +278,13 @@ export class RepoIntelligenceService {
         ...(input.glob ? { glob: input.glob } : {}),
         totalHits: hits.length,
         hits,
-        suggestedSpans
+        suggestedSpans,
+        context: {
+          chars: summary.length,
+          estimatedTokens: estimateContextTokens(summary.length),
+          hitCount: hits.length,
+          suggestedSpanCount: suggestedSpans.length
+        }
       }
     }
   }
@@ -297,7 +324,13 @@ export class RepoIntelligenceService {
       summary,
       structuredPayload: {
         workspaceRoot,
-        items: resolved
+        items: resolved,
+        context: {
+          chars: resolved.reduce((total, item) => total + item.content.length, 0),
+          estimatedTokens: estimateContextTokens(resolved.reduce((total, item) => total + item.content.length, 0)),
+          itemCount: resolved.length,
+          includedLines: resolved.reduce((total, item) => total + Math.max(0, item.endLine - item.startLine + 1), 0)
+        }
       }
     }
   }
@@ -376,4 +409,8 @@ export class RepoIntelligenceService {
     }
     return results
   }
+}
+
+export function estimateContextTokens(chars: number): number {
+  return Math.ceil(Math.max(0, chars) / 4)
 }

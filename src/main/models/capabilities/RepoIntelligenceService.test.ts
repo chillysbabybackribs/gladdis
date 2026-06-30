@@ -65,6 +65,12 @@ describe('RepoIntelligenceService', () => {
     expect(result.structuredPayload.totalHits).toBeGreaterThan(0)
     expect(result.structuredPayload.hits.some((hit) => hit.path === 'src/alpha.ts')).toBe(true)
     expect(result.structuredPayload.suggestedSpans.length).toBeGreaterThan(0)
+    expect(result.structuredPayload.context).toEqual(expect.objectContaining({
+      chars: result.summary.length,
+      estimatedTokens: expect.any(Number),
+      hitCount: result.structuredPayload.totalHits,
+      suggestedSpanCount: result.structuredPayload.suggestedSpans.length
+    }))
 
     await fs.rm(workspace, { recursive: true, force: true })
   })
@@ -186,6 +192,12 @@ describe('RepoIntelligenceService', () => {
         totalLines: 5
       })
     ])
+    expect(result.structuredPayload.context).toEqual(expect.objectContaining({
+      chars: 'line 2\ntarget line 3\nline 4'.length,
+      estimatedTokens: expect.any(Number),
+      itemCount: 1,
+      includedLines: 3
+    }))
 
     await fs.rm(workspace, { recursive: true, force: true })
   })

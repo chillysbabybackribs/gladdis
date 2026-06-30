@@ -730,12 +730,26 @@ function remoteAppHtml(token: string): string {
       overflow: hidden;
     }
     header {
-      padding: calc(14px + var(--safe-top)) calc(16px + var(--safe-right)) 14px calc(16px + var(--safe-left));
+      padding: calc(10px + var(--safe-top)) calc(12px + var(--safe-right)) 10px calc(12px + var(--safe-left));
       border-bottom: 1px solid var(--border-subtle);
       background: var(--bg-panel);
     }
-    h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0; color: var(--text-primary); }
-    #status { margin-top: 5px; color: var(--text-secondary); font-size: 12.5px; }
+    /* Title cluster: wordmark + a small connection dot, baseline-aligned. */
+    .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); }
+    /* Connection status as a compact dot (green ok / amber connecting / red off),
+       not a tall second line. Hover/long title shows the text via aria-label. */
+    #status {
+      flex: 0 0 auto;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--text-muted);
+      transition: background 0.2s ease;
+    }
+    #status.ok { background: var(--success); }
+    #status.warn { background: var(--warning); }
+    #status.off { background: var(--danger); }
     main {
       padding: 16px calc(16px + var(--safe-right)) 16px calc(16px + var(--safe-left));
       overflow-y: auto;
@@ -765,59 +779,169 @@ function remoteAppHtml(token: string): string {
       background: var(--bg-elevated);
       color: var(--text-primary);
     }
+    /* Composer: full-width box, send button inset on the right edge. */
     form {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      align-items: end;
       padding: 12px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
       border-top: 1px solid var(--border-subtle);
       background: var(--bg-panel);
     }
+    .composer-box {
+      position: relative;
+      width: 100%;
+      display: flex;
+      align-items: flex-end;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      transition: border-color 0.14s ease, box-shadow 0.14s ease;
+    }
+    .composer-box:focus-within { border-color: var(--accent-dim); box-shadow: 0 0 0 2px var(--accent-glow); }
     textarea {
+      flex: 1 1 auto;
+      min-width: 0;
       min-height: 46px;
       max-height: 140px;
       resize: none;
-      border-radius: var(--radius-lg);
-      border: 1px solid var(--border-subtle);
-      background: var(--bg-surface);
+      border: 0;
+      background: transparent;
       color: var(--text-primary);
-      padding: 12px;
+      /* Leave room for the inset send button. */
+      padding: 12px 50px 12px 14px;
       /* 16px keeps iOS from zooming the viewport on focus. */
       font-family: inherit;
       font-size: 16px;
       line-height: 1.5;
       outline: none;
-      transition: border-color 0.14s ease;
     }
-    textarea:focus { border-color: var(--accent-dim); box-shadow: 0 0 0 2px var(--accent-glow); }
     textarea::placeholder { color: var(--text-muted); }
-    /* Send button: white-on-dark, matching desktop .composer-send. */
-    button {
+    /* Inset send button: small round arrow, bottom-right inside the composer. */
+    #send {
+      position: absolute;
+      right: 7px;
+      bottom: 7px;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      padding: 0;
       border: 0;
-      border-radius: var(--radius-lg);
+      border-radius: 999px;
       background: #fff;
       color: #111;
-      padding: 0 18px;
-      min-height: 46px;
-      font-family: inherit;
-      font-size: 15px;
-      font-weight: 600;
-      transition: background 0.12s ease, transform 0.08s ease;
+      transition: background 0.12s ease, opacity 0.12s ease, transform 0.08s ease;
     }
-    button:active { background: #d8d8d8; transform: translateY(1px); }
-    /* Header row: title left, model picker right. */
-    .head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-    #model {
+    #send:active { background: #d8d8d8; transform: translateY(1px); }
+    #send:disabled { background: var(--bg-elevated); color: var(--text-muted); }
+    #send svg { width: 18px; height: 18px; }
+    /* Header icon buttons (history / new chat). */
+    .icon-btn {
       flex: 0 0 auto;
-      max-width: 56%;
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--text-secondary);
+      transition: color 0.12s ease, background 0.12s ease, transform 0.08s ease;
+    }
+    .icon-btn:hover { color: var(--text-primary); background: var(--bg-elevated); }
+    .icon-btn:active { transform: translateY(1px); }
+    .icon-btn svg { width: 19px; height: 19px; display: block; }
+    /* Controls row under the composer: History · New · Model. */
+    .composer-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 9px;
+    }
+    .tool-btn {
+      flex: 0 0 auto;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 11px 0 9px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-secondary);
       font-family: inherit;
-      font-size: 12.5px;
+      font-size: 13px;
+      transition: color 0.12s ease, background 0.12s ease, transform 0.08s ease;
+    }
+    .tool-btn svg { width: 16px; height: 16px; display: block; }
+    .tool-btn:hover { color: var(--text-primary); background: var(--bg-elevated); }
+    .tool-btn:active { transform: translateY(1px); }
+    .composer-tools #model { margin-left: auto; }
+    /* History slide-over panel. */
+    .history-scrim {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease;
+      z-index: 9;
+    }
+    .history-scrim.open { opacity: 1; pointer-events: auto; }
+    .history-panel {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: min(86%, 360px);
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border-subtle);
+      transform: translateX(-100%);
+      transition: transform 0.22s ease;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      padding-top: var(--safe-top);
+      padding-left: var(--safe-left);
+    }
+    .history-panel.open { transform: translateX(0); }
+    .history-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 14px 12px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .history-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+    .history-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 6px; }
+    .history-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 11px 12px;
+      border: 0;
+      border-radius: var(--radius);
+      background: transparent;
+      color: var(--text-primary);
+      transition: background 0.12s ease;
+    }
+    .history-item:hover, .history-item.active { background: var(--bg-elevated); }
+    .history-item-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-item-snippet { margin-top: 3px; font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .history-empty { padding: 24px 16px; color: var(--text-muted); font-size: 13px; text-align: center; }
+    /* Header: just the wordmark + a connection dot. */
+    .head-row { display: flex; align-items: center; gap: 10px; }
+    #model {
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: 180px;
+      height: 34px;
+      font-family: inherit;
+      font-size: 13px;
       color: var(--text-secondary);
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
-      border-radius: var(--radius);
-      padding: 6px 8px;
+      border-radius: 999px;
+      padding: 0 10px;
       outline: none;
     }
     #model:focus { border-color: var(--accent-dim); }
@@ -864,16 +988,42 @@ function remoteAppHtml(token: string): string {
 <body>
   <header>
     <div class="head-row">
-      <h1>Gladdis</h1>
-      <select id="model" aria-label="Model"></select>
+      <div class="brand">
+        <h1>Gladdis</h1>
+        <span id="status" role="status" aria-label="Connecting"></span>
+      </div>
     </div>
-    <div id="status">Connecting...</div>
   </header>
   <main id="messages"></main>
   <form id="form">
-    <textarea id="input" placeholder="Message Gladdis" autocomplete="off"></textarea>
-    <button type="submit">Send</button>
+    <div class="composer-box">
+      <textarea id="input" placeholder="Message Gladdis" autocomplete="off"></textarea>
+      <button id="send" type="submit" aria-label="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+      </button>
+    </div>
+    <div class="composer-tools">
+      <button id="history-btn" class="tool-btn" type="button" aria-label="Chat history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
+        <span>History</span>
+      </button>
+      <button id="new-btn" class="tool-btn" type="button" aria-label="New chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        <span>New</span>
+      </button>
+      <select id="model" aria-label="Model"></select>
+    </div>
   </form>
+  <div id="history-scrim" class="history-scrim"></div>
+  <aside id="history-panel" class="history-panel" aria-hidden="true">
+    <div class="history-head">
+      <h2>Chat history</h2>
+      <button id="history-close" class="icon-btn" type="button" aria-label="Close history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+    </div>
+    <div id="history-list" class="history-list"></div>
+  </aside>
   <script>
     const token = new URLSearchParams(location.search).get('token') || ${tokenJson}
     const storageKey = 'gladdis-remote-v2:' + token
@@ -896,12 +1046,43 @@ function remoteAppHtml(token: string): string {
       scrollToBottomIfPinned()
       return el
     }
-    // Pin-to-bottom: only auto-scroll if the user is already near the bottom, so
-    // reading scrollback isn't yanked away mid-stream.
-    function scrollToBottomIfPinned() {
-      const nearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80
-      if (nearBottom) messages.scrollTop = messages.scrollHeight
+    // ---- Hardened auto-scroll (stick-to-bottom) ----
+    // A single source of truth: \`stick\` is true while the user is reading the
+    // latest output and false once they scroll up to read back. Streaming deltas,
+    // new messages, restores, and keyboard/viewport resizes all funnel through
+    // scrollToBottom(), which only moves the view when stick is true. This avoids
+    // the classic bugs: yanking the user down while they read scrollback, and
+    // losing the pin because the DOM grew before we measured.
+    let stick = true
+    let programmaticScroll = false
+    const STICK_THRESHOLD = 64
+    function distanceFromBottom() {
+      return messages.scrollHeight - messages.scrollTop - messages.clientHeight
     }
+    // The user's own scrolling sets intent; our programmatic scrolls do not.
+    messages.addEventListener('scroll', () => {
+      if (programmaticScroll) return
+      stick = distanceFromBottom() <= STICK_THRESHOLD
+    }, { passive: true })
+    function scrollToBottom(force) {
+      if (force) stick = true
+      if (!stick) return
+      // Defer to after layout so markdown re-renders / image reflow are included.
+      requestAnimationFrame(() => {
+        if (!stick) return
+        programmaticScroll = true
+        messages.scrollTop = messages.scrollHeight
+        // Release the guard on the next frame, after the scroll event fires.
+        requestAnimationFrame(() => { programmaticScroll = false })
+      })
+    }
+    // Backward-compatible name used by existing call sites.
+    function scrollToBottomIfPinned() { scrollToBottom(false) }
+    // Mobile keyboard open/close shrinks the viewport; keep the latest in view.
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', () => scrollToBottom(false))
+    }
+    window.addEventListener('resize', () => scrollToBottom(false))
     // Assistant text is markdown. We keep the raw source on the node and
     // re-render on each streamed delta so formatting appears live, token by token.
     function setAssistantText(el, raw) {
@@ -1038,9 +1219,19 @@ function remoteAppHtml(token: string): string {
         : null
       persistState()
     }
+    // Connection state is shown as a colored dot, not a text line. Green =
+    // connected, amber = connecting/reconnecting, red = error/offline. The full
+    // text (plus any queued count) lives on aria-label for screen readers.
     function setStatus(base) {
       const queued = outbox.filter((item) => !item.acked).length
-      status.textContent = queued ? base + ' - ' + queued + ' queued' : base
+      const label = queued ? base + ' - ' + queued + ' queued' : base
+      status.setAttribute('aria-label', label)
+      let state = 'warn'
+      if (base === 'Connected') state = queued ? 'warn' : 'ok'
+      else if (base === 'Queued offline' || base === 'connected') state = queued ? 'warn' : 'ok'
+      else if (/error|low|fail|offline/i.test(base)) state = 'off'
+      status.classList.remove('ok', 'warn', 'off')
+      status.classList.add(state)
     }
     function flushOutbox() {
       if (!socket || socket.readyState !== WebSocket.OPEN) return
@@ -1068,6 +1259,8 @@ function remoteAppHtml(token: string): string {
     function renderConversation(conversation) {
       clearMessages()
       for (const message of conversation.messages || []) add(message.role, message.text || '', message.id)
+      // Opening a conversation should land at the latest message.
+      scrollToBottom(true)
     }
     function mergeLocalPending() {
       const merged = new Map()
@@ -1243,6 +1436,73 @@ function remoteAppHtml(token: string): string {
     })
     loadModels()
 
+    // ---- New chat ----
+    function startNewChat() {
+      // Drop the current conversation id and clear the transcript. The next send
+      // creates a fresh remote conversation server-side.
+      setConversation(null)
+      clearMessages()
+      document.querySelector('#input').focus()
+    }
+    document.querySelector('#new-btn').addEventListener('click', startNewChat)
+
+    // ---- Chat history (shares the desktop conversation store via /api/chats) ----
+    const historyPanel = document.querySelector('#history-panel')
+    const historyScrim = document.querySelector('#history-scrim')
+    const historyList = document.querySelector('#history-list')
+    function openHistory() {
+      historyPanel.classList.add('open')
+      historyScrim.classList.add('open')
+      historyPanel.setAttribute('aria-hidden', 'false')
+      loadHistory()
+    }
+    function closeHistory() {
+      historyPanel.classList.remove('open')
+      historyScrim.classList.remove('open')
+      historyPanel.setAttribute('aria-hidden', 'true')
+    }
+    async function loadHistory() {
+      historyList.innerHTML = '<div class="history-empty">Loading…</div>'
+      try {
+        const res = await fetch('/api/chats?token=' + encodeURIComponent(token))
+        if (!res.ok) { historyList.innerHTML = '<div class="history-empty">Could not load history.</div>'; return }
+        const body = await res.json()
+        const items = Array.isArray(body.conversations) ? body.conversations : []
+        if (!items.length) { historyList.innerHTML = '<div class="history-empty">No conversations yet.</div>'; return }
+        historyList.innerHTML = ''
+        for (const meta of items) {
+          const btn = document.createElement('button')
+          btn.type = 'button'
+          btn.className = 'history-item' + (meta.id === conversationId ? ' active' : '')
+          const title = document.createElement('div')
+          title.className = 'history-item-title'
+          title.textContent = meta.title || 'Untitled chat'
+          btn.appendChild(title)
+          if (meta.summary) {
+            const snip = document.createElement('div')
+            snip.className = 'history-item-snippet'
+            snip.textContent = meta.summary
+            btn.appendChild(snip)
+          }
+          btn.addEventListener('click', () => openConversation(meta.id))
+          historyList.appendChild(btn)
+        }
+      } catch (_error) {
+        historyList.innerHTML = '<div class="history-empty">Could not load history.</div>'
+      }
+    }
+    async function openConversation(id) {
+      const conversation = await fetchConversation(id)
+      if (conversation) {
+        setConversation(conversation.id)
+        renderConversation(conversation)
+      }
+      closeHistory()
+    }
+    document.querySelector('#history-btn').addEventListener('click', openHistory)
+    document.querySelector('#history-close').addEventListener('click', closeHistory)
+    historyScrim.addEventListener('click', closeHistory)
+
     connect()
     document.querySelector('#form').addEventListener('submit', async (event) => {
       event.preventDefault()
@@ -1252,6 +1512,8 @@ function remoteAppHtml(token: string): string {
       input.value = ''
       add('user', text)
       const assistant = add('assistant', '')
+      // Sending is an explicit intent to follow the reply: re-pin to bottom.
+      scrollToBottom(true)
       outbox.push({
         clientMessageId: nextClientMessageId(),
         text,

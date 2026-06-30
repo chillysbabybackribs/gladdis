@@ -375,12 +375,19 @@ export class TabManager {
     const filter = buildNetworkFilter(opts)
     const recorder = createWatchNetworkRecorder({
       filter,
+      includeRequestBody: opts.includeRequestBody,
+      redactSensitive: opts.redactSensitive,
       maxBodies: opts.maxBodies,
       maxBodyChars: opts.maxBodyChars,
       getResponseBody: async (requestId) => {
         return (await tab.cdp.send('Network.getResponseBody', { requestId })) as {
           body: string
           base64Encoded: boolean
+        }
+      },
+      getRequestPostData: async (requestId) => {
+        return (await tab.cdp.send('Network.getRequestPostData', { requestId })) as {
+          postData: string
         }
       }
     })
@@ -420,12 +427,19 @@ export class TabManager {
     const filter = buildNetworkFilter(opts)
     const recorder = createWatchNetworkRecorder({
       filter,
+      includeRequestBody: opts.includeRequestBody,
+      redactSensitive: opts.redactSensitive,
       maxBodies: opts.maxBodies,
       maxBodyChars: opts.maxBodyChars,
       getResponseBody: async (requestId) => {
         return (await tab.cdp.send('Network.getResponseBody', { requestId })) as {
           body: string
           base64Encoded: boolean
+        }
+      },
+      getRequestPostData: async (requestId) => {
+        return (await tab.cdp.send('Network.getRequestPostData', { requestId })) as {
+          postData: string
         }
       }
     })

@@ -20,6 +20,8 @@ export type CapturedNetworkRequest = {
   type: string
   requestHeaders?: Record<string, string>
   responseHeaders?: Record<string, string>
+  requestBody?: string
+  requestBodyTruncated?: boolean
   startedAt?: number
   responseReceivedAt?: number
   finishedAt?: number
@@ -51,6 +53,8 @@ export type WatchNetworkOptions = {
   statusMin?: number
   statusMax?: number
   mimeIncludes?: string[]
+  includeRequestBody?: boolean
+  redactSensitive?: boolean
   windowMs: number
   maxBodies: number
   maxBodyChars: number
@@ -58,10 +62,25 @@ export type WatchNetworkOptions = {
 
 type CreateWatchNetworkRecorderOptions = {
   filter?: NetworkFilterSpec
+  includeRequestBody?: boolean
+  redactSensitive?: boolean
   maxBodies: number
   maxBodyChars: number
   getResponseBody: (requestId: string) => Promise<{ body: string; base64Encoded: boolean }>
+  getRequestPostData?: (requestId: string) => Promise<{ postData: string }>
 }
+
+const SENSITIVE_HEADER_NAMES = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+  'x-csrf-token'
+])
+
+const SENSITIVE_FIELD_PATTERN = /(authorization|token|access_token|refresh_token|id_token|api_?key|secret|password|passwd|session|cookie|bearer)/i
 
 function isDataType(type: string, mime: string): boolean {
   const normalizedType = (type || '').toLowerCase()
@@ -77,6 +96,63 @@ function normalizeHeaderMap(headers: unknown): Record<string, string> | undefine
     out[String(key)] = typeof value === 'string' ? value : String(value)
   }
   return Object.keys(out).length > 0 ? out : undefined
+}
+
+function redactHeaderMap(headers: Record<string, string> | undefined, enabled: boolean): Record<string, string> | undefined {
+  if (!headers) return undefined
+  if (!enabled) return headers
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(headers)) {
+    out[key] = SENSITIVE_HEADER_NAMES.has(key.toLowerCase()) ? '[REDACTED]' : value
+  }
+  return out
+}
+
+function truncateText(value: string, maxChars: number): { value: string; truncated: boolean } {
+  if (value.length <= maxChars) return { value, truncated: false }
+  return { value: value.slice(0, maxChars), truncated: true }
+}
+
+function redactStructuredValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => redactStructuredValue(item))
+  if (!value || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = SENSITIVE_FIELD_PATTERN.test(key) ? '[REDACTED]' : redactStructuredValue(inner)
+  }
+  return out
+}
+
+function redactTextPatterns(text: string): string {
+  return text
+    .replace(/((?:authorization|token|access_token|refresh_token|id_token|api_?key|secret|password|passwd|session|cookie)=)([^&\s]+)/gi, '$1[REDACTED]')
+    .replace(/("(?:authorization|token|access_token|refresh_token|id_token|api_?key|secret|password|passwd|session|cookie)"\s*:\s*")([^"]*)"/gi, '$1[REDACTED]"')
+}
+
+function redactBodyText(body: string, enabled: boolean): string {
+  if (!enabled || !body) return body
+
+  try {
+    const parsed = JSON.parse(body)
+    return JSON.stringify(redactStructuredValue(parsed), null, 2)
+  } catch {
+    // fall through
+  }
+
+  try {
+    const params = new URLSearchParams(body)
+    let changed = false
+    for (const key of [...params.keys()]) {
+      if (!SENSITIVE_FIELD_PATTERN.test(key)) continue
+      params.set(key, '[REDACTED]')
+      changed = true
+    }
+    if (changed) return params.toString()
+  } catch {
+    // fall through
+  }
+
+  return redactTextPatterns(body)
 }
 
 function matchesMetadataFilter(record: CapturedNetworkRequest, filter?: NetworkFilterSpec): boolean {
@@ -233,6 +309,12 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
   const canCaptureBody = (record: CapturedNetworkRequest): boolean =>
     matchesMetadataFilter(record, options.filter) && isDataType(record.type, record.mimeType) && record.status >= 200 && record.status < 400
 
+  const canCaptureRequestBody = (record: CapturedNetworkRequest): boolean => {
+    if (!options.includeRequestBody) return false
+    const method = (record.method || '').toUpperCase()
+    return method !== 'GET' && method !== 'HEAD'
+  }
+
   const claimBodySlot = (requestId: string): boolean => {
     if (bodyStates.has(requestId)) return true
     if (bodyClaimOrder.includes(requestId)) return true
@@ -253,9 +335,9 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
     if (!claimBodySlot(requestId)) return
     try {
       const res = await options.getResponseBody(requestId)
-      let body = res.base64Encoded ? Buffer.from(res.body, 'base64').toString('utf8') : res.body
-      const truncated = body.length > options.maxBodyChars
-      if (truncated) body = body.slice(0, options.maxBodyChars)
+      const rawBody = res.base64Encoded ? Buffer.from(res.body, 'base64').toString('utf8') : res.body
+      const redactedBody = redactBodyText(rawBody, options.redactSensitive !== false)
+      const { value: body, truncated } = truncateText(redactedBody, options.maxBodyChars)
       bodyStates.set(requestId, {
         requestId,
         url: record.url,
@@ -268,6 +350,31 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
     } catch {
       releaseBodySlot(requestId)
       // Body may already be gone or unavailable; keep metadata and allow fallback recovery.
+    }
+  }
+
+  const maybeStoreRequestBody = async (requestId: string, body: unknown): Promise<void> => {
+    const record = requests.get(requestId)
+    if (!record || record.requestBody !== undefined || !canCaptureRequestBody(record)) return
+
+    const rawBody = typeof body === 'string' ? body : ''
+    if (rawBody) {
+      const redactedBody = redactBodyText(rawBody, options.redactSensitive !== false)
+      const truncated = truncateText(redactedBody, options.maxBodyChars)
+      record.requestBody = truncated.value
+      record.requestBodyTruncated = truncated.truncated
+      return
+    }
+
+    if (!options.getRequestPostData) return
+    try {
+      const res = await options.getRequestPostData(requestId)
+      const redactedBody = redactBodyText(String(res.postData ?? ''), options.redactSensitive !== false)
+      const truncated = truncateText(redactedBody, options.maxBodyChars)
+      record.requestBody = truncated.value
+      record.requestBodyTruncated = truncated.truncated
+    } catch {
+      // Request post data is best-effort and often unavailable after the fact.
     }
   }
 
@@ -285,8 +392,9 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
             method: String(request.method ?? 'GET'),
             type: String(params?.type ?? ''),
             startedAt: typeof params?.timestamp === 'number' ? params.timestamp * 1000 : Date.now(),
-            requestHeaders: normalizeHeaderMap(request.headers)
+            requestHeaders: redactHeaderMap(normalizeHeaderMap(request.headers), options.redactSensitive !== false)
           })
+          void maybeStoreRequestBody(requestId, request.postData)
           return
         }
 
@@ -302,14 +410,14 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
             status: Number(response.status ?? 0),
             mimeType: String(response.mimeType ?? ''),
             responseReceivedAt: typeof params?.timestamp === 'number' ? params.timestamp * 1000 : Date.now(),
-            responseHeaders: normalizeHeaderMap(response.headers)
+            responseHeaders: redactHeaderMap(normalizeHeaderMap(response.headers), options.redactSensitive !== false)
           })
           if (!record.method || record.method === 'GET') {
             const pseudoMethod = response?.requestHeaders?.[':method'] ?? response?.requestHeaders?.method
             if (pseudoMethod) record.method = String(pseudoMethod)
           }
           if (!record.requestHeaders) {
-            record.requestHeaders = normalizeHeaderMap(response.requestHeaders)
+            record.requestHeaders = redactHeaderMap(normalizeHeaderMap(response.requestHeaders), options.redactSensitive !== false)
           }
           return
         }
@@ -348,6 +456,9 @@ export function createWatchNetworkRecorder(options: CreateWatchNetworkRecorderOp
       bodies: CapturedNetworkBody[]
     }> {
       const captured = [...requests.values()].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+      if (options.includeRequestBody) {
+        await Promise.all(captured.map((record) => maybeStoreRequestBody(record.requestId, undefined)))
+      }
       const candidates = captured.filter((record) => canCaptureBody(record))
       for (const record of candidates) {
         if (bodyClaimOrder.length >= options.maxBodies) break

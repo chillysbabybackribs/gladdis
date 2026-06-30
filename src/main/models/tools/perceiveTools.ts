@@ -521,6 +521,8 @@ export async function runWatchNetwork(
       statusMin: watchArgs.statusMin,
       statusMax: watchArgs.statusMax,
       mimeIncludes: watchArgs.mimeIncludes,
+      includeRequestBody: watchArgs.includeRequestBody,
+      redactSensitive: watchArgs.redactSensitive,
       windowMs: watchArgs.windowMs,
       maxBodies: watchArgs.maxBodies,
       maxBodyChars: watchArgs.maxBodyChars
@@ -543,6 +545,8 @@ export async function runWatchNetwork(
           statusMin: watchArgs.statusMin,
           statusMax: watchArgs.statusMax,
           mimeIncludes: watchArgs.mimeIncludes,
+          includeRequestBody: watchArgs.includeRequestBody,
+          redactSensitive: watchArgs.redactSensitive,
           windowMs: watchArgs.windowMs,
           maxBodies: watchArgs.maxBodies,
           maxBodyChars: watchArgs.maxBodyChars,
@@ -556,7 +560,31 @@ export async function runWatchNetwork(
     let output =
       `Captured ${result.totalSeen} request(s)` +
       (watchArgs.filterLabel ? ` matching ${watchArgs.filterLabel}` : '') +
-      ` in ${watchArgs.windowMs}ms. Showing ${result.bodies.length} response bod${result.bodies.length === 1 ? 'y' : 'ies'}:\n\n`
+      ` in ${watchArgs.windowMs}ms. Showing ${result.bodies.length} response bod${result.bodies.length === 1 ? 'y' : 'ies'}`
+    if (watchArgs.includeRequestBody) output += ' and request payload previews'
+    if (watchArgs.redactSensitive) output += ' with sensitive values redacted'
+    output += ':\n\n'
+
+    const failed = result.captured.filter((item) => !item.success)
+    if (failed.length > 0) {
+      output += 'Failed requests:\n'
+      for (const item of failed.slice(0, 5)) {
+        output += `  [${item.status}] ${item.method} ${item.url} ${item.errorText ?? 'failed'}\n`
+      }
+      output += '\n'
+    }
+
+    const slowest = [...result.captured]
+      .filter((item) => typeof item.durationMs === 'number')
+      .sort((a, b) => (b.durationMs ?? 0) - (a.durationMs ?? 0))
+      .slice(0, 3)
+    if (slowest.length > 0) {
+      output += 'Slowest requests:\n'
+      for (const item of slowest) {
+        output += `  ${Math.round(item.durationMs ?? 0)}ms ${item.method} ${item.url}\n`
+      }
+      output += '\n'
+    }
 
     output += 'Endpoints seen:\n'
     for (const c of result.captured.slice(0, 25)) {
@@ -564,6 +592,9 @@ export async function runWatchNetwork(
       const size = typeof c.encodedDataLength === 'number' ? ` ${c.encodedDataLength}B` : ''
       const outcome = c.success ? 'ok' : (c.errorText ? `failed:${c.errorText}` : 'pending')
       output += `  [${c.status}] ${c.method} ${c.type} ${c.mimeType}${timing}${size} ${outcome}  ${c.url}\n`
+      if (watchArgs.includeRequestBody && c.requestBody) {
+        output += `    request body${c.requestBodyTruncated ? ' [truncated]' : ''}: ${c.requestBody}\n`
+      }
     }
     if (result.captured.length > 25) output += `  …and ${result.captured.length - 25} more\n`
     output += '\n'
@@ -585,6 +616,8 @@ export async function runWatchNetwork(
         statusMin: watchArgs.statusMin,
         statusMax: watchArgs.statusMax,
         mimeIncludes: watchArgs.mimeIncludes,
+        includeRequestBody: watchArgs.includeRequestBody,
+        redactSensitive: watchArgs.redactSensitive,
         windowMs: watchArgs.windowMs,
         maxBodies: watchArgs.maxBodies,
         maxBodyChars: watchArgs.maxBodyChars,
@@ -609,6 +642,8 @@ export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
   statusMin?: number
   statusMax?: number
   mimeIncludes?: string[]
+  includeRequestBody: boolean
+  redactSensitive: boolean
   filterLabel?: string
   windowMs: number
   maxBodies: number
@@ -708,6 +743,8 @@ export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
   const statusMin = parseNumericArg(args.status_min ?? args.statusMin, args.status_min !== undefined ? 'status_min' : 'statusMin')
   const statusMax = parseNumericArg(args.status_max ?? args.statusMax, args.status_max !== undefined ? 'status_max' : 'statusMax')
   const mimeIncludes = pickArrayArg('mime_includes', 'mimeIncludes', 'string') as string[] | undefined
+  const includeRequestBody = args.include_request_body === true || args.includeRequestBody === true
+  const redactSensitive = args.redact_sensitive !== false && args.redactSensitive !== false
 
   if (statusMin !== undefined) assertRange(statusMin, args.status_min !== undefined ? 'status_min' : 'statusMin', 100, 599)
   if (statusMax !== undefined) assertRange(statusMax, args.status_max !== undefined ? 'status_max' : 'statusMax', 100, 599)
@@ -734,6 +771,8 @@ export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
     statusMin,
     statusMax,
     mimeIncludes,
+    includeRequestBody,
+    redactSensitive,
     filterLabel: filterParts.length > 0 ? filterParts.join('; ') : undefined,
     windowMs: pickNumericArg('window_ms', 'windowMs', 4_000, 500, 15_000),
     maxBodies: pickNumericArg('max_bodies', 'maxBodies', 3, 1, 10),

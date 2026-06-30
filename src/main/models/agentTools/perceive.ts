@@ -187,6 +187,14 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
           items: { type: 'string' },
           description: 'Optional case-insensitive substrings that must match the response mime type, e.g. ["json", "javascript"].'
         },
+        include_request_body: {
+          type: 'boolean',
+          description: 'If true, include bounded previews of POST/PUT/PATCH request payloads when available.'
+        },
+        redact_sensitive: {
+          type: 'boolean',
+          description: 'If false, disables the default redaction of sensitive headers and payload fields.'
+        },
         window_ms: {
           type: 'number',
           description: 'How long to observe, in ms. Default 4000, max 15000.'
@@ -224,6 +232,8 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
           type: 'array',
           items: { type: 'string' }
         },
+        includeRequestBody: { type: 'boolean' },
+        redactSensitive: { type: 'boolean' },
         windowMs: { type: 'number' },
         totalSeen: { type: 'number' },
         captured: {
@@ -245,6 +255,8 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
                 type: 'object',
                 additionalProperties: { type: 'string' }
               },
+              requestBody: { type: 'string' },
+              requestBodyTruncated: { type: 'boolean' },
               startedAt: { type: 'number' },
               responseReceivedAt: { type: 'number' },
               finishedAt: { type: 'number' },

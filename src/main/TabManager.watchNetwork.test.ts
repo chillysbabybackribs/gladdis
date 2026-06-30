@@ -24,12 +24,14 @@ class FakeDebugger extends EventEmitter {
 
 function createHarness(options?: {
   onGetResponseBody?: (requestId: string) => { body: string; base64Encoded?: boolean } | Promise<{ body: string; base64Encoded?: boolean }>
+  onGetRequestPostData?: (requestId: string) => { postData: string } | Promise<{ postData: string }>
   onCommand?: (method: string) => void
   onLoadUrl?: (url: string) => void
 }) {
   const debuggerInstance = new FakeDebugger()
   const sentCommands: Array<{ method: string; params: Record<string, unknown> }> = []
   const getResponseBodyCalls: string[] = []
+  const getRequestPostDataCalls: string[] = []
 
   const cdp = {
     send: async (method: string, params: Record<string, unknown> = {}) => {
@@ -50,6 +52,13 @@ function createHarness(options?: {
           body: `body:${requestId}`,
           base64Encoded: false
         }
+      }
+      if (method === 'Network.getRequestPostData') {
+        const requestId = String(params.requestId ?? '')
+        getRequestPostDataCalls.push(requestId)
+        const result = options?.onGetRequestPostData?.(requestId)
+        if (result) return await result
+        return { postData: `payload:${requestId}` }
       }
       return {}
     }
@@ -76,7 +85,8 @@ function createHarness(options?: {
     manager,
     debuggerInstance,
     sentCommands,
-    getResponseBodyCalls
+    getResponseBodyCalls,
+    getRequestPostDataCalls
   }
 }
 
@@ -93,6 +103,9 @@ function emitRequestLifecycle(
     responseTimestamp?: number
     finishTimestamp?: number
     encodedDataLength?: number
+    postData?: string
+    requestHeaders?: Record<string, string>
+    responseHeaders?: Record<string, string>
   }
 ): void {
   debuggerInstance.emitMessage('Network.requestWillBeSent', {
@@ -102,7 +115,8 @@ function emitRequestLifecycle(
     request: {
       url: request.url,
       method: request.method ?? 'GET',
-      headers: { accept: 'application/json' }
+      headers: request.requestHeaders ?? { accept: 'application/json' },
+      postData: request.postData
     }
   })
 
@@ -114,7 +128,7 @@ function emitRequestLifecycle(
       url: request.url,
       status: request.status ?? 200,
       mimeType: request.mimeType ?? 'application/json',
-      headers: { 'content-type': request.mimeType ?? 'application/json' }
+      headers: request.responseHeaders ?? { 'content-type': request.mimeType ?? 'application/json' }
     }
   })
 
@@ -240,5 +254,88 @@ describe('TabManager.watchNetwork sequencing', () => {
     ])
     expect(sentCommands.at(-1)?.method).toBe('Network.disable')
     expect(result.filter).toEqual(expect.objectContaining({ resourceTypes: ['fetch'] }))
+  })
+
+  it('captures and redacts request post data when enabled', async () => {
+    const { manager, debuggerInstance, getRequestPostDataCalls } = createHarness()
+
+    const watchPromise = manager.watchNetwork('tab-1', {
+      urlFilter: 'graphql',
+      includeRequestBody: true,
+      redactSensitive: true,
+      windowMs: 20,
+      maxBodies: 1,
+      maxBodyChars: 1000
+    })
+
+    emitRequestLifecycle(debuggerInstance, {
+      requestId: 'req-graphql',
+      url: 'https://example.com/graphql',
+      method: 'POST',
+      postData: JSON.stringify({
+        operationName: 'ViewerQuery',
+        variables: { token: 'super-secret', q: 'ok' }
+      }),
+      requestHeaders: {
+        authorization: 'Bearer secret-token',
+        accept: 'application/json'
+      },
+      responseHeaders: {
+        'set-cookie': 'session=abc123',
+        'content-type': 'application/json'
+      }
+    })
+
+    const result = await watchPromise
+
+    expect(getRequestPostDataCalls).toEqual([])
+    expect(result.captured).toEqual([
+      expect.objectContaining({
+        requestId: 'req-graphql',
+        requestHeaders: {
+          authorization: '[REDACTED]',
+          accept: 'application/json'
+        },
+        responseHeaders: {
+          'set-cookie': '[REDACTED]',
+          'content-type': 'application/json'
+        },
+        requestBody: expect.stringContaining('"token": "[REDACTED]"'),
+        requestBodyTruncated: false
+      })
+    ])
+  })
+
+  it('falls back to Network.getRequestPostData when the event did not include postData', async () => {
+    const { manager, debuggerInstance, getRequestPostDataCalls } = createHarness({
+      onGetRequestPostData: async () => ({
+        postData: 'query=hello&password=hunter2'
+      })
+    })
+
+    const watchPromise = manager.watchNetwork('tab-1', {
+      urlFilter: 'submit',
+      includeRequestBody: true,
+      windowMs: 20,
+      maxBodies: 1,
+      maxBodyChars: 1000
+    })
+
+    emitRequestLifecycle(debuggerInstance, {
+      requestId: 'req-form',
+      url: 'https://example.com/submit',
+      method: 'POST',
+      mimeType: 'text/plain'
+    })
+
+    const result = await watchPromise
+
+    expect(getRequestPostDataCalls).toEqual(['req-form'])
+    expect(result.captured[0]).toEqual(
+      expect.objectContaining({
+        requestBody: 'query=hello&password=%5BREDACTED%5D',
+        requestBodyTruncated: false
+      })
+    )
   })
 })

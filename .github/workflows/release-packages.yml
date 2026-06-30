@@ -35,6 +35,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: npm run dist:linux
 
+      - name: Generate release checksums
+        run: |
+          cd release
+          sha256sum *.AppImage *.deb latest-linux.yml > SHA256SUMS.txt
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -42,6 +47,7 @@ jobs:
           path: |
             release/*.AppImage
             release/*.deb
+            release/SHA256SUMS.txt
           if-no-files-found: error
 
       - name: Publish GitHub release assets
@@ -52,3 +58,4 @@ jobs:
             release/*.AppImage
             release/*.deb
             release/latest-linux.yml
+            release/SHA256SUMS.txt

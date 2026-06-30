@@ -36,8 +36,19 @@
           >
             Download .deb
           </a>
+          <a
+            class="button button-secondary button-disabled"
+            id="download-checksums"
+            href="#"
+            aria-disabled="true"
+          >
+            Checksums
+          </a>
         </div>
         <p class="meta" id="release-status">Checking the latest Linux release…</p>
+        <p class="meta meta-small" id="checksum-status">
+          Checksums and install commands will appear with the latest release.
+        </p>
       </section>
 
       <section class="card-grid">
@@ -62,6 +73,16 @@
             Tagged releases publish Linux artifacts to GitHub Releases, and this
             page automatically points to the latest published build.
           </p>
+        </article>
+        <article class="card card-wide">
+          <h2>Verify and install</h2>
+          <p>
+            Verify the checksum before installing if you want an integrity check
+            from the published release bundle.
+          </p>
+          <pre class="command-block"><code id="verify-command">sha256sum -c SHA256SUMS.txt --ignore-missing</code></pre>
+          <pre class="command-block"><code id="appimage-command">chmod +x Gladys-*.AppImage && ./Gladys-*.AppImage</code></pre>
+          <pre class="command-block"><code id="deb-command">sudo apt install ./Gladys-*.deb</code></pre>
         </article>
       </section>
     </main>

@@ -5,6 +5,7 @@ This repo now has the first packaging scaffold in place:
 - Electron Builder config with Linux installer targets (`AppImage` and `deb`)
 - Linux-first GitHub Actions workflow that builds installer artifacts on Ubuntu
 - GitHub Release publishing scaffold for tagged Linux builds
+- Release checksum publishing scaffold for Linux assets
 - Static Linux download page scaffold in `docs/download/`
 - `npm run release:doctor` to show what is still missing
 

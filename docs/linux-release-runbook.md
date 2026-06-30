@@ -32,6 +32,7 @@ Once the tag is pushed, the `Release Linux Packages` GitHub Actions workflow wil
 
 - build the Linux `AppImage`
 - build the Linux `.deb`
+- generate `SHA256SUMS.txt` for the published Linux artifacts
 - upload those artifacts to the GitHub release
 
 ## Current caveat

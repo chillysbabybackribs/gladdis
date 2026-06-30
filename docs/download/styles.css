@@ -138,6 +138,10 @@ h1 {
   color: var(--muted);
 }
 
+.meta-small {
+  font-size: 0.96rem;
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -162,6 +166,25 @@ h1 {
   margin: 0;
   line-height: 1.7;
   color: var(--muted);
+}
+
+.card-wide {
+  grid-column: 1 / -1;
+}
+
+.command-block {
+  margin: 14px 0 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 1px solid rgba(102, 169, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(4, 10, 18, 0.92);
+}
+
+.command-block code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.95rem;
+  color: #d9f6ff;
 }
 
 @media (max-width: 860px) {

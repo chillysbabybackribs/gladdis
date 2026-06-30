@@ -41,6 +41,11 @@ printStatus(
   'static Linux-first page ready for GitHub Pages or another host'
 )
 printStatus(
+  'Release checksum flow',
+  existsSync(join(root, '.github', 'workflows', 'release-packages.yml')),
+  'workflow should publish SHA256SUMS.txt with Linux assets'
+)
+printStatus(
   'Pages deploy workflow',
   existsSync(join(root, '.github', 'workflows', 'deploy-download-page.yml')),
   'optional GitHub Pages deploy pipeline'

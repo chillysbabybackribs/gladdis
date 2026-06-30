@@ -1590,9 +1590,10 @@ main {
   }
 
   .hero-mobile-tagline {
-    max-width: 18ch;
-    font-size: 0.84rem;
-    line-height: 1.3;
+    max-width: none;
+    font-size: 1.5rem;
+    line-height: 1.2;
+    white-space: nowrap;
   }
 
   .hero-mobile-description {

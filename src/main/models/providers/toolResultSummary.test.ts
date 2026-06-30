@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { __testInternals, summarizeTrimmedToolResult } from './toolResultSummary'
+import { __testInternals, renderTrimmedToolResultStub, summarizeTrimmedToolResult } from './toolResultSummary'
 
 afterEach(() => __testInternals.resetSummaryCaches())
 
@@ -14,7 +14,9 @@ describe('summarizeTrimmedToolResult cache', () => {
     expect(__testInternals.getSummaryCacheState()).toEqual({
       idEntries: 1,
       hashEntries: 1,
-      computeCount: 1
+      computeCount: 1,
+      renderedStubEntries: 0,
+      renderedStubComputeCount: 0
     })
   })
 
@@ -33,7 +35,35 @@ describe('summarizeTrimmedToolResult cache', () => {
     expect(__testInternals.getSummaryCacheState()).toEqual({
       idEntries: 2,
       hashEntries: 1,
-      computeCount: 1
+      computeCount: 1,
+      renderedStubEntries: 0,
+      renderedStubComputeCount: 0
+    })
+  })
+})
+
+describe('renderTrimmedToolResultStub cache', () => {
+  it('reuses the fully rendered stub for the same tool_call_id', () => {
+    const first = renderTrimmedToolResultStub({
+      prefix: '[trimmed]',
+      toolCallId: 'call-7',
+      lead: 'earlier search_repo result summarized to save tokens:',
+      text: 'src/main/models/providers/openai.ts:790 renderTrimmedToolResultStub'
+    })
+    const second = renderTrimmedToolResultStub({
+      prefix: '[trimmed]',
+      toolCallId: 'call-7',
+      lead: 'earlier search_repo result summarized to save tokens:',
+      text: 'changed later'
+    })
+
+    expect(second).toBe(first)
+    expect(__testInternals.getSummaryCacheState()).toEqual({
+      idEntries: 1,
+      hashEntries: 1,
+      computeCount: 1,
+      renderedStubEntries: 1,
+      renderedStubComputeCount: 1
     })
   })
 })

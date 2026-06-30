@@ -9,7 +9,9 @@ const SUMMARY_HASH_CACHE_LIMIT = 256
 
 const summaryByToolCallId = new Map<string, string>()
 const summaryByContentHash = new Map<string, string>()
+const renderedStubByToolCallId = new Map<string, string>()
 let summaryComputeCount = 0
+let renderedStubComputeCount = 0
 
 function cleanInline(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
@@ -145,21 +147,52 @@ export function summarizeTrimmedToolResult(text: string, toolCallId?: string): s
   return summary
 }
 
+type TrimmedToolStubArgs = {
+  prefix: string
+  toolCallId?: string
+  lead: string
+  text: string
+}
+
+export function renderTrimmedToolResultStub(args: TrimmedToolStubArgs): string {
+  const cleanToolCallId = args.toolCallId?.trim()
+  if (cleanToolCallId) {
+    const cachedStub = renderedStubByToolCallId.get(cleanToolCallId)
+    if (cachedStub) return cachedStub
+  }
+
+  const summary = summarizeTrimmedToolResult(args.text, cleanToolCallId)
+  renderedStubComputeCount += 1
+  const stub =
+    `${args.prefix} (id ${cleanToolCallId ?? 'unknown'}) — ${args.lead}\n` +
+    `${summary}\n` +
+    `Call recall_history with tool_call_id "${cleanToolCallId ?? 'unknown'}" to read it in full.`
+
+  if (cleanToolCallId) rememberBounded(renderedStubByToolCallId, cleanToolCallId, stub, SUMMARY_ID_CACHE_LIMIT)
+  return stub
+}
+
 export const __testInternals = {
   resetSummaryCaches(): void {
     summaryByToolCallId.clear()
     summaryByContentHash.clear()
+    renderedStubByToolCallId.clear()
     summaryComputeCount = 0
+    renderedStubComputeCount = 0
   },
   getSummaryCacheState(): {
     idEntries: number
     hashEntries: number
     computeCount: number
+    renderedStubEntries: number
+    renderedStubComputeCount: number
   } {
     return {
       idEntries: summaryByToolCallId.size,
       hashEntries: summaryByContentHash.size,
-      computeCount: summaryComputeCount
+      computeCount: summaryComputeCount,
+      renderedStubEntries: renderedStubByToolCallId.size,
+      renderedStubComputeCount
     }
   }
 }

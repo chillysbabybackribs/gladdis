@@ -13,7 +13,7 @@ import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './l
 import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
 import { approxInputChars } from '../ModelCallLedger'
-import { summarizeTrimmedToolResult } from './toolResultSummary'
+import { renderTrimmedToolResultStub } from './toolResultSummary'
 
 type FinishUsage = {
   inputTokens?: number
@@ -790,11 +790,12 @@ export function stubOldOpenAiResults(msgs: OpenAiMessage[], keep: number): void 
     if (msg.role === 'tool' && typeof msg.content === 'string') {
       if (msg.content.startsWith(STUB_PREFIX)) continue
       const toolName = msg.name?.trim() || 'tool'
-      const summary = summarizeTrimmedToolResult(msg.content, msg.tool_call_id)
-      msg.content =
-        `${STUB_PREFIX} (id ${msg.tool_call_id}) — earlier ${toolName} result summarized to save tokens:\n` +
-        `${summary}\n` +
-        `Call recall_history with tool_call_id "${msg.tool_call_id}" to read it in full.`
+      msg.content = renderTrimmedToolResultStub({
+        prefix: STUB_PREFIX,
+        toolCallId: msg.tool_call_id,
+        lead: `earlier ${toolName} result summarized to save tokens:`,
+        text: msg.content
+      })
     }
   }
 }

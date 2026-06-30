@@ -1489,21 +1489,21 @@ main {
 @media (max-width: 720px) {
   main,
   .footer {
-    width: min(var(--maxw), calc(100% - 28px));
+    width: min(var(--maxw), calc(100% - 24px));
   }
 
   .topbar {
-    gap: 14px;
-    padding: 14px 14px 12px;
+    gap: 10px;
+    padding: 10px 12px 10px;
   }
 
   .brand {
-    font-size: 0.98rem;
+    font-size: 0.92rem;
   }
 
   .topnav {
-    gap: 10px;
-    font-size: 0.82rem;
+    gap: 8px;
+    font-size: 0.76rem;
   }
 
   .topnav a:not(.topnav-cta) {
@@ -1511,18 +1511,18 @@ main {
   }
 
   .topnav-cta {
-    padding: 6px 12px;
-    border-radius: 8px;
+    padding: 5px 10px;
+    border-radius: 7px;
   }
 
   .section {
-    padding: 38px 0;
+    padding: 28px 0;
   }
 
   .eyebrow {
-    margin-bottom: 10px;
-    font-size: 0.64rem;
-    letter-spacing: 0.18em;
+    margin-bottom: 8px;
+    font-size: 0.58rem;
+    letter-spacing: 0.16em;
   }
 
   .card-grid {
@@ -1532,14 +1532,14 @@ main {
   .button {
     width: 100%;
     min-width: 0;
-    padding: 11px 16px;
+    padding: 10px 14px;
     border-radius: 8px;
-    font-size: 0.88rem;
+    font-size: 0.82rem;
   }
 
   .hero {
-    padding-top: 8px;
-    padding-bottom: 6px;
+    padding-top: 4px;
+    padding-bottom: 2px;
     text-align: left;
   }
 
@@ -1550,9 +1550,9 @@ main {
 
   .hero-title {
     margin: 0;
-    max-width: 8ch;
-    font-size: clamp(1.72rem, 8vw, 2.18rem);
-    line-height: 1.02;
+    max-width: 7ch;
+    font-size: clamp(1.52rem, 7.3vw, 1.94rem);
+    line-height: 1;
   }
 
   .hero-subtitle {
@@ -1565,38 +1565,38 @@ main {
 
   .hero-mobile-showcase {
     display: block;
-    margin-top: 18px;
-  }
-
-  .hero-mobile-copy {
-    margin-bottom: 14px;
-  }
-
-  .hero-mobile-tagline {
-    max-width: 19ch;
-    font-size: 0.98rem;
-    line-height: 1.28;
-  }
-
-  .hero-mobile-description {
-    max-width: 31ch;
-    margin-top: 10px;
-    font-size: 0.84rem;
-    line-height: 1.48;
-  }
-
-  .hero-mobile-actions {
     margin-top: 14px;
   }
 
+  .hero-mobile-copy {
+    margin-bottom: 12px;
+  }
+
+  .hero-mobile-tagline {
+    max-width: 16ch;
+    font-size: 0.88rem;
+    line-height: 1.24;
+  }
+
+  .hero-mobile-description {
+    max-width: 29ch;
+    margin-top: 8px;
+    font-size: 0.76rem;
+    line-height: 1.42;
+  }
+
+  .hero-mobile-actions {
+    margin-top: 12px;
+  }
+
   .hero-mobile-video-shell {
-    border-radius: 16px;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
+    border-radius: 14px;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28);
   }
 
   .hero-mobile-video {
-    aspect-ratio: 10 / 13;
-    max-height: min(50vh, 320px);
+    aspect-ratio: 10 / 12.4;
+    max-height: min(42vh, 284px);
   }
 
   #capabilities,
@@ -1606,27 +1606,35 @@ main {
   }
 
   #download {
-    padding-top: 30px;
+    padding-top: 22px;
   }
 
   .download-panel {
-    padding: 22px 18px;
-    border-radius: 18px;
+    padding: 16px 14px;
+    border-radius: 16px;
   }
 
   .download-head h2 {
-    font-size: 1.45rem;
+    font-size: 1.2rem;
   }
 
   .download-lede,
   .meta,
   .meta-small {
-    font-size: 0.84rem;
+    font-size: 0.74rem;
+    line-height: 1.4;
   }
 
   .download-actions {
-    gap: 10px;
-    margin-top: 20px;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  #download-deb,
+  #download-checksums,
+  .install-grid,
+  .meta-small {
+    display: none;
   }
 
   .install-label {
@@ -1644,11 +1652,17 @@ main {
   }
 
   .footer {
-    padding: 30px 0 42px;
+    padding: 24px 0 34px;
+  }
+
+  .footer-brand {
+    font-size: 0.94rem;
   }
 
   .footer-note {
-    font-size: 0.84rem;
+    max-width: 24ch;
+    font-size: 0.74rem;
+    line-height: 1.45;
   }
 
   .demo-frame {

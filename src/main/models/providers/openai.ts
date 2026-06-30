@@ -790,7 +790,7 @@ export function stubOldOpenAiResults(msgs: OpenAiMessage[], keep: number): void 
     if (msg.role === 'tool' && typeof msg.content === 'string') {
       if (msg.content.startsWith(STUB_PREFIX)) continue
       const toolName = msg.name?.trim() || 'tool'
-      const summary = summarizeTrimmedToolResult(msg.content)
+      const summary = summarizeTrimmedToolResult(msg.content, msg.tool_call_id)
       msg.content =
         `${STUB_PREFIX} (id ${msg.tool_call_id}) — earlier ${toolName} result summarized to save tokens:\n` +
         `${summary}\n` +

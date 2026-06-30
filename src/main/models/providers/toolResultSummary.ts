@@ -1,7 +1,15 @@
+import crypto from 'node:crypto'
+
 const MAX_SUMMARY_CHARS = 320
 const MAX_LINES = 4
 const MAX_LINE_CHARS = 180
 const MAX_JSON_FRAGMENTS = 6
+const SUMMARY_ID_CACHE_LIMIT = 256
+const SUMMARY_HASH_CACHE_LIMIT = 256
+
+const summaryByToolCallId = new Map<string, string>()
+const summaryByContentHash = new Map<string, string>()
+let summaryComputeCount = 0
 
 function cleanInline(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
@@ -99,6 +107,59 @@ function summarizeText(text: string): string {
   return truncate(picked.join('\n'), MAX_SUMMARY_CHARS)
 }
 
-export function summarizeTrimmedToolResult(text: string): string {
+function summarizeTrimmedToolResultUncached(text: string): string {
+  summaryComputeCount += 1
   return summarizeJson(text) ?? summarizeText(text)
+}
+
+function contentHash(text: string): string {
+  return crypto.createHash('sha1').update(text).digest('hex')
+}
+
+function rememberBounded<K>(map: Map<K, string>, key: K, value: string, limit: number): void {
+  if (map.has(key)) map.delete(key)
+  map.set(key, value)
+  if (map.size > limit) {
+    const oldestKey = map.keys().next().value
+    if (oldestKey !== undefined) map.delete(oldestKey)
+  }
+}
+
+export function summarizeTrimmedToolResult(text: string, toolCallId?: string): string {
+  const cleanToolCallId = toolCallId?.trim()
+  if (cleanToolCallId) {
+    const cachedById = summaryByToolCallId.get(cleanToolCallId)
+    if (cachedById) return cachedById
+  }
+
+  const hash = contentHash(text)
+  const cachedByHash = summaryByContentHash.get(hash)
+  if (cachedByHash) {
+    if (cleanToolCallId) rememberBounded(summaryByToolCallId, cleanToolCallId, cachedByHash, SUMMARY_ID_CACHE_LIMIT)
+    return cachedByHash
+  }
+
+  const summary = summarizeTrimmedToolResultUncached(text)
+  rememberBounded(summaryByContentHash, hash, summary, SUMMARY_HASH_CACHE_LIMIT)
+  if (cleanToolCallId) rememberBounded(summaryByToolCallId, cleanToolCallId, summary, SUMMARY_ID_CACHE_LIMIT)
+  return summary
+}
+
+export const __testInternals = {
+  resetSummaryCaches(): void {
+    summaryByToolCallId.clear()
+    summaryByContentHash.clear()
+    summaryComputeCount = 0
+  },
+  getSummaryCacheState(): {
+    idEntries: number
+    hashEntries: number
+    computeCount: number
+  } {
+    return {
+      idEntries: summaryByToolCallId.size,
+      hashEntries: summaryByContentHash.size,
+      computeCount: summaryComputeCount
+    }
+  }
 }

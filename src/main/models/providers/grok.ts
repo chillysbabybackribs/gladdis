@@ -567,7 +567,7 @@ export function stubOldGrokResults(msgs: OpenAiMessage[], keep: number): void {
   for (let i = 0; i < cutoff; i++) {
     const m = msgs[i]
     if (typeof m.content === 'string' && m.content.startsWith(STUB_PREFIX)) continue
-    const summary = typeof m.content === 'string' ? summarizeTrimmedToolResult(m.content) : ''
+    const summary = typeof m.content === 'string' ? summarizeTrimmedToolResult(m.content, m.tool_call_id) : ''
     m.content =
       `${STUB_PREFIX} (id ${m.tool_call_id}) — earlier tool result summarized to save tokens:\n` +
       `${summary}\n` +

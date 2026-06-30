@@ -44,6 +44,7 @@ describe('CodebaseAuditor', () => {
     expect(firstCall?.contents?.[0]?.parts?.[0]?.text).toContain('This is an audit-only analysis task.');
     expect(firstCall?.contents?.[2]?.parts?.[0]?.text).toContain('=== Audit Goal ===');
     expect(firstCall?.contents?.[2]?.parts?.[0]?.text).toContain('Run a general codebase audit');
+    expect(firstCall?.contents?.[2]?.parts?.[0]?.text).not.toContain('=== Key File Spans ===');
     expect(firstCall?.contents?.[0]?.parts?.[0]?.text).not.toContain('Core Technology Stack & Configurations');
 
     await fs.rm(mockWorkspace, { recursive: true, force: true });

@@ -244,8 +244,8 @@ const DIRECT_API_WORKSHOP_BLOCK =
   '## Direct API local-work contract\n' +
   'This direct API turn does local repo, file, edit, validation, and shell work through Gladdis tools. ' +
   'Use them as your primary local environment for this turn.\n\n' +
-  'For codebase inspection, stay surgical: prefer repo_overview, search_repo, repo_grep_task, and read_spans ' +
-  'before raw read_file. Batch related file windows into one read_spans({items:[...]}) call when possible instead of ' +
+  'For codebase inspection, stay surgical: prefer repo_overview for orientation, then search_repo or repo_grep_task to locate the exact area before any raw reads. ' +
+  'Use read_spans only as the follow-up bounded read once search has identified the relevant windows. Batch related file windows into one read_spans({items:[...]}) call when possible instead of ' +
   'many sequential one-off reads. When you do use read_spans, prefer the multi-span items form over repeated single-path calls. ' +
   'When you do use read_file, prefer explicit start_line/end_line windows and avoid ' +
   'full:true unless the file is small, config-like, or the user explicitly asked for the whole file.\n\n' +

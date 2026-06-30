@@ -390,6 +390,8 @@ describe('runOpenAiToolLoop', () => {
     expect(toolResult?.preview).toContain('OpenAI local-work policy')
     expect(toolResult?.preview).toContain('search_repo')
     expect(toolResult?.preview).toContain('read_spans')
+    expect(toolResult?.preview).toContain('as the first step')
+    expect(toolResult?.preview).toContain('only if you still need code windows')
     expect(toolResult?.preview).toContain('Batch related windows into one read_spans')
   })
 

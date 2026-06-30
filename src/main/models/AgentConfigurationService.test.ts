@@ -97,7 +97,8 @@ describe('AgentConfigurationService', () => {
     )
 
     expect(system).toContain('## Direct API local-work contract')
-    expect(system).toContain('prefer repo_overview, search_repo, repo_grep_task, and read_spans')
+    expect(system).toContain('prefer repo_overview for orientation, then search_repo or repo_grep_task')
+    expect(system).toContain('Use read_spans only as the follow-up bounded read once search has identified the relevant windows')
     expect(system).toContain('Batch related file windows into one read_spans({items:[...]}) call')
     expect(system).toContain('avoid full:true unless the file is small')
     expect(system).toContain('Keep Gladdis browser tools first-class for web search')

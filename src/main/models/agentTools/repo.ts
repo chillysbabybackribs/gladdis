@@ -22,7 +22,8 @@ const SPAN_COORDINATE_SCHEMA = {
 /**
  * REPO — repository intelligence (CapabilityBroker-backed).
  * `repo_overview` for orientation, `repo_grep_task` for task-shaped targeted
- * grep plus sections, `search_repo`/`read_spans` for surgical reads,
+ * grep plus sections, `search_repo` for discovery, `read_spans` for bounded
+ * follow-up reads,
  * `research_dossier` for Gemini-summarized recon, `verify_change` to gate
  * edits behind validation.
  */
@@ -58,7 +59,7 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'search_repo',
     description:
-      'Search workspace symbols/modules/filenames, then open focused files next.',
+      'Search workspace symbols/modules/filenames as the preferred first step before bounded file reads.',
     parameters: {
       type: 'object',
       properties: {
@@ -116,7 +117,7 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'repo_grep_task',
     description:
-      'Find exact repository sections for a natural-language task by running multiple deterministic query variations in parallel, then returning bounded code spans.',
+      'Find exact repository sections for a natural-language task by running multiple deterministic query variations in parallel; use this as a search-first path before any follow-up file-window reads.',
     parameters: {
       type: 'object',
       properties: {
@@ -198,7 +199,7 @@ export const REPO_TOOLS: ToolDef[] = [
   {
     name: 'read_spans',
     description:
-      'Read bounded line windows from workspace files; batch related windows with items (up to 6 spans per call).',
+      'Read bounded line windows from workspace files after search_repo or repo_grep_task has identified the relevant area; batch related windows with items (up to 6 spans per call).',
     parameters: {
       type: 'object',
     properties: {

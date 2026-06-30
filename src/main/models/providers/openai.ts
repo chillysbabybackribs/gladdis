@@ -169,8 +169,8 @@ function openAiReadPolicyOutcome(pathLike: string): { ok: false; text: string } 
       `OpenAI local-work policy: do not start with a broad read_file on ${clean}. ` +
       'Locate the relevant region first to save tokens, then read only that window. ' +
       `Use search_repo({"query":"symbol_or_phrase"${scopedPath}}) or ` +
-      `repo_grep_task({"task":"what you need to inspect"${scopedPath}}), then follow the suggested ` +
-      `read_spans call. Batch related windows into one read_spans({"items":[...]}) call instead of making a long chain of single-span reads. ` +
+      `repo_grep_task({"task":"what you need to inspect"${scopedPath}}) as the first step, then follow the suggested ` +
+      `read_spans call only if you still need code windows. Batch related windows into one read_spans({"items":[...]}) call instead of making a long chain of single-span reads. ` +
       `If you already know the area, call read_spans({"items":[{"path":${JSON.stringify(clean)},"start_line":1,"end_line":80}]}) ` +
       'or read_file with explicit start_line/end_line.'
   }

@@ -9,7 +9,7 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'read_file',
     description:
-      'Read a UTF-8 file with optional line bounds. Prefer repo_overview/search_repo/repo_grep_task/read_spans/search_files first; ' +
+      'Read a UTF-8 file with optional line bounds. Prefer repo_overview/search_repo/repo_grep_task/search_files first, then use read_spans or line-bounded reads as follow-up; ' +
       'then use start_line/end_line for surgical reads. Small files return whole; large files return a bounded preview plus metadata.',
     parameters: {
       type: 'object',

@@ -128,10 +128,8 @@ export class CodebaseAuditor {
   async runAudit(focusPath?: string, auditGoal?: string): Promise<string> {
     const workspaceRoot = path.resolve(this.workspaceRoot);
     const overview = await this.loadOverview(workspaceRoot, focusPath);
-    const auditFiles = this.pickAuditFiles(overview.structuredPayload);
-    const [readme, fileSpans, focusContext, goalEvidence] = await Promise.all([
+    const [readme, focusContext, goalEvidence] = await Promise.all([
       this.readOptional(path.join(workspaceRoot, 'README.md'), 1000),
-      this.readSpans(workspaceRoot, auditFiles),
       focusPath ? this.readFocusPathContext(workspaceRoot, focusPath) : Promise.resolve(''),
       this.collectGoalEvidence(workspaceRoot, focusPath, auditGoal)
     ]);
@@ -157,7 +155,6 @@ Behavioral requirements:
       focusPath ? `Audit Focus Target: Only focus on modules, files, and rules related to: "${focusPath}"` : null,
       readme ? `\n=== README.md ===\n${readme}` : '\n=== README.md ===\nNone found',
       `\n=== Repository Overview ===\n${overview.summary}`,
-      fileSpans ? `\n=== Key File Spans ===\n${fileSpans}` : '\n=== Key File Spans ===\nNone captured',
       focusContext ? `\n${focusContext}` : null,
       goalEvidence ? `\n=== Goal-Driven Evidence ===\n${goalEvidence}` : null,
       fallbackTree ? `\n=== Complete Project File Tree ===\n${fallbackTree}` : null
@@ -277,16 +274,6 @@ Output ONLY the final Markdown document. Be rigorous, precise, and fully grounde
         return `${meta}\n${item.content}`;
       })
       .join('\n\n');
-  }
-
-  private pickAuditFiles(overview: RepoOverviewPayload): string[] {
-    const seen = new Set<string>();
-    const ordered = [...overview.keyFiles, ...overview.entryPoints].filter((filePath) => {
-      if (seen.has(filePath)) return false;
-      seen.add(filePath);
-      return true;
-    });
-    return ordered.slice(0, 6);
   }
 
   private async readFocusPathContext(workspaceRoot: string, focusPath: string): Promise<string> {

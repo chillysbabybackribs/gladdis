@@ -2,6 +2,12 @@ import { AGENT_TOOLS } from '../agentTools'
 import { GLADDIS_WEB_TOOLS_RULE } from '../codex/dynamicBrowserTools'
 
 export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
+  'recall_history',
+  'repo_overview',
+  'search_repo',
+  'read_spans',
+  'research_dossier',
+  'verify_change',
   'search',
   'deep_search',
   'fetch_page',
@@ -30,12 +36,16 @@ export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
 
 export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work use the Gladdis MCP tools: search, deep_search, fetch_page, navigate, browse_task, ' +
-  'read_page, grep_page, grep_click, grep_type, screenshot, screenshot_app, click_xy, type_text, ' +
-  'press_key, execute_in_browser, and cdp_command.\n' +
-  'These act on the visible Gladdis browser tab the user is watching, so always prefer them over native ' +
-  'web tools or external browsers.\n' +
-  'Start with read_page or grep_page before acting. Prefer grep_click and grep_type for direct discovery ' +
-  '+ action, and use browse_task for multi-step browser workflows.\n' +
-  'Keep Claude Code\'s native local repo, file, and shell abilities for code work; use the Gladdis MCP ' +
-  'tools only for browser/web actions.'
+  'For browser work beyond search use the Gladdis MCP tools too: navigate, browse_task, read_page, grep_page, ' +
+  'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
+  'helpers use recall_history, repo_overview, search_repo, read_spans, research_dossier, and verify_change.\n' +
+  'Prefer grep_click and grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
+  'NEVER reach for a browser through Claude Code\'s native shell or any other path. Do not run google-chrome, ' +
+  'chromium, chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer ' +
+  'scripts, or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev ' +
+  'server. These bypass Gladdis, hide the page from the user, and skip Gladdis\'s search. The Gladdis MCP tools ' +
+  'are always the right tool; a native browser command is always wrong here.\n' +
+  'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev ' +
+  'app unless you need startup/cold-boot/fresh-process validation, and say why first.\n' +
+  'Keep Claude Code\'s native local repo, file, and shell abilities for code work; use the Gladdis MCP tools ' +
+  'for browser work and Gladdis-specific context helpers.'

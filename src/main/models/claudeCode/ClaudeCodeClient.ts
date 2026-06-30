@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
 import type { ChatRequest, ChatStreamEvent, ClaudeCodeStatus } from '../../../../shared/types'
+import { CLAUDE_CODE_BROWSER_TOOL_NAMES } from './browserTools'
 
 const execFileAsync = promisify(execFile)
 const CLAUDE_BIN = process.env.GLADDIS_CLAUDE_CODE_BIN || 'claude'
@@ -265,7 +266,7 @@ export class ClaudeCodeClient {
               this.emit({
                 requestId: args.requestId,
                 type: 'tool_call',
-                tool: `claude.${String(block.name ?? 'tool')}`,
+                tool: formatClaudeToolName(block.name),
                 args: blockArgs ?? {},
                 callId: block.id
               })
@@ -283,7 +284,8 @@ export class ClaudeCodeClient {
               type: 'tool_result',
               callId: block.tool_use_id,
               ok: block.is_error !== true,
-              preview: toolResultPreview(block.content, msg.tool_use_result)
+              preview: toolResultPreview(block.content, msg.tool_use_result),
+              imageDataUrl: toolResultImage(block.content)
             })
           }
           return
@@ -390,6 +392,11 @@ function safeParseJson(value: string): unknown {
   }
 }
 
+function formatClaudeToolName(name: unknown): string {
+  const tool = typeof name === 'string' ? name : 'tool'
+  return CLAUDE_CODE_BROWSER_TOOL_NAMES.has(tool) ? `gladdis.${tool}` : `claude.${tool}`
+}
+
 function toolResultPreview(content: unknown, toolUseResult: Record<string, unknown> | null | undefined): string {
   if (toolUseResult) {
     const stdout = typeof toolUseResult.stdout === 'string' ? toolUseResult.stdout.trim() : ''
@@ -416,6 +423,22 @@ function toolResultPreview(content: unknown, toolUseResult: Record<string, unkno
   } catch {
     return String(content)
   }
+}
+
+function toolResultImage(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined
+  for (const item of content) {
+    if (
+      item &&
+      typeof item === 'object' &&
+      (item as any).type === 'image' &&
+      typeof (item as any).data === 'string' &&
+      (item as any).data.trim()
+    ) {
+      return `data:${typeof (item as any).mimeType === 'string' ? (item as any).mimeType : 'image/png'};base64,${(item as any).data}`
+    }
+  }
+  return undefined
 }
 
 function usageFromResult(usage: any): ClaudeUsage | undefined {

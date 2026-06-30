@@ -231,7 +231,13 @@ export const CLAUDE_CODE_SYSTEM =
   'Before changing anything, locate the truth of how this repo actually works — search and read the ' +
   'relevant files, run the build/tests to see current state, and make edits against the real codebase, ' +
   'not assumptions. Install missing local packages or tools directly when needed.\n\n' +
+  'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
+  'use the attached recall_history MCP helper, summarize the relevant saved chat context, and stop for ' +
+  'the next concrete instruction. Do not edit files, run validations, navigate pages, or continue old ' +
+  'work from a bare resume request.\n\n' +
   `${CLAUDE_CODE_BROWSER_INSTRUCTIONS}\n\n` +
+  'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
+  'or current-site state, ground the answer with read_page or browse_task first.\n\n' +
   'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
   'launching the local dev server, use the attached Gladdis browser tools to confirm the page is not blank ' +
   'and the intended UI is visible before finishing.\n\n' +

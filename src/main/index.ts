@@ -48,14 +48,21 @@ import {
 import { AutoDreamScheduler } from './models/memory/AutoDreamScheduler'
 import { loadDreamHistory } from './models/memory/dreamHistory'
 import { ServiceRegistry } from './ServiceRegistry'
+import { RemoteChatServer } from './remote/RemoteChatServer'
 
 let win: BaseWindow
 let uiView: WebContentsView
 let registry: ServiceRegistry
+let remoteChatServer: RemoteChatServer | null = null
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const appId = process.env.GLADDIS_APP_ID ?? 'com.gladdis.app'
 const trustLocalCertificates = process.env.GLADDIS_TRUST_LOCAL_CERTS === '1'
+const enablePhoneBridge = process.env.GLADDIS_PHONE_BRIDGE === '1'
+const phoneBridgeHost = process.env.GLADDIS_PHONE_BRIDGE_HOST ?? '127.0.0.1'
+const phoneBridgePort = parseOptionalPort(process.env.GLADDIS_PHONE_BRIDGE_PORT)
+const phoneBridgeCorsOrigin = process.env.GLADDIS_PHONE_BRIDGE_CORS_ORIGIN
+const phoneBridgeToken = process.env.GLADDIS_PHONE_BRIDGE_TOKEN
 const extraTrustedHosts = new Set(
   (process.env.GLADDIS_TRUSTED_LOCAL_CERT_HOSTS ?? '')
     .split(',')
@@ -216,12 +223,49 @@ function createWindow(): void {
     const folder = registry.workspace.get().folder
     if (folder) await registry.autoDream.start(folder)
   })()
+  if (enablePhoneBridge) startRemoteChatServer()
 
   registerIpc()
   registerApplicationMenu()
 
   // Open the homepage so gladdis always starts with exactly one browser tab.
   registry.tabs.ensureInitialTab()
+}
+
+function startRemoteChatServer(): void {
+  remoteChatServer = new RemoteChatServer(
+    {
+      send: (req) => registry.chat.send(req),
+      abort: (requestId) => registry.chat.abort(requestId),
+      listConversations: () => registry.chats.list(),
+      getConversation: (id) => registry.chats.get(id),
+      saveConversation: (conversation) => registry.chats.save(conversation),
+      subscribeChatStream: (listener) => registry.subscribeChatStream(listener),
+      nudgeWorkspace: () => {
+        const folder = registry.workspace.get().folder
+        if (folder) registry.autoDream.nudge(folder)
+      },
+      warmCursorBridge: () => registry.chat.warmCursorBridge()
+    },
+    {
+      host: phoneBridgeHost,
+      port: phoneBridgePort,
+      token: phoneBridgeToken,
+      corsOrigin: phoneBridgeCorsOrigin
+    }
+  )
+  void remoteChatServer.start().then((info) => {
+    console.log(`[gladdis] phone bridge listening at ${info.appUrl}`)
+  }).catch((error) => {
+    console.warn('[gladdis] phone bridge failed to start:', error)
+  })
+}
+
+function parseOptionalPort(value: string | undefined): number | undefined {
+  if (!value) return undefined
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) return undefined
+  return parsed
 }
 
 async function captureAppWindowPng(): Promise<string> {
@@ -639,4 +683,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   registry?.disposePtyHost()
+  void remoteChatServer?.close()
 })

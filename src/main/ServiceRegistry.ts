@@ -11,6 +11,7 @@ import { BrowserTools } from './models/browserTools'
 import { ModelCallLedger } from './models/ModelCallLedger'
 import { AutoDreamScheduler } from './models/memory/AutoDreamScheduler'
 import { IPC } from '../../shared/types'
+import type { ChatStreamEvent } from '../../shared/types'
 import type { PtyHost } from './terminal/PtyHost'
 import { ChatStreamIpcBatcher } from './chatStreamIpcBatcher'
 
@@ -30,6 +31,7 @@ export class ServiceRegistry {
   private _chat: ChatService | null = null
   private _autoDream: AutoDreamScheduler | null = null
   private _ptyHost: PtyHost | null = null
+  private readonly chatStreamListeners = new Set<(event: ChatStreamEvent) => void>()
   private readonly chatStreamBatcher = new ChatStreamIpcBatcher((event) => {
     if (!this.uiView.webContents.isDestroyed()) {
       this.uiView.webContents.send(IPC.CHAT_STREAM, event)
@@ -117,7 +119,7 @@ export class ServiceRegistry {
     if (!this._chat) {
       this._chat = new ChatService(
         this.keys,
-        (e) => this.chatStreamBatcher.push(e),
+        (e) => this.emitChatStream(e),
         this.tools,
         this.audit,
         this.chats,
@@ -130,6 +132,16 @@ export class ServiceRegistry {
       this._chat.setCodexFolder(this.workspace.get().folder)
     }
     return this._chat
+  }
+
+  subscribeChatStream(listener: (event: ChatStreamEvent) => void): () => void {
+    this.chatStreamListeners.add(listener)
+    return () => this.chatStreamListeners.delete(listener)
+  }
+
+  private emitChatStream(event: ChatStreamEvent): void {
+    this.chatStreamBatcher.push(event)
+    for (const listener of this.chatStreamListeners) listener(event)
   }
 
   get autoDream(): AutoDreamScheduler {

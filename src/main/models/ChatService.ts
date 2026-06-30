@@ -202,6 +202,7 @@ export class ChatService {
       {
         repoOverview: (input) => this.repoIntelligence.repoOverview(input),
         searchRepo: (input) => this.repoIntelligence.searchRepo(input),
+        repoGrepTask: (input) => this.repoIntelligence.repoGrepTask(input),
         readSpans: (input) => this.repoIntelligence.readSpans(input),
         researchDossier: (input) => this.researchDossier.researchDossier(input),
         verifyChange: (input) => validation.verifyChange(input)

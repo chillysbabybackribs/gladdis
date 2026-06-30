@@ -122,7 +122,19 @@ function makeSupervisorHarness(req: {
 describe('ChatService provider hardening', () => {
   it('exposes a single unified search tool plus fetch_page', () => {
     const toolNames = AGENT_TOOLS.map((tool) => tool.name)
-    expect(toolNames).toEqual(expect.arrayContaining(['repo_overview', 'search_repo', 'read_spans', 'research_dossier', 'verify_change', 'search', 'navigate', 'fetch_page']))
+    expect(toolNames).toEqual(
+      expect.arrayContaining([
+        'repo_overview',
+        'search_repo',
+        'repo_grep_task',
+        'read_spans',
+        'research_dossier',
+        'verify_change',
+        'search',
+        'navigate',
+        'fetch_page'
+      ])
+    )
     expect(toolNames).not.toContain('background_web_search')
     expect(toolNames).not.toContain('search_task')
     expect(toolNames).not.toContain('search_web')
@@ -132,6 +144,7 @@ describe('ChatService provider hardening', () => {
   it('gives all three providers ONE browser surface (Codex sees the same tools)', () => {
     expect(CODEX_BROWSER_TOOL_NAMES.has('repo_overview')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('search_repo')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('repo_grep_task')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('read_spans')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('research_dossier')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('verify_change')).toBe(true)
@@ -216,6 +229,7 @@ describe('ChatService provider hardening', () => {
     expect(granted.has('read_file')).toBe(true)
     expect(granted.has('repo_overview')).toBe(true)
     expect(granted.has('search_repo')).toBe(true)
+    expect(granted.has('repo_grep_task')).toBe(true)
     expect(granted.has('read_spans')).toBe(true)
     expect(granted.has('research_dossier')).toBe(true)
     expect(granted.has('verify_change')).toBe(true)
@@ -224,6 +238,7 @@ describe('ChatService provider hardening', () => {
     const next = resolveTurnTools(lean.tools, granted).map((t) => t.name)
     expect(next).toContain('repo_overview')
     expect(next).toContain('search_repo')
+    expect(next).toContain('repo_grep_task')
     expect(next).toContain('read_spans')
     expect(next).toContain('research_dossier')
     expect(next).toContain('verify_change')
@@ -272,6 +287,28 @@ describe('ChatService provider hardening', () => {
     expect(bad.ok).toBe(false)
     const badTools = await bt.run('request_tools', { tools: ['non_existent_tool'] }, { tabId: 'tab-1', grantedTools: new Set() } as any)
     expect(badTools.ok).toBe(false)
+  })
+
+  it('wires repo_grep_task into the capability broker handed to BrowserTools', async () => {
+    const workspaceRoot = '/home/dp/Desktop/myworkspace/Gladdis'
+    const { tools } = makeService(workspaceRoot)
+    expect(tools.setCapabilityBroker).toHaveBeenCalledTimes(1)
+    const broker = tools.setCapabilityBroker.mock.calls[0]?.[0]
+    expect(broker).toBeTruthy()
+
+    const result = await broker.repoGrepTask(
+      {
+        requestId: 'req-1',
+        taskId: 'task-1'
+      },
+      {
+        workspaceRoot,
+        task: 'Find where browser tabs are created and managed'
+      }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.summary).toContain('Find where browser tabs are created and managed')
   })
 
   it('describes recall_history as context recovery, not automatic continuation', () => {

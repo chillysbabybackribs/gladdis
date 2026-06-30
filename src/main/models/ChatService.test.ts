@@ -1044,6 +1044,126 @@ describe('ChatService provider hardening', () => {
     expect(cursorSend).toHaveBeenCalledOnce()
   })
 
+  it('automatically runs verify_change after Cursor edits files without native validation', async () => {
+    const { service, emit } = makeService('/tmp/selected-project')
+    const verifyChange = vi.fn(async () => ({
+      ok: true,
+      summary: 'typecheck: pass',
+      cacheStatus: 'miss',
+      structuredPayload: {
+        workspaceRoot: '/tmp/selected-project',
+        language: 'node',
+        checks: [{ check: 'typecheck', ok: true, output: 'ok' }]
+      }
+    }))
+    ;(service as any).capabilityBroker.verifyChange = verifyChange
+    const cursorSend = vi.fn(async () => {
+      ;(service as any).emit({
+        requestId: 'req-cursor-verify',
+        type: 'tool_call',
+        tool: 'edit_file',
+        args: { path: 'src/main/index.ts' },
+        callId: 'cursor-edit-1'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-verify',
+        type: 'tool_result',
+        callId: 'cursor-edit-1',
+        ok: true,
+        preview: 'Updated src/main/index.ts'
+      })
+      return { text: 'done' }
+    })
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-verify',
+      modelId: 'composer-2.5',
+      conversationId: 'conv-cursor-verify',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'update src/main/index.ts to fix the typing issue' }]
+    } as any)
+
+    expect(verifyChange).toHaveBeenCalledOnce()
+    expect(verifyChange).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'req-cursor-verify' }),
+      expect.objectContaining({ workspaceRoot: '/tmp/selected-project', checks: ['typecheck'] })
+    )
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'req-cursor-verify',
+        type: 'tool_call',
+        tool: 'verify_change'
+      })
+    )
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'req-cursor-verify',
+        type: 'tool_result',
+        callId: 'cursor_post_validation',
+        ok: true
+      })
+    )
+  })
+
+  it('does not duplicate verification when Cursor already ran native validation', async () => {
+    const { service } = makeService('/tmp/selected-project')
+    const verifyChange = vi.fn()
+    ;(service as any).capabilityBroker.verifyChange = verifyChange
+    const cursorSend = vi.fn(async () => {
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-validate',
+        type: 'tool_call',
+        tool: 'edit_file',
+        args: { path: 'src/main/index.ts' },
+        callId: 'cursor-edit-1'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-validate',
+        type: 'tool_result',
+        callId: 'cursor-edit-1',
+        ok: true,
+        preview: 'Updated src/main/index.ts'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-validate',
+        type: 'tool_call',
+        tool: 'run_validation',
+        args: { check: 'typecheck' },
+        callId: 'cursor-validate-1'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-native-validate',
+        type: 'tool_result',
+        callId: 'cursor-validate-1',
+        ok: true,
+        preview: 'typecheck: pass'
+      })
+      return { text: 'done' }
+    })
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-native-validate',
+      modelId: 'composer-2.5',
+      conversationId: 'conv-cursor-native-validate',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'fix the typing issue and validate it' }]
+    } as any)
+
+    expect(verifyChange).not.toHaveBeenCalled()
+  })
+
   it('runs browse_task/search on the user\'s picked model — no silent gemini substitution', () => {
     const { service } = makeService()
     const completed: string[] = []

@@ -52,9 +52,10 @@ const BROWSER_INTERACTION_GUIDANCE =
   '## Browser interaction\n' +
   '  • grep_page → primary tool to find text/elements on a page; grep the words near the answer ' +
   '(type text/regex) and read the returned context, or use type selector for a specific CSS selector/XPath target. Avoid broad tag selectors (a/div/img), they dump the page.\n' +
-  '  • grep_click → discover and click in one step.\n' +
-  '  • grep_type → discover, focus, and type in one step.\n' +
+  '  • grep_click → discover and click in one step; after read_a11y you can click @aN refs directly.\n' +
+  '  • grep_type → discover, focus, and type in one step; after read_a11y you can target @aN refs directly.\n' +
   '  • read_page → high-level digest (structure + actions); use for orientation, not targeting.\n' +
+  '  • read_a11y → compact CDP accessibility tree (role + name + @refs + coordinates); use for control discovery on component-heavy UIs.\n' +
   '  • navigate/click_xy/type_text/press_key/execute_in_browser/cdp_command → page actions.'
 
 const FILESYSTEM_OVERVIEW =
@@ -88,7 +89,7 @@ const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: s
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
   { enabled: (names) => names.has('search') || names.has('deep_search') || names.has('fetch_page'), text: BROWSER_OVERVIEW },
-  { enabled: (names) => names.has('browse_task') || names.has('read_page') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => names.has('browse_task') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
   { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('repo_grep_task') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
   { enabled: (names) => names.has('run_command') || names.has('launch_web_dev_server'), text: SHELL_GUIDANCE },
@@ -123,7 +124,7 @@ function guidanceKey(tools: ToolDef[]): GuidanceBit {
   const names = new Set(tools.map((tool) => tool.name))
   let key = 0
   if (names.has('search') || names.has('deep_search') || names.has('fetch_page')) key |= GUIDANCE_BITS.browserSearch
-  if (names.has('browse_task') || names.has('read_page') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
+  if (names.has('browse_task') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
   if (names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('repo_grep_task') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier')) key |= GUIDANCE_BITS.filesystemRead
   if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
   if (names.has('run_command') || names.has('launch_web_dev_server')) key |= GUIDANCE_BITS.shell
@@ -251,13 +252,39 @@ export const CLAUDE_CODE_SYSTEM =
  * already arrives with a large built-in runtime prompt, so extra instructions
  * here should be only the Gladdis-specific contract and browser-tool rules.
  */
-export const CURSOR_SYSTEM =
-  `${ABOUT_GLADDIS}\n\n` +
-  'This turn runs through a logged-in local Cursor Agent CLI session. Use the actual workspace on disk, ' +
-  'verify before asserting, and complete the task end-to-end when feasible.\n\n' +
-  `${CURSOR_BROWSER_INSTRUCTIONS}\n\n` +
-  'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, or ' +
-  'current-site state, ground the answer with read_page or browse_task first.\n\n' +
-  'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and launching ' +
-  'the local dev server, use the attached Gladdis browser tools to confirm the page is not blank and the ' +
-  'intended UI is visible before finishing.'
+
+// Cache for cursor system prompts - keyed by enableBrowserTools boolean
+const CURSOR_SYSTEM_CACHE = new Map<boolean, string>()
+
+export function buildCursorSystem(options: { enableBrowserTools: boolean }): string {
+  const cached = CURSOR_SYSTEM_CACHE.get(options.enableBrowserTools)
+  if (cached) return cached
+
+  const core =
+    `${ABOUT_GLADDIS}\n\n` +
+    'This turn runs through a logged-in local Cursor Agent CLI session. Use the actual workspace on disk, ' +
+    'verify before asserting, and complete the task end-to-end when feasible.'
+
+  let result: string
+  if (!options.enableBrowserTools) {
+    result =
+      core +
+      '\n\nUse Cursor native local repo, file, shell, and validation abilities for code work. ' +
+      'After editing files, run the narrowest relevant local verification command before claiming success.'
+  } else {
+    result =
+      core +
+      '\n\n' +
+      `${CURSOR_BROWSER_INSTRUCTIONS}\n\n` +
+      'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, or ' +
+      'current-site state, ground the answer with read_page or browse_task first.\n\n' +
+      'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and launching ' +
+      'the local dev server, use the attached Gladdis browser tools to confirm the page is not blank and the ' +
+      'intended UI is visible before finishing.'
+  }
+
+  CURSOR_SYSTEM_CACHE.set(options.enableBrowserTools, result)
+  return result
+}
+
+export const CURSOR_SYSTEM = buildCursorSystem({ enableBrowserTools: true })

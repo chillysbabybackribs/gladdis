@@ -849,7 +849,7 @@ export function shouldEmitAssistantStreamText(kind: CursorAssistantEventKind): b
   return kind === 'stream_delta' || kind === 'final_flush'
 }
 
-function formatCursorToolName(toolCall: any): string {
+export function formatCursorToolName(toolCall: any): string {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
   const [firstKey, firstValue] = firstCursorToolEntry(payload)
   if (firstKey === 'mcpToolCall') {
@@ -916,10 +916,10 @@ function firstCursorToolEntry(payload: Record<string, any>): [string, any] {
   return [firstKey, firstKey ? payload[firstKey] : undefined]
 }
 
-function normalizeCursorToolName(key: string): string {
+export function normalizeCursorToolName(key: string): string {
   switch (key) {
     case 'shellToolCall':
-      return 'execute_in_browser'
+      return 'run_command'
     case 'readToolCall':
     case 'fileReadToolCall':
       return 'read_file'

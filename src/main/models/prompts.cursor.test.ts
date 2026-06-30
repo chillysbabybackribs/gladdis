@@ -6,7 +6,8 @@ describe('buildCursorSystem', () => {
   it('omits browser MCP instructions on code-only turns', () => {
     const prompt = buildCursorSystem({ enableBrowserTools: false })
     expect(prompt).not.toContain(CURSOR_BROWSER_INSTRUCTIONS)
-    expect(prompt).toContain('Use Cursor native local repo, file, and shell abilities')
+    expect(prompt).toContain('Use Cursor native local repo, file, shell, and validation abilities')
+    expect(prompt).toContain('run the narrowest relevant local verification command')
   })
 
   it('includes browser MCP instructions when the bridge is enabled', () => {
@@ -46,5 +47,20 @@ describe('CURSOR_BROWSER_INSTRUCTIONS', () => {
       expect(CURSOR_BROWSER_INSTRUCTIONS).toContain(tool)
     }
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('lightweight notebook')
+  })
+
+  it('only advertises the reduced Cursor MCP surface and native validation expectations', () => {
+    for (const unavailableTool of [
+      'repo_overview',
+      'repo_grep_task',
+      'search_repo',
+      'read_spans',
+      'research_dossier',
+      'verify_change'
+    ]) {
+      expect(CURSOR_BROWSER_INSTRUCTIONS).not.toContain(unavailableTool)
+    }
+    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('validation abilities')
+    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('run the narrowest relevant local verification command')
   })
 })

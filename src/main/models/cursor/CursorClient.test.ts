@@ -12,7 +12,7 @@ vi.mock('node:child_process', () => ({
   execFile: (...args: unknown[]) => execFileMock(...args)
 }))
 
-import { classifyAssistantEvent, computeCursorEmitDelta, ensureWorkspaceMcpConfig, isMcpConfigWarm, parseCursorModels, probeMcpConfigWarm, shouldEmitAssistantStreamText, CursorClient } from './CursorClient'
+import { classifyAssistantEvent, computeCursorEmitDelta, ensureWorkspaceMcpConfig, formatCursorToolName, isMcpConfigWarm, normalizeCursorToolName, parseCursorModels, probeMcpConfigWarm, shouldEmitAssistantStreamText, CursorClient } from './CursorClient'
 import { CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from '../claudeCode/browserTools'
 
 beforeEach(() => {
@@ -191,6 +191,19 @@ Tip: use --model <id> to switch.
     step = computeCursorEmitDelta('HelloWorld', 'Hello\n\nWorld', 'final_flush')
     expect(step.delta).toBe('')
     expect(step.nextEmitted).toBe('Hello\n\nWorld')
+  })
+
+  it('maps Cursor native local tools to Gladdis-equivalent names', () => {
+    expect(normalizeCursorToolName('shellToolCall')).toBe('run_command')
+    expect(normalizeCursorToolName('runValidationToolCall')).toBe('run_validation')
+    expect(
+      formatCursorToolName({
+        mcpToolCall: {
+          serverName: 'gladdis',
+          toolName: 'read_page'
+        }
+      })
+    ).toBe('gladdis.read_page')
   })
 })
 

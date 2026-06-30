@@ -60,6 +60,11 @@ import { createTurnSupervisor } from './turnSupervisor'
 import { AgentOptimizerService } from './AgentOptimizerService'
 import { AgentConfigurationService } from './AgentConfigurationService'
 import {
+  createToolValidationState,
+  needsValidationBeforeFinal,
+  noteToolOutcome
+} from './providers/toolValidation'
+import {
   completeAnthropic,
   runAnthropicToolLoop,
   streamAnthropicPlain,
@@ -193,6 +198,8 @@ export class ChatService {
   private anthropicClient: { key: string; client: Anthropic } | null = null
   private googleClient: { key: string; client: GoogleGenAI } | null = null
   private readonly toolStarts = new Map<string, number>()
+  private readonly toolNames = new Map<string, string>()
+  private readonly cursorValidationStates = new Map<string, ReturnType<typeof createToolValidationState>>()
   private readonly capabilityBroker: CapabilityBroker
   private readonly repoIntelligence: RepoIntelligenceService
   private readonly researchDossier: ResearchDossierService
@@ -254,13 +261,21 @@ export class ChatService {
   private emit = (event: ChatStreamEvent): void => {
     if (event.type === 'tool_call') {
       const startedAt = event.startedAt ?? Date.now()
-      this.toolStarts.set(`${event.requestId}:${event.callId}`, startedAt)
+      const key = `${event.requestId}:${event.callId}`
+      this.toolStarts.set(key, startedAt)
+      this.toolNames.set(key, event.tool)
       event = { ...event, startedAt }
     } else if (event.type === 'tool_result') {
       const endedAt = event.endedAt ?? Date.now()
       const key = `${event.requestId}:${event.callId}`
       const startedAt = this.toolStarts.get(key)
+      const toolName = this.toolNames.get(key)
+      const cursorValidation = this.cursorValidationStates.get(event.requestId)
       this.toolStarts.delete(key)
+      this.toolNames.delete(key)
+      if (cursorValidation && toolName) {
+        noteToolOutcome(cursorValidation, toolName, { ok: event.ok, text: event.preview })
+      }
       event = {
         ...event,
         endedAt,
@@ -269,10 +284,53 @@ export class ChatService {
     } else if (event.type === 'done' || event.type === 'error') {
       const prefix = `${event.requestId}:`
       for (const key of this.toolStarts.keys()) if (key.startsWith(prefix)) this.toolStarts.delete(key)
+      for (const key of this.toolNames.keys()) if (key.startsWith(prefix)) this.toolNames.delete(key)
+      this.cursorValidationStates.delete(event.requestId)
     }
     const assistantMessageId =
       event.assistantMessageId ?? this.assistantMessageIds.get(event.requestId)
     this.sendStreamEvent(assistantMessageId ? { ...event, assistantMessageId } : event)
+  }
+
+  private async runCursorPostActionVerification(
+    req: Pick<ChatRequest, 'requestId' | 'conversationId'>,
+    goal: string
+  ): Promise<void> {
+    const validation = this.cursorValidationStates.get(req.requestId)
+    if (!validation || !needsValidationBeforeFinal(validation, [{ name: 'verify_change' }])) return
+    const workspaceRoot = this.tools.getWorkspaceRoot?.()
+    if (!workspaceRoot) return
+
+    const callId = 'cursor_post_validation'
+    this.emit({
+      requestId: req.requestId,
+      type: 'tool_call',
+      tool: 'verify_change',
+      args: { check: 'typecheck' },
+      callId
+    })
+    const result = await this.capabilityBroker.verifyChange(
+      {
+        requestId: req.requestId,
+        assistantMessageId: this.assistantMessageIds.get(req.requestId),
+        taskId: taskIdForRequest(req)
+      },
+      {
+        workspaceRoot,
+        checks: ['typecheck'],
+        goal
+      }
+    )
+    this.emit({
+      requestId: req.requestId,
+      type: 'tool_result',
+      callId,
+      ok: result.ok,
+      preview: result.summary
+    })
+    if (!result.ok) {
+      throw new Error(`Automatic post-action verification failed: ${result.summary}`)
+    }
   }
 
   private emitLoopState(
@@ -897,6 +955,7 @@ export class ChatService {
         try {
           const enableCursorMcp = shouldEnableCursorMcpBridge(policy)
           const cursorMode: 'ask' | 'agent' = agentic ? 'agent' : 'ask'
+          this.cursorValidationStates.set(req.requestId, createToolValidationState())
           const wsBlock = this.agentConfig.workspaceSystemBlock(initialProfile)
           const cursorSystem = [
             buildCursorSystem({ enableBrowserTools: enableCursorMcp }),
@@ -920,6 +979,7 @@ export class ChatService {
               getQueuedContext: () => this.consumeQueuedInterjection(req.requestId)
             }
           )
+          await this.runCursorPostActionVerification(req, actionableText)
           supervisor.complete('Cursor Agent task completed.')
           call.finish({
             output: result.text,
@@ -934,6 +994,8 @@ export class ChatService {
           supervisor.blocked(message, controller.signal.aborted)
           call.finish({ status: 'error', error: err })
           throw err
+        } finally {
+          this.cursorValidationStates.delete(req.requestId)
         }
       } else {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm

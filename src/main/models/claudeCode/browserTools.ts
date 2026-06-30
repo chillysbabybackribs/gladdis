@@ -23,6 +23,7 @@ export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
   'navigate',
   'browse_task',
   'read_page',
+  'read_a11y',
   'grep_page',
   'watch_network',
   'grep_click',
@@ -61,6 +62,7 @@ export const CURSOR_MCP_TOOL_NAMES = new Set([
   'navigate',
   'browse_task',
   'read_page',
+  'read_a11y',
   'grep_page',
   'watch_network',
   'grep_click',
@@ -85,7 +87,7 @@ export const CURSOR_MCP_TOOLS = AGENT_TOOLS
 
 export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the Gladdis MCP tools too: search_open, navigate, browse_task, read_page, grep_page, ' +
+  'For browser work beyond search use the Gladdis MCP tools too: search_open, navigate, browse_task, read_page, read_a11y, grep_page, ' +
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
   'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, memory_create_task, repo_overview, ' +
@@ -111,11 +113,10 @@ export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
 // the model never learns to call.
 export const CURSOR_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the Gladdis MCP tools too: navigate, browse_task, read_page, grep_page, ' +
+  'For browser work beyond search use the Gladdis MCP tools too: navigate, browse_task, read_page, read_a11y, grep_page, ' +
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
-  'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, memory_create_task, repo_overview, ' +
-  'repo_grep_task, search_repo, read_spans, research_dossier, and verify_change.\n' +
+  'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, and memory_create_task.\n' +
   'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook: call memory_read before re-asking for ' +
   'context that may already be known, use memory_write for durable decisions/constraints/identifiers, use memory_list for a ' +
   'quick inventory, use memory_create_task for task-specific notes, and use memory_forget to clear stale notes when plans change. ' +
@@ -128,4 +129,6 @@ export const CURSOR_BROWSER_INSTRUCTIONS =
   'are always the right tool; a native browser command is always wrong here.\n' +
   'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev ' +
   'app unless you need startup/cold-boot/fresh-process validation, and say why first.\n' +
-  'Use Cursor native local repo, file, and shell abilities for code work; use the Gladdis MCP tools for browser work.'
+  'Use Cursor native local repo, file, shell, and validation abilities for code work. After editing files, run the narrowest ' +
+  'relevant local verification command before claiming success; if validation fails, fix it or say clearly why it cannot pass. ' +
+  'Use the Gladdis MCP tools for browser work.'

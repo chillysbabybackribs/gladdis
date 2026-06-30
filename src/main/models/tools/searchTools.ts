@@ -2,6 +2,7 @@ import type { TabManager } from '../../TabManager'
 import type { PageExtractor } from '../../extract/PageExtractor'
 import type { KeyStore } from '../KeyStore'
 import type { ToolContext, ToolOutcome } from '../browserTools'
+import { shouldUseDirectBrowserTools } from '../../../../shared/types'
 import { digestPage } from '../PageDigest'
 import { runDeepSearch } from '../deepSearch'
 import { runUnifiedSearch } from '../unifiedSearch'
@@ -42,12 +43,22 @@ export async function runSearchTool(
       limitPerQuery: clampInt(args.limit, 1, 8, 4),
       digestTop: clampInt(args.digest_top, 0, 3, 2),
       focus: args.focus ? String(args.focus) : undefined,
-      navigateVisible: typeof args.navigate_visible === 'boolean' ? args.navigate_visible : false
+      navigateVisible: resolveSearchNavigationMode(args, ctx)
     }
   )
   if (!outcome.ok) return { ok: false, text: outcome.text }
   deps.rememberDone(ctx, memKey, outcome.text)
   return { ok: true, text: outcome.text }
+}
+
+function resolveSearchNavigationMode(args: Record<string, any>, ctx: ToolContext): boolean {
+  if (typeof args.navigate_visible === 'boolean') return args.navigate_visible
+  const latestUserText = ctx.latestUserText ?? ''
+  return (
+    shouldUseDirectBrowserTools(latestUserText) ||
+    /\b(?:open|navigate|visit|load|go to)\b.{0,80}\b(?:result|page|site|tab|link|url|browser)\b/i.test(latestUserText) ||
+    /\b(?:open|navigate|visit|load|go to)\s+(?:it|them|that|those|the best result|the first result)\b/i.test(latestUserText)
+  )
 }
 
 /**

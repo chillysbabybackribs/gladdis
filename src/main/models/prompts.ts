@@ -40,7 +40,7 @@ const BROWSER_OVERVIEW =
   `${GLADDIS_WEB_TOOLS_RULE}\n\n` +
   'All browser actions act on the VISIBLE tab the user is watching — they see the page change. ' +
   'Use your own judgment about which tool fits; there is no fixed script.\n\n' +
-  '  • search → finds web results, then opens the best hit in the visible tab.\n' +
+  '  • search → finds web results and, for browser-oriented tasks, opens the best hit in the visible tab while returning ranked evidence.\n' +
   '  • fetch_page → read a known URL deeply.\n' +
   '  • browse_task → multi-step deterministic flows (logins, checkouts, multi-page processes).\n' +
   '  • screenshot/screenshot_app → visual confirmation only.\n\n' +

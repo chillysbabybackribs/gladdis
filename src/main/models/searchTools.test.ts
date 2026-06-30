@@ -71,6 +71,36 @@ describe('unified search tool', () => {
     expect(out.text).toContain('the page body')
   })
 
+  it('auto-navigates search results for browser-oriented tasks when the flag is omitted', async () => {
+    const { tools } = makeTools()
+    vi.mocked(runUnifiedSearch).mockClear()
+
+    await tools.run(
+      'search',
+      { query: 'open the electron docs' },
+      { tabId: 'tab-1', latestUserText: 'search the web for the Electron docs and open the best result' }
+    )
+
+    expect(vi.mocked(runUnifiedSearch).mock.calls[0]?.[1]).toMatchObject({
+      navigateVisible: true
+    })
+  })
+
+  it('keeps search background-only for research tasks when the flag is omitted', async () => {
+    const { tools } = makeTools()
+    vi.mocked(runUnifiedSearch).mockClear()
+
+    await tools.run(
+      'search',
+      { query: 'latest Electron architecture articles' },
+      { tabId: 'tab-1', latestUserText: 'search the web for recent Electron architecture articles and summarize the findings' }
+    )
+
+    expect(vi.mocked(runUnifiedSearch).mock.calls[0]?.[1]).toMatchObject({
+      navigateVisible: false
+    })
+  })
+
   it('fetch_page opens the URL in the visible tab and returns a digest', async () => {
     const { tools, navigate, extractor, tabs } = makeTools()
     const out = await tools.run('fetch_page', { url: 'https://example.com/a' }, { tabId: 'tab-1' })

@@ -9,7 +9,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
   {
     name: 'search',
     description:
-      'Find web pages and evidence. Returns ranked SERP results and keeps the visible tab unchanged by default.',
+      'Find web pages and evidence. For browser-oriented tasks it also opens the best result in the visible tab; otherwise it keeps the visible tab unchanged unless `navigate_visible` is true.',
     parameters: {
       type: 'object',
       properties: {
@@ -21,7 +21,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
           type: 'boolean',
           description:
             'If true, navigates the active visible browser tab to the best search result. ' +
-            'Default is false (the search is run cleanly in background tabs without changing the user\'s current page).'
+            'If omitted, Gladdis auto-navigates for browser-oriented tasks and stays background-only for pure research.'
         }
       },
       required: ['query']

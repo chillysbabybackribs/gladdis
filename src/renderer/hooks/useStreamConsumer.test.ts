@@ -37,6 +37,31 @@ describe('applyStreamEventToMessages', () => {
     ])
   })
 
+  it('uses the cached assistant index when it already points at the targeted row', () => {
+    const messages: Message[] = [
+      { id: 'assistant-a', role: 'assistant', text: 'alpha', parts: [{ kind: 'text', text: 'alpha' }] },
+      { id: 'user-b', role: 'user', text: 'second' },
+      { id: 'assistant-b', role: 'assistant', text: 'beta', parts: [{ kind: 'text', text: 'beta' }] }
+    ]
+
+    const next = applyStreamEventToMessages(
+      messages,
+      {
+        requestId: 'req-b',
+        assistantMessageId: 'assistant-b',
+        type: 'delta',
+        text: ' tail'
+      },
+      undefined,
+      2
+    )
+
+    expect(next[0]).toBe(messages[0])
+    expect(next[1]).toBe(messages[1])
+    expect(next[2].text).toBe('beta tail')
+    expect(next[2].liveTextSegments).toEqual([' tail'])
+  })
+
   it('does not fall back to the latest assistant when a target id is missing', () => {
     const messages: Message[] = [
       { id: 'assistant-a', role: 'assistant', text: 'alpha', parts: [{ kind: 'text', text: 'alpha' }] }

@@ -57,6 +57,20 @@ function findAssistantIndex(messages: Message[], assistantMessageId?: string | n
   return -1
 }
 
+function resolveAssistantIndex(
+  messages: Message[],
+  assistantMessageId?: string | null,
+  hintedIndex?: number | null
+): number {
+  if (hintedIndex != null && hintedIndex >= 0 && hintedIndex < messages.length) {
+    const hinted = messages[hintedIndex]
+    if (hinted?.role === 'assistant' && (!assistantMessageId || hinted.id === assistantMessageId)) {
+      return hintedIndex
+    }
+  }
+  return findAssistantIndex(messages, assistantMessageId)
+}
+
 function commitLiveText(message: Message): Message {
   const text = liveTextValue(message)
   if (!text) return message
@@ -71,10 +85,11 @@ function commitLiveText(message: Message): Message {
 export function applyStreamEventToMessages(
   messages: Message[],
   event: ChatStreamEvent,
-  fallbackAssistantMessageId?: string | null
+  fallbackAssistantMessageId?: string | null,
+  fallbackAssistantIndex?: number | null
 ): Message[] {
   const targetId = event.assistantMessageId ?? fallbackAssistantMessageId ?? null
-  const index = findAssistantIndex(messages, targetId)
+  const index = resolveAssistantIndex(messages, targetId, fallbackAssistantIndex)
   if (index === -1) return messages
   const original = messages[index]
   const message = event.type === 'delta' ? original : commitLiveText(original)
@@ -257,6 +272,8 @@ interface StreamConsumerArgs {
   activeReq: RefObject<string | null>
   /** Id of the assistant message receiving the in-flight request. */
   activeAssistantMessageId: RefObject<string | null>
+  /** Cached index of the active assistant row so steady-state stream updates stay O(1). */
+  activeAssistantIndex: RefObject<number | null>
   /** Audible-replies handle; spoken per delta, flushed on done. */
   ttsRef: RefObject<TtsHandle>
   setMessages: Dispatch<SetStateAction<Message[]>>
@@ -297,6 +314,7 @@ interface StreamConsumerArgs {
 export function useStreamConsumer({
   activeReq,
   activeAssistantMessageId,
+  activeAssistantIndex,
   ttsRef,
   setMessages,
   setStreaming,
@@ -317,7 +335,7 @@ export function useStreamConsumer({
       if (!text) return
       pendingDelta.current = ''
       setMessages((msgs) => {
-        return applyStreamEventToMessages(
+        const next = applyStreamEventToMessages(
           msgs,
           {
             requestId: activeReq.current ?? '',
@@ -325,8 +343,18 @@ export function useStreamConsumer({
             type: 'delta',
             text
           },
-          activeAssistantMessageId.current
+          activeAssistantMessageId.current,
+          activeAssistantIndex.current
         )
+        const assistantId = activeAssistantMessageId.current
+        if (assistantId) {
+          activeAssistantIndex.current = resolveAssistantIndex(
+            next,
+            assistantId,
+            activeAssistantIndex.current
+          )
+        }
+        return next
       })
       onCommitRef.current()
     }
@@ -353,13 +381,28 @@ export function useStreamConsumer({
       }
 
       setMessages((msgs) => {
-        return applyStreamEventToMessages(msgs, e, activeAssistantMessageId.current)
+        const next = applyStreamEventToMessages(
+          msgs,
+          e,
+          activeAssistantMessageId.current,
+          activeAssistantIndex.current
+        )
+        const assistantId = activeAssistantMessageId.current
+        if (assistantId) {
+          activeAssistantIndex.current = resolveAssistantIndex(
+            next,
+            assistantId,
+            activeAssistantIndex.current
+          )
+        }
+        return next
       })
       onCommitRef.current()
       if (e.type === 'done' || e.type === 'error') {
         if (e.type === 'done') void ttsRef.current.flush()
         activeReq.current = null
         activeAssistantMessageId.current = null
+        activeAssistantIndex.current = null
         setStreaming(false)
         setPaused?.(false)
       }

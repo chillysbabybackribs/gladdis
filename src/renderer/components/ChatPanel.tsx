@@ -118,6 +118,7 @@ export function ChatPanel({
   ttsRef.current = tts
   const activeReq = useRef<string | null>(null)
   const activeAssistantMessageId = useRef<string | null>(null)
+  const activeAssistantIndex = useRef<number | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const autoScroll = useAutoScroll(scrollRef)
   const convIdRef = useRef(convId)
@@ -201,6 +202,8 @@ export function ChatPanel({
             conv.messages as Message[],
             conv.continuesFromId ?? null
           )
+          activeAssistantMessageId.current = null
+          activeAssistantIndex.current = null
           setMessages(conv.messages as Message[])
           // After the restored messages paint, anchor at the latest reply
           // instead of opening at the top of the transcript.
@@ -218,6 +221,7 @@ export function ChatPanel({
   useStreamConsumer({
     activeReq,
     activeAssistantMessageId,
+    activeAssistantIndex,
     ttsRef,
     setMessages,
     setStreaming,
@@ -336,6 +340,7 @@ export function ChatPanel({
     const assistantMessageId = newMessageId()
     activeReq.current = requestId
     activeAssistantMessageId.current = assistantMessageId
+    activeAssistantIndex.current = messagesRef.current.length + 1
     tts.stop() // silence any audio from the previous reply before this one starts
     setStreaming(true)
     setMessages((m) => [...m, userMsg, { id: assistantMessageId, role: 'assistant', text: '' }])
@@ -379,7 +384,11 @@ export function ChatPanel({
       const assistantIndex = assistantId
         ? m.findIndex((message) => message.role === 'assistant' && message.id === assistantId)
         : -1
-      if (assistantIndex === -1) return [...m, userMsg]
+      if (assistantIndex === -1) {
+        activeAssistantIndex.current = null
+        return [...m, userMsg]
+      }
+      activeAssistantIndex.current = assistantIndex + 1
       return [...m.slice(0, assistantIndex), userMsg, ...m.slice(assistantIndex)]
     })
     autoScroll.scrollToBottom()
@@ -390,6 +399,7 @@ export function ChatPanel({
       window.gladdis.chat.abort(activeReq.current)
       activeReq.current = null
       activeAssistantMessageId.current = null
+      activeAssistantIndex.current = null
       tts.stop()
       setStreaming(false)
       setPaused(false)
@@ -422,7 +432,10 @@ export function ChatPanel({
       window.gladdis.chat.abort(activeReq.current)
       activeReq.current = null
       activeAssistantMessageId.current = null
+      activeAssistantIndex.current = null
     }
+    activeAssistantMessageId.current = null
+    activeAssistantIndex.current = null
     tts.stop()
     void flushPersist()
     setStreaming(false)
@@ -444,6 +457,7 @@ export function ChatPanel({
       window.gladdis.chat.abort(activeReq.current)
       activeReq.current = null
       activeAssistantMessageId.current = null
+      activeAssistantIndex.current = null
     }
     tts.stop()
     void flushPersist()
@@ -460,6 +474,8 @@ export function ChatPanel({
         conv.messages as Message[],
         conv.continuesFromId ?? null
       )
+      activeAssistantMessageId.current = null
+      activeAssistantIndex.current = null
       setMessages(conv.messages as Message[])
       requestAnimationFrame(() => autoScroll.scrollToBottom())
     }
@@ -471,7 +487,10 @@ export function ChatPanel({
       window.gladdis.chat.abort(activeReq.current)
       activeReq.current = null
       activeAssistantMessageId.current = null
+      activeAssistantIndex.current = null
     }
+    activeAssistantMessageId.current = null
+    activeAssistantIndex.current = null
     tts.stop()
     void flushPersist()
     setStreaming(false)

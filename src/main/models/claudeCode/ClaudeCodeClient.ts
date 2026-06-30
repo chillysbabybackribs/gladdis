@@ -195,7 +195,11 @@ export class ClaudeCodeClient {
       args.system
     ]
     if (bridge) {
-      baseCliArgs.push('--strict-mcp-config', '--mcp-config', bridge.mcpConfig)
+      baseCliArgs.push(
+        '--strict-mcp-config',
+        '--mcp-config', bridge.mcpConfig,
+        '--allowedTools', 'mcp__gladdis__*'
+      )
     }
 
     const buildCliArgs = (resumeId: string | null): string[] => {

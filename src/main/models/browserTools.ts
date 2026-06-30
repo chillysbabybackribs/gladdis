@@ -43,6 +43,7 @@ import {
 import {
   runDeepSearchTool,
   runFetchPage,
+  runSearchOpenTool,
   runSearchTool
 } from './tools/searchTools'
 import { runShellCommand } from './tools/shellTools'
@@ -298,6 +299,8 @@ export class BrowserTools {
           return runDeepSearchTool(this.searchDeps(), args, ctx)
         case 'search':
           return runSearchTool(this.searchDeps(), args, ctx)
+        case 'search_open':
+          return runSearchOpenTool(this.searchDeps(), args, ctx)
         case 'fetch_page':
           return runFetchPage(this.searchDeps(), args, ctx)
 

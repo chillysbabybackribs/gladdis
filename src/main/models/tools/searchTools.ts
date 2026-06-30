@@ -51,6 +51,68 @@ export async function runSearchTool(
   return { ok: true, text: outcome.text }
 }
 
+export async function runSearchOpenTool(
+  deps: SearchToolsDeps,
+  args: Record<string, any>,
+  ctx: ToolContext
+): Promise<ToolOutcome> {
+  const query = String(args.query ?? '').trim()
+  if (!query) return { ok: false, text: 'search_open: "query" is required.' }
+
+  const rawUrl = String(args.url ?? '').trim()
+  if (!rawUrl) return { ok: false, text: 'search_open: "url" is required.' }
+
+  let normalizedUrl: string
+  try {
+    normalizedUrl = new URL(rawUrl).toString()
+  } catch {
+    return { ok: false, text: `search_open: invalid URL "${rawUrl}".` }
+  }
+
+  const memKey = `search_open:${query.toLowerCase()}|${normalizeUrl(normalizedUrl)}`
+  const prior = deps.taskScope(ctx).get(memKey)
+  if (prior) {
+    return { ok: true, text: `(already ran this parallel search/open step this task — reusing prior results)\n${prior}` }
+  }
+
+  const [searchOutcome, fetchOutcome] = await Promise.all([
+    runUnifiedSearch(
+      { tabs: deps.tabs, extractor: deps.extractor },
+      {
+        query,
+        tabId: ctx.tabId,
+        limitPerQuery: clampInt(args.limit, 1, 8, 4),
+        digestTop: clampInt(args.digest_top, 0, 3, 2),
+        focus: args.focus ? String(args.focus) : undefined,
+        navigateVisible: false
+      }
+    ),
+    runFetchPage(
+      deps,
+      {
+        url: normalizedUrl,
+        focus: args.focus,
+        viewportOnly: args.viewportOnly
+      },
+      ctx
+    )
+  ])
+
+  const ok = searchOutcome.ok || fetchOutcome.ok
+  const summary = [
+    `SEARCH_OPEN "${query}" + ${normalizedUrl}`,
+    '',
+    'DIRECT PAGE:',
+    fetchOutcome.text,
+    '',
+    'WEB SEARCH:',
+    searchOutcome.text
+  ].join('\n')
+
+  deps.rememberDone(ctx, memKey, summary)
+  return { ok, text: summary }
+}
+
 function resolveSearchNavigationMode(args: Record<string, any>, ctx: ToolContext): boolean {
   if (typeof args.navigate_visible === 'boolean') return args.navigate_visible
   const latestUserText = ctx.latestUserText ?? ''

@@ -9,6 +9,7 @@ export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
   'research_dossier',
   'verify_change',
   'search',
+  'search_open',
   'deep_search',
   'fetch_page',
   'navigate',
@@ -36,7 +37,7 @@ export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
 
 export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the Gladdis MCP tools too: navigate, browse_task, read_page, grep_page, ' +
+  'For browser work beyond search use the Gladdis MCP tools too: search_open, navigate, browse_task, read_page, grep_page, ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
   'helpers use recall_history, repo_overview, search_repo, read_spans, research_dossier, and verify_change.\n' +
   'Prefer grep_click and grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +

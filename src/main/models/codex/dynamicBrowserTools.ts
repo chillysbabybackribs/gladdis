@@ -12,6 +12,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'research_dossier',
   'verify_change',
   'search',
+  'search_open',
   'deep_search',
   'fetch_page',
   'navigate',
@@ -47,7 +48,7 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
 export const GLADDIS_WEB_TOOLS_RULE =
   'WEB SEARCH RULE — binding, not a preference: every web/search action goes through Gladdis\'s own ' +
   'tools, which drive the visible Chromium tab the user is watching. Use search and deep_search for web ' +
-  'search (the user sees the results in-tab), and fetch_page to read a known URL. ' +
+  'search (the user sees the results in-tab), use search_open when you have both a search query and a likely direct URL to check in parallel, and use fetch_page to read a known URL. ' +
   'You do NOT have a working built-in/native web search or grounding here: it is disabled and its results ' +
   'do not reach the user. Treat any urge to "search the web" or answer a current/dated/online question ' +
   'from your own knowledge as a signal to call search instead. Never answer a question that needs live web ' +

@@ -28,6 +28,26 @@ export const SEARCH_TOOLS: ToolDef[] = [
     }
   },
   {
+    name: 'search_open',
+    description:
+      'Run a web search and open a likely direct URL in parallel. Use when you know a site or page worth checking directly but still want search fallback/evidence in the same step.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The search query.' },
+        url: { type: 'string', description: 'Full URL to open in the visible tab while search runs in parallel.' },
+        limit: { type: 'number', description: 'SERP hits to return (1-8). Default 4.' },
+        digest_top: { type: 'number', description: 'Live-evidence hits to probe (0-3). Default 2.' },
+        focus: { type: 'string', description: 'Optional keyword to weight excerpt selection.' },
+        viewportOnly: {
+          type: 'boolean',
+          description: 'If true, only include visible-on-screen actions in the direct-page digest.'
+        }
+      },
+      required: ['query', 'url']
+    }
+  },
+  {
     name: 'fetch_page',
     description:
       'Open a URL in the visible tab and return a bounded digest after navigation settles.',

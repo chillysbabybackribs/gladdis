@@ -111,9 +111,31 @@ describe('unified search tool', () => {
     expect(out.text).toContain('the page body')
   })
 
+  it('search_open runs web search and direct page fetch together', async () => {
+    const { tools, navigate, extractor } = makeTools()
+    vi.mocked(runUnifiedSearch).mockClear()
+
+    const out = await tools.run(
+      'search_open',
+      { query: 'electron docs', url: 'https://electronjs.org/docs/latest/' },
+      { tabId: 'tab-1' }
+    )
+
+    expect(vi.mocked(runUnifiedSearch).mock.calls[0]?.[1]).toMatchObject({
+      query: 'electron docs',
+      navigateVisible: false
+    })
+    expect(navigate).toHaveBeenCalledWith('tab-1', 'https://electronjs.org/docs/latest/')
+    expect(extractor.run).toHaveBeenCalledWith('tab-1')
+    expect(out.ok).toBe(true)
+    expect(out.text).toContain('DIRECT PAGE:')
+    expect(out.text).toContain('WEB SEARCH:')
+  })
+
   it('rejects empty/invalid input cleanly without throwing', async () => {
     const { tools } = makeTools()
     expect((await tools.run('search', {}, { tabId: 'tab-1' })).ok).toBe(false)
+    expect((await tools.run('search_open', { query: 'x' }, { tabId: 'tab-1' })).ok).toBe(false)
     expect((await tools.run('fetch_page', { url: 'not-a-url' }, { tabId: 'tab-1' })).ok).toBe(false)
   })
 

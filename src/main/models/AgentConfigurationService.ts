@@ -6,6 +6,7 @@ import {
 } from '../../../shared/types'
 import { BrowserTools, type ToolContext } from './browserTools'
 import {
+  AGENT_TOOLS,
   selectAgentToolProfile,
   knownToolByName,
   normalizeToolName
@@ -14,6 +15,7 @@ import { stripActivePagePreamble } from './routing'
 import { taskIdForRequest } from './loopStateEmitter'
 import { buildAgentSystem } from './prompts'
 import { isBareContinuation } from '../../../shared/types'
+import type { Provider } from '../../../shared/types'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 import type { LlmComplete } from '../pipeline/Planner'
 
@@ -69,10 +71,33 @@ export class AgentConfigurationService {
     }
   }
 
-  public agentToolProfile(req: ChatRequest): ReturnType<typeof selectAgentToolProfile> {
+  public agentToolProfile(
+    req: ChatRequest,
+    provider?: Provider
+  ): ReturnType<typeof selectAgentToolProfile> {
     const baseText = this.latestSubstantiveUserText(req)
-    const profile = selectAgentToolProfile(baseText)
+    let profile = selectAgentToolProfile(baseText, {
+      hasWorkspaceFolder: !!this.tools.getWorkspaceRoot()
+    })
+    profile = this.applyProviderToolPolicy(profile, provider)
     return this.applyAgentToolPolicy(req, profile)
+  }
+
+  private applyProviderToolPolicy(
+    profile: ReturnType<typeof selectAgentToolProfile>,
+    provider?: Provider
+  ): ReturnType<typeof selectAgentToolProfile> {
+    if (provider !== 'openai' || !this.tools.getWorkspaceRoot()) return profile
+
+    // OpenAI's direct API path does not have a separate native CLI runtime
+    // like Codex/Cursor/Claude Code. On workspace turns, promote browser /
+    // research profiles to a workshop-style surface so OpenAI can inspect and
+    // edit local code without first burning a request_tools round-trip.
+    if (profile.name !== 'browser' && profile.name !== 'research') return profile
+
+    const requestTools = knownToolByName('request_tools')
+    const tools = requestTools ? [...AGENT_TOOLS, requestTools] : [...AGENT_TOOLS]
+    return { name: 'full', tools }
   }
 
   private applyAgentToolPolicy(
@@ -196,11 +221,13 @@ export class AgentConfigurationService {
 
   public async buildTurnAgentSystem(
     req: ChatRequest,
-    tools: Parameters<typeof buildAgentSystem>[0]
+    tools: Parameters<typeof buildAgentSystem>[0],
+    provider?: Provider
   ): Promise<string> {
     const base = await buildAgentSystem(tools)
+    const providerBlock = provider === 'openai' ? OPENAI_WORKSHOP_BLOCK : null
     const custom = this.customAgentSystemBlock(req)
-    return [base, custom].filter(Boolean).join('\n\n')
+    return [base, providerBlock, custom].filter(Boolean).join('\n\n')
   }
 
   public workspaceSystemBlock(profile?: ReturnType<typeof selectAgentToolProfile>): string | null {
@@ -212,3 +239,14 @@ export class AgentConfigurationService {
     return `Workspace: ${folder}`
   }
 }
+
+const OPENAI_WORKSHOP_BLOCK =
+  '## OpenAI local-work contract\n' +
+  'This OpenAI turn does local repo, file, edit, validation, and shell work through Gladdis tools. ' +
+  'Use them as your primary local environment for this turn.\n\n' +
+  'For codebase inspection, stay surgical: prefer repo_overview, search_repo, repo_grep_task, and read_spans ' +
+  'before raw read_file. When you do use read_file, prefer explicit start_line/end_line windows and avoid ' +
+  'full:true unless the file is small, config-like, or the user explicitly asked for the whole file.\n\n' +
+  'For local work, use run_command for commands, edit_file for exact patches, write_file only when creating or ' +
+  'fully replacing a file, and verify_change for validation. Keep Gladdis browser tools first-class for web search ' +
+  'and page work inside the visible Chromium tab; do not treat shell/browser commands as substitutes for web tasks.'

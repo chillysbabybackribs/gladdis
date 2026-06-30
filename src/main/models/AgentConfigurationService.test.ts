@@ -45,6 +45,28 @@ describe('AgentConfigurationService', () => {
     expect(profile.name).toBe('browser')
   })
 
+  it('upgrades OpenAI browser turns with a workspace into a full workshop surface', () => {
+    const { service } = makeConfigService('/home/user/project')
+    const req = {
+      messages: [{ role: 'user', content: 'check the current docs site and then update the parser code' }]
+    } as any
+
+    const profile = service.agentToolProfile(req, 'openai')
+    const names = profile.tools.map((tool: { name: string }) => tool.name)
+
+    expect(profile.name).toBe('full')
+    expect(names).toEqual(expect.arrayContaining([
+      'search',
+      'read_page',
+      'search_repo',
+      'read_spans',
+      'read_file',
+      'edit_file',
+      'run_command',
+      'verify_change'
+    ]))
+  })
+
   it('gives filesystem turns the full path block and lean turns an escalation hint', () => {
     const { service } = makeConfigService('/home/user/project')
     const fsProfile = { name: 'filesystem' } as any
@@ -64,5 +86,19 @@ describe('AgentConfigurationService', () => {
     const profile = { name: 'conversation' } as any
     const block = service.workspaceSystemBlock(profile)
     expect(block).toContain('Use request_tools("filesystem")')
+  })
+
+  it('adds OpenAI-specific surgical local-work guidance to the turn system prompt', async () => {
+    const { service } = makeConfigService('/home/user/project')
+    const system = await service.buildTurnAgentSystem(
+      { messages: [{ role: 'user', content: 'inspect the repo and fix the UI' }] } as any,
+      selectAgentToolProfile('inspect the repo and fix the UI', { hasWorkspaceFolder: true }).tools,
+      'openai'
+    )
+
+    expect(system).toContain('## OpenAI local-work contract')
+    expect(system).toContain('prefer repo_overview, search_repo, repo_grep_task, and read_spans')
+    expect(system).toContain('avoid full:true unless the file is small')
+    expect(system).toContain('Keep Gladdis browser tools first-class for web search')
   })
 })

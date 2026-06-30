@@ -86,8 +86,8 @@ export async function dispatchAgenticTurn(args: {
 }): Promise<void> {
   const { req, model, signal, client, browserLlm, maxOutputTokens, deps } = args
   const provider = model.provider
-  const profile = deps.agentConfig.agentToolProfile(req)
-  const agentSystem = await deps.agentConfig.buildTurnAgentSystem(req, profile.tools)
+  const profile = deps.agentConfig.agentToolProfile(req, provider)
+  const agentSystem = await deps.agentConfig.buildTurnAgentSystem(req, profile.tools, provider)
   const workspaceBlock = deps.agentConfig.workspaceSystemBlock(profile)
   const ctx = deps.buildToolContext(req, browserLlm)
 

@@ -9,8 +9,8 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'read_file',
     description:
-      'Read a UTF-8 file with optional line bounds. Small files return whole; ' +
-      'large files return a bounded preview plus metadata.',
+      'Read a UTF-8 file with optional line bounds. Prefer repo_overview/search_repo/repo_grep_task/read_spans/search_files first; ' +
+      'then use start_line/end_line for surgical reads. Small files return whole; large files return a bounded preview plus metadata.',
     parameters: {
       type: 'object',
       properties: {
@@ -63,7 +63,7 @@ export const FS_TOOLS: ToolDef[] = [
   {
     name: 'search_files',
     description:
-      'Recursive search for symbols before reading files. Returns ranked path hits and a read_file suggestion.',
+      'Recursive search for symbols before reading files. Returns ranked hits plus suggested narrow read_file windows.',
     parameters: {
       type: 'object',
       properties: {

@@ -11,6 +11,7 @@ import type { CapabilityBroker } from '../capabilities/CapabilityBroker'
 import { orchestrate } from '../../pipeline/orchestrate'
 import { generatePipelineFinalResponse } from '../../pipeline/finalResponse'
 import { cap } from './toolUtils'
+import { summarizeNetworkCapture } from './perceiveTools'
 
 const execFileAsync = promisify(execFile)
 
@@ -51,7 +52,9 @@ export async function runBrowseTask(
   const site = args.site ? String(args.site) : undefined
   const pipelineDeps = {
     cdpSend: (id: string, m: string, p?: Record<string, unknown>) => deps.tabs.cdpSend(id, m, p),
-    capture: (id: string) => deps.extractor.run(id)
+    capture: (id: string) => deps.extractor.run(id),
+    runWithPendingNetworkCapture: <T>(id: string, action: () => Promise<T> | T) =>
+      deps.tabs.runWithPendingNetworkCapture(id, action)
   }
   const trajectory = await orchestrate({
     tabId: ctx.tabId,
@@ -69,9 +72,12 @@ export async function runBrowseTask(
     finalCapture,
     llm
   })
+  const preActionNetworkSummary = trajectory.preActionNetwork
+    ? summarizeNetworkCapture(trajectory.preActionNetwork, { label: 'PRE-ACTION NETWORK' })
+    : null
   return {
     ok: true,
-    text: answer,
+    text: preActionNetworkSummary ? `${answer}\n${preActionNetworkSummary.text}` : answer,
     structuredContent: {
       task,
       ...(site ? { site } : {}),
@@ -81,7 +87,8 @@ export async function runBrowseTask(
       deterministicChecks: trajectory.deterministicChecks,
       finalUrl: finalCapture.url,
       finalTitle: finalCapture.content?.title ?? '',
-      steps: trajectory.steps.map((step) => ({ intent: step.step.intent }))
+      steps: trajectory.steps.map((step) => ({ intent: step.step.intent })),
+      ...(preActionNetworkSummary ? { preActionNetwork: preActionNetworkSummary.structuredContent } : {})
     }
   }
 }

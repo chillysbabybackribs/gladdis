@@ -1,4 +1,9 @@
 import type { PageCapture } from '../../../shared/types'
+import type {
+  CapturedNetworkBody,
+  CapturedNetworkRequest,
+  NetworkFilterSpec
+} from '../network/watchNetworkRecorder'
 
 /**
  * Deterministic browser-interaction pipeline — type contract.
@@ -99,6 +104,13 @@ export interface StepEvidence {
   links: Array<{ text: string; href: string }>
 }
 
+export interface PipelineNetworkCaptureResult {
+  captured: CapturedNetworkRequest[]
+  totalSeen: number
+  bodies: CapturedNetworkBody[]
+  filter?: NetworkFilterSpec
+}
+
 /** A frozen, replayable record of one end-to-end run. On a clean run this is
  *  the artifact that lets the SAME task on the SAME site run pure-deterministic
  *  next time, with zero planner calls until something breaks. */
@@ -113,6 +125,8 @@ export interface Trajectory {
   deterministicChecks: number
   success: boolean
   steps: StepResult[]
+  /** Optional one-shot network capture armed before the first real action. */
+  preActionNetwork?: PipelineNetworkCaptureResult | null
   /** The final plan actually executed (may differ from initial after replans). */
   finalPlan: Plan
 }
@@ -124,4 +138,9 @@ export interface PipelineDeps {
   cdpSend(tabId: string, method: string, params?: Record<string, unknown>): Promise<unknown>
   /** Deterministic perception — PageExtractor.run. */
   capture(tabId: string): Promise<PageCapture>
+  /** Optional one-shot capture armed before the next browser-driving action. */
+  runWithPendingNetworkCapture?<T>(
+    tabId: string,
+    action: () => Promise<T> | T
+  ): Promise<{ value: T; network: PipelineNetworkCaptureResult | null }>
 }

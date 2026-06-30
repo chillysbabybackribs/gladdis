@@ -130,4 +130,61 @@ describe('Runner', () => {
     expect(trajectory.steps[0].status).toBe('aborted')
     expect(cdpSend.mock.calls.filter((call) => call[1] === 'Input.dispatchKeyEvent')).toHaveLength(2)
   })
+
+  it('consumes an armed network capture before the first pipeline action', async () => {
+    const cdpSend = vi.fn(async (_tabId: string, method: string) => {
+      if (method === 'Runtime.evaluate') {
+        return { result: { value: 'complete' } }
+      }
+      return {}
+    })
+    const capture = vi.fn(async (): Promise<PageCapture> => ({
+      url: 'https://example.com/',
+      title: 'Example',
+      capturedAt: Date.now(),
+      tookMs: 1,
+      content: {
+        title: 'Example',
+        byline: null,
+        text: 'Example body',
+        markdown: 'Example body',
+        headings: [],
+        wordCount: 2
+      },
+      data: { meta: {}, openGraph: {}, jsonLd: [], canonical: null, feeds: [], lang: null },
+      actions: [],
+      dom: { nodeCount: 1, htmlBytes: 1, frameCount: 1 }
+    }))
+    const seenTabs: string[] = []
+    async function runWithPendingNetworkCapture<T>(tabId: string, action: () => Promise<T> | T) {
+      seenTabs.push(tabId)
+      const value = await action()
+      return {
+        value,
+        network: {
+          captured: [],
+          totalSeen: 2,
+          bodies: []
+        }
+      }
+    }
+    const plan: Plan = {
+      task: 'open example.com',
+      site: 'Example',
+      basedOnUrl: 'https://example.com/',
+      steps: [
+        {
+          intent: 'Navigate to example.com',
+          action: { type: 'navigate', url: 'https://example.com/' },
+          postCondition: { kind: 'always' }
+        }
+      ]
+    }
+
+    const trajectory = await new Runner({ cdpSend, capture, runWithPendingNetworkCapture }).run('tab-1', plan)
+
+    expect(seenTabs).toEqual(['tab-1'])
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Page.navigate', { url: 'https://example.com/' })
+    expect(trajectory.preActionNetwork?.totalSeen).toBe(2)
+  })
 })

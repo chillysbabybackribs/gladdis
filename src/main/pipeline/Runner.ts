@@ -92,6 +92,8 @@ export class Runner {
       let success = true
       let totalReplans = 0
       const evidenceUrls = new Set<string>()
+      let preActionNetwork: Trajectory['preActionNetwork'] = null
+      let shouldCheckPendingNetworkCapture = typeof this.deps.runWithPendingNetworkCapture === 'function'
 
       type QueuedStep = { stepNo: number; step: PlanStep }
       // Mutable queue so replans can splice a fresh tail in front of remainder.
@@ -170,8 +172,17 @@ export class Runner {
               })
             }
             try {
-              await executeAction(this.deps, tabId, step.action, this.onLog)
-              await settleForPostCondition(this.deps, tabId, step.action, postCond)
+              if (shouldCheckPendingNetworkCapture && this.deps.runWithPendingNetworkCapture) {
+                const wrapped = await this.deps.runWithPendingNetworkCapture(tabId, async () => {
+                  await executeAction(this.deps, tabId, step.action, this.onLog)
+                  await settleForPostCondition(this.deps, tabId, step.action, postCond)
+                })
+                preActionNetwork = wrapped.network
+                shouldCheckPendingNetworkCapture = false
+              } else {
+                await executeAction(this.deps, tabId, step.action, this.onLog)
+                await settleForPostCondition(this.deps, tabId, step.action, postCond)
+              }
             } catch (e: any) {
               error = `action threw: ${e?.message ?? e}`
               passed = false
@@ -356,6 +367,7 @@ export class Runner {
         deterministicChecks: checks,
         success,
         steps: results,
+        preActionNetwork,
         finalPlan: { ...plan, steps: results.map((r) => r.step) }
       }
     } finally {

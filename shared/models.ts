@@ -30,6 +30,7 @@ export interface ModelOption {
  */
 export const MODELS: ModelOption[] = [
   { id: 'claude-opus-4-8', label: 'Claude Opus 4.8', provider: 'anthropic', availability: 'verified' },
+  { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', provider: 'anthropic', availability: 'speculative' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', availability: 'verified' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'verified' },

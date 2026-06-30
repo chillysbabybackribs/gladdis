@@ -155,7 +155,18 @@ export async function memoryWrite(args: MemoryWriteArgs, workspaceRoot: string):
   }
 
   await saveMemoryFile(workspaceRoot, memory)
-  return { ok: true, text: `Written to ${scope}${task_id ? `:${task_id}` : ''} → ${key}` }
+  return {
+    ok: true,
+    text: `Written to ${scope}${task_id ? `:${task_id}` : ''} → ${key}`,
+    structuredContent: {
+      scope,
+      ...(task_id ? { taskId: task_id } : {}),
+      key,
+      value: normalizeStructuredValue(value),
+      ...(typeof conversationId === 'string' && conversationId ? { conversationId } : {}),
+      action: 'written'
+    }
+  }
 }
 
 export interface MemoryReadArgs {
@@ -183,19 +194,29 @@ export async function memoryRead(args: MemoryReadArgs, workspaceRoot: string): P
   }
 
   if (scope === 'workspace') {
-    const payload: Record<string, unknown> = { updatedAt: memory.workspace.updatedAt }
+    const values: Record<string, unknown> = {}
     if (keys?.length) {
       for (const k of keys) {
         const e = matched.find((m) => m.key === k)
-        payload[k] = e ? e.value : undefined
+        values[k] = e ? normalizeStructuredValue(e.value) : null
       }
     } else {
-      for (const e of matched) if (e.key) payload[e.key] = e.value
+      for (const e of matched) if (e.key) values[e.key] = normalizeStructuredValue(e.value)
     }
-    return { ok: true, text: JSON.stringify(payload, null, 2) }
+    const payload: Record<string, unknown> = { updatedAt: memory.workspace.updatedAt, ...values }
+    return {
+      ok: true,
+      text: JSON.stringify(payload, null, 2),
+      structuredContent: {
+        scope,
+        updatedAt: memory.workspace.updatedAt,
+        values
+      }
+    }
   }
 
   const task = memory.tasks[task_id!]
+  const values: Record<string, unknown> = {}
   const payload: Record<string, unknown> = {
     label: task?.label,
     createdAt: task?.createdAt,
@@ -204,12 +225,28 @@ export async function memoryRead(args: MemoryReadArgs, workspaceRoot: string): P
   if (keys?.length) {
     for (const k of keys) {
       const e = matched.find((m) => m.key === k)
-      payload[k] = e ? e.value : undefined
+      values[k] = e ? normalizeStructuredValue(e.value) : null
+      payload[k] = values[k]
     }
   } else {
-    for (const e of matched) if (e.key) payload[e.key] = e.value
+    for (const e of matched) {
+      if (!e.key) continue
+      values[e.key] = normalizeStructuredValue(e.value)
+      payload[e.key] = values[e.key]
+    }
   }
-  return { ok: true, text: JSON.stringify(payload, null, 2) }
+  return {
+    ok: true,
+    text: JSON.stringify(payload, null, 2),
+    structuredContent: {
+      scope,
+      taskId: task_id!,
+      ...(task?.label ? { label: task.label } : {}),
+      ...(task?.createdAt ? { createdAt: task.createdAt } : {}),
+      ...(task?.updatedAt ? { updatedAt: task.updatedAt } : {}),
+      values
+    }
+  }
 }
 
 export interface MemoryListArgs {
@@ -229,9 +266,15 @@ export async function memoryList(args: MemoryListArgs, workspaceRoot: string): P
       (e) => e.scope === 'workspace' && !e.freshness.archivedAt
     )
     const keysOut = wsEntries.map((e) => e.key).filter((k): k is string => !!k)
+    const payload = { keys: keysOut, updatedAt: memory.workspace.updatedAt }
     return {
       ok: true,
-      text: JSON.stringify({ keys: keysOut, updatedAt: memory.workspace.updatedAt }, null, 2)
+      text: JSON.stringify(payload, null, 2),
+      structuredContent: {
+        scope,
+        keys: keysOut,
+        updatedAt: memory.workspace.updatedAt
+      }
     }
   }
 
@@ -248,14 +291,31 @@ export async function memoryList(args: MemoryListArgs, workspaceRoot: string): P
             !e.freshness.archivedAt
         )
         .map((e) => e.key as string)
-      return { ok: true, text: JSON.stringify({ task_id, label: task.label, keys: keysOut }, null, 2) }
+      const payload = { task_id, label: task.label, keys: keysOut }
+      return {
+        ok: true,
+        text: JSON.stringify(payload, null, 2),
+        structuredContent: {
+          scope,
+          taskId: task_id,
+          ...(task.label ? { label: task.label } : {}),
+          keys: keysOut
+        }
+      }
     }
     const tasks = Object.values(memory.tasks).map((t) => ({
       id: t.id,
       label: t.label,
       updatedAt: t.updatedAt
     }))
-    return { ok: true, text: JSON.stringify({ tasks }, null, 2) }
+    return {
+      ok: true,
+      text: JSON.stringify({ tasks }, null, 2),
+      structuredContent: {
+        scope,
+        tasks
+      }
+    }
   }
 
   return { ok: false, text: `Invalid scope: ${scope}` }
@@ -275,7 +335,15 @@ export async function memoryCreateTask(
   const now = new Date().toISOString()
   memory.tasks[taskId] = { id: taskId, label, createdAt: now, updatedAt: now }
   await saveMemoryFile(workspaceRoot, memory)
-  return { ok: true, text: `Created task: ${taskId} (use this as task_id in future calls)` }
+  return {
+    ok: true,
+    text: `Created task: ${taskId} (use this as task_id in future calls)`,
+    structuredContent: {
+      taskId,
+      label,
+      createdAt: now
+    }
+  }
 }
 
 export interface MemoryForgetArgs {
@@ -315,7 +383,17 @@ export async function memoryForget(args: MemoryForgetArgs, workspaceRoot: string
   }
 
   await saveMemoryFile(workspaceRoot, memory)
-  return { ok: true, text: 'Memory updated' }
+  return {
+    ok: true,
+    text: 'Memory updated',
+    structuredContent: {
+      scope,
+      ...(task_id ? { taskId: task_id } : {}),
+      ...(keys?.length ? { keys } : {}),
+      deletedTask: scope === 'task' && !keys?.length,
+      action: 'forgot'
+    }
+  }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -365,6 +443,26 @@ function formatAsText(key: string, value: unknown): string {
 
 function generateEntryId(): string {
   return `mem_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeStructuredValue(value: unknown): unknown {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value
+  }
+  if (Array.isArray(value)) return value.map((item) => normalizeStructuredValue(item))
+  if (typeof value === 'object') {
+    const normalized: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value)) {
+      normalized[key] = normalizeStructuredValue(child)
+    }
+    return normalized
+  }
+  return value == null ? null : String(value)
 }
 
 export type { MemoryEntry, MemoryFileV2 } from './memory/types'

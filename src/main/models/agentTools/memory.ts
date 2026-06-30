@@ -21,6 +21,104 @@ export const MEMORY_TOOLS: ToolDef[] = [
           description: 'Current conversation or all saved chats when requested.'
         }
       }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: [
+            'tool_call_result',
+            'conversation_transcript',
+            'saved_conversation_list',
+            'saved_conversation_search',
+            'lineage_overview',
+            'lineage_search'
+          ]
+        },
+        scope: { type: 'string', enum: ['conversation', 'all'] },
+        query: { type: 'string' },
+        conversationId: { type: 'string' },
+        toolCallId: { type: 'string' },
+        title: { type: 'string' },
+        createdAt: { type: 'string' },
+        updatedAt: { type: 'string' },
+        hitCount: { type: 'number' },
+        totalConversations: { type: 'number' },
+        resultText: { type: 'string' },
+        summary: { type: 'string' },
+        conversations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              title: { type: 'string' },
+              createdAt: { type: 'string' },
+              updatedAt: { type: 'string' },
+              summary: { type: 'string' },
+              source: { type: 'string' },
+              messageCount: { type: 'number' }
+            },
+            required: ['id', 'title', 'updatedAt']
+          }
+        },
+        matches: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              conversationId: { type: 'string' },
+              title: { type: 'string' },
+              updatedAt: { type: 'string' },
+              summary: { type: 'string' },
+              role: { type: 'string' },
+              messageIndex: { type: 'number' },
+              excerpt: { type: 'string' },
+              source: { type: 'string' },
+              text: { type: 'string' },
+              tools: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    tool: { type: 'string' },
+                    status: { type: 'string' },
+                    preview: { type: 'string' }
+                  },
+                  required: ['tool', 'status']
+                }
+              }
+            },
+            required: ['conversationId', 'title']
+          }
+        },
+        transcript: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              role: { type: 'string' },
+              text: { type: 'string' },
+              index: { type: 'number' },
+              tools: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    tool: { type: 'string' },
+                    status: { type: 'string' },
+                    preview: { type: 'string' }
+                  },
+                  required: ['tool', 'status']
+                }
+              }
+            },
+            required: ['role', 'text', 'index']
+          }
+        }
+      },
+      required: ['mode']
     }
   },
   {
@@ -36,6 +134,18 @@ export const MEMORY_TOOLS: ToolDef[] = [
         value: { type: 'object' }
       },
       required: ['scope', 'key', 'value']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        taskId: { type: 'string' },
+        key: { type: 'string' },
+        value: {},
+        conversationId: { type: 'string' },
+        action: { type: 'string', enum: ['written'] }
+      },
+      required: ['scope', 'key', 'value', 'action']
     }
   },
   {
@@ -49,6 +159,21 @@ export const MEMORY_TOOLS: ToolDef[] = [
         keys: { type: 'array', items: { type: 'string' } }
       },
       required: ['scope']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        taskId: { type: 'string' },
+        label: { type: 'string' },
+        createdAt: { type: 'string' },
+        updatedAt: { type: 'string' },
+        values: {
+          type: 'object',
+          additionalProperties: true
+        }
+      },
+      required: ['scope', 'values']
     }
   },
   {
@@ -59,6 +184,32 @@ export const MEMORY_TOOLS: ToolDef[] = [
       properties: {
         scope: { type: 'string', enum: ['workspace', 'task'] },
         task_id: { type: 'string' }
+      },
+      required: ['scope']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        taskId: { type: 'string' },
+        label: { type: 'string' },
+        updatedAt: { type: 'string' },
+        keys: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        tasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              label: { type: 'string' },
+              updatedAt: { type: 'string' }
+            },
+            required: ['id', 'updatedAt']
+          }
+        }
       },
       required: ['scope']
     }
@@ -74,6 +225,20 @@ export const MEMORY_TOOLS: ToolDef[] = [
         keys: { type: 'array', items: { type: 'string' } }
       },
       required: ['scope']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        scope: { type: 'string', enum: ['workspace', 'task'] },
+        taskId: { type: 'string' },
+        keys: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        deletedTask: { type: 'boolean' },
+        action: { type: 'string', enum: ['forgot'] }
+      },
+      required: ['scope', 'action']
     }
   },
   {
@@ -84,6 +249,15 @@ export const MEMORY_TOOLS: ToolDef[] = [
       properties: {
         label: { type: 'string', description: 'Optional human-readable label for the task' }
       }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string' },
+        label: { type: 'string' },
+        createdAt: { type: 'string' }
+      },
+      required: ['taskId', 'label', 'createdAt']
     }
   }
 ]

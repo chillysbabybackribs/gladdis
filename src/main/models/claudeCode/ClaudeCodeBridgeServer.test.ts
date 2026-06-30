@@ -72,6 +72,17 @@ describe('ClaudeCodeBridgeServer', () => {
 
     const tools = await client.listTools()
     expect(tools.tools.map((tool) => tool.name)).toContain('read_page')
+    expect(tools.tools.find((tool) => tool.name === 'recall_history')).toEqual(
+      expect.objectContaining({
+        outputSchema: expect.objectContaining({
+          type: 'object',
+          properties: expect.objectContaining({
+            mode: expect.objectContaining({ type: 'string' }),
+            matches: expect.anything()
+          })
+        })
+      })
+    )
     expect(tools.tools.find((tool) => tool.name === 'repo_overview')).toEqual(
       expect.objectContaining({
         outputSchema: expect.objectContaining({

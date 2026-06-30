@@ -76,7 +76,18 @@ export function runRecallHistory(
   const toolCallId = args.tool_call_id ? String(args.tool_call_id) : null
   if (toolCallId) {
     const full = ctx.fullResults?.get(toolCallId)
-    if (full != null) return { ok: true, text: cap(full, 20_000) }
+    if (full != null) {
+      const resultText = cap(full, 20_000)
+      return {
+        ok: true,
+        text: resultText,
+        structuredContent: {
+          mode: 'tool_call_result',
+          toolCallId,
+          resultText
+        }
+      }
+    }
     return { ok: false, text: `No tool result found for id "${toolCallId}" in this request.` }
   }
 
@@ -87,16 +98,30 @@ export function runRecallHistory(
   if (conversationId) {
     const conv = deps.chats.get(conversationId)
     if (!conv) return { ok: false, text: `No saved Gladdis conversation found for id "${conversationId}".` }
+    const transcript = serializeTranscript(conv)
+    const createdAt = formatConversationDate(conv.createdAt)
+    const updatedAt = formatConversationDate(conv.updatedAt)
+    const resultText = cap(
+      `Gladdis conversation "${conv.title}"\n` +
+      `id: ${conv.id}\n` +
+      `created: ${createdAt}\n` +
+      `updated: ${updatedAt}\n\n` +
+      conversationTranscript(conv),
+      30_000
+    )
     return {
       ok: true,
-      text: cap(
-        `Gladdis conversation "${conv.title}"\n` +
-        `id: ${conv.id}\n` +
-        `created: ${formatConversationDate(conv.createdAt)}\n` +
-        `updated: ${formatConversationDate(conv.updatedAt)}\n\n` +
-        conversationTranscript(conv),
-        30_000
-      )
+      text: resultText,
+      structuredContent: {
+        mode: 'conversation_transcript',
+        scope,
+        conversationId: conv.id,
+        title: conv.title,
+        createdAt,
+        updatedAt,
+        summary: conversationSummary(conv),
+        transcript
+      }
     }
   }
 
@@ -109,12 +134,24 @@ export function runRecallHistory(
         `   id: ${conv.id} | updated: ${formatConversationDate(conv.updatedAt)}\n` +
         `   summary: ${conversationMetaSummary(conv)}`
       ).join('\n\n')
+      const conversations = recent.map((conv) => ({
+        id: conv.id,
+        title: conv.title,
+        updatedAt: formatConversationDate(conv.updatedAt),
+        summary: conversationMetaSummary(conv)
+      }))
       return {
         ok: true,
         text:
           'Recent saved Gladdis conversations. ' +
           'Use conversation_id to read the full saved chat only if the summary is not enough.\n\n' +
-          body
+          body,
+        structuredContent: {
+          mode: 'saved_conversation_list',
+          scope,
+          totalConversations: conversations.length,
+          conversations
+        }
       }
     }
     const hits = deps.chats.search(query, 8)
@@ -130,7 +167,22 @@ export function runRecallHistory(
       text:
         `Found ${hits.length} saved chat match(es) for "${query}". ` +
         'Use conversation_id to read the full saved chat only if the summary/match is not enough.\n\n' +
-        body
+        body,
+      structuredContent: {
+        mode: 'saved_conversation_search',
+        scope,
+        query,
+        hitCount: hits.length,
+        matches: hits.map((hit) => ({
+          conversationId: hit.conversationId,
+          title: hit.title,
+          updatedAt: formatConversationDate(hit.updatedAt),
+          summary: hit.summary || '(no summary yet)',
+          role: hit.role,
+          messageIndex: hit.messageIndex + 1,
+          excerpt: hit.excerpt
+        }))
+      }
     }
   }
 
@@ -169,7 +221,21 @@ export function runRecallHistory(
         `Brief conversation overview${chainNote}. ` +
         `Use conversation_id to read a full saved chat, or query for exact matching turns.\n\n${sections.join('\n\n')}`,
         8_000
-      )
+      ),
+      structuredContent: {
+        mode: 'lineage_overview',
+        scope,
+        totalConversations: conversations.length,
+        conversations: conversations.map((conv, convIndex) => ({
+          id: conv.id,
+          title: conv.title,
+          createdAt: formatConversationDate(conv.createdAt),
+          updatedAt: formatConversationDate(conv.updatedAt),
+          summary: conversationSummary(conv) || '(no summary yet)',
+          source: convIndex === 0 ? 'current chat' : 'previous chat',
+          messageCount: conv.messages.length
+        }))
+      }
     }
   }
 
@@ -191,7 +257,25 @@ export function runRecallHistory(
       return `#${i + 1} ${source} ${m.role}:\n${m.text}${tools ? `\n${tools}` : ''}`
     })
     .join('\n\n')
-  return { ok: true, text: cap(`${hits.length} matching turn(s):\n\n${body}`, 30_000) }
+  return {
+    ok: true,
+    text: cap(`${hits.length} matching turn(s):\n\n${body}`, 30_000),
+    structuredContent: {
+      mode: 'lineage_search',
+      scope,
+      query,
+      hitCount: hits.length,
+      matches: hits.map(({ conv, convIndex, m, i }) => ({
+        conversationId: conv.id,
+        title: conv.title,
+        source: convIndex === 0 ? 'current chat' : `continued from "${conv.title}"`,
+        role: m.role,
+        messageIndex: i + 1,
+        text: m.text,
+        tools: serializeToolList(m.tools)
+      }))
+    }
+  }
 }
 
 // ── Conversation formatting helpers ─────────────────────────────────────────
@@ -223,6 +307,25 @@ function conversationTranscript(conv: Conversation): string {
       return `#${i + 1} ${m.role}:\n${m.text}${tools ? `\n${tools}` : ''}`
     })
     .join('\n\n')
+}
+
+function serializeTranscript(conv: Conversation): Array<Record<string, unknown>> {
+  return conv.messages.map((message, index) => ({
+    role: message.role,
+    text: message.text,
+    index: index + 1,
+    ...(message.tools?.length ? { tools: serializeToolList(message.tools) } : {})
+  }))
+}
+
+function serializeToolList(
+  tools: Conversation['messages'][number]['tools'] | undefined
+): Array<Record<string, unknown>> {
+  return (tools ?? []).map((tool) => ({
+    tool: tool.tool,
+    status: tool.status,
+    ...(tool.preview ? { preview: tool.preview } : {})
+  }))
 }
 
 function conversationMetaSummary(conv: ConversationMeta): string {

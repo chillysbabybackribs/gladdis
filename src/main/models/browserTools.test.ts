@@ -236,6 +236,71 @@ describe('BrowserTools', () => {
     })
   })
 
+  it('returns structured content for memory workspace reads', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-memory-workspace-'))
+    const chats = {
+      get: vi.fn(),
+      list: vi.fn(() => []),
+      search: vi.fn(() => []),
+      lineage: vi.fn(() => []),
+      previousConversation: vi.fn(() => null)
+    }
+    const tools = new BrowserTools({} as any, {} as any, chats as any)
+    tools.setWorkspaceRoot(dir)
+
+    const write = await tools.run(
+      'memory_write',
+      { scope: 'workspace', key: 'theme', value: { accent: 'orange' } },
+      { tabId: 'tab-1', conversationId: 'conv-1' }
+    )
+    expect(write.ok).toBe(true)
+    expect(write.structuredContent).toEqual({
+      scope: 'workspace',
+      key: 'theme',
+      value: { accent: 'orange' },
+      conversationId: 'conv-1',
+      action: 'written'
+    })
+
+    const read = await tools.run(
+      'memory_read',
+      { scope: 'workspace', keys: ['theme', 'missing'] },
+      { tabId: 'tab-1', conversationId: 'conv-1' }
+    )
+    expect(read.ok).toBe(true)
+    expect(read.structuredContent).toEqual({
+      scope: 'workspace',
+      updatedAt: expect.any(String),
+      values: {
+        theme: { accent: 'orange' },
+        missing: null
+      }
+    })
+  })
+
+  it('returns structured content for recall_history tool-call lookups', async () => {
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'recall_history',
+      { tool_call_id: 'tool-123' },
+      {
+        tabId: 'tab-1',
+        fullResults: new Map([['tool-123', 'saved tool output']])
+      }
+    )
+
+    expect(result).toEqual({
+      ok: true,
+      text: 'saved tool output',
+      structuredContent: {
+        mode: 'tool_call_result',
+        toolCallId: 'tool-123',
+        resultText: 'saved tool output'
+      }
+    })
+  })
+
   it('returns small files whole by default instead of forcing a second range call', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gladdis-read-small-file-'))
     const file = join(dir, 'small.txt')

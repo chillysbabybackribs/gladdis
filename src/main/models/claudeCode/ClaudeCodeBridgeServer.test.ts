@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { ClaudeCodeBridgeServer } from './ClaudeCodeBridgeServer'
-import { CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from './browserTools'
+import { CLAUDE_CODE_BROWSER_INSTRUCTIONS, CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from './browserTools'
 
 describe('ClaudeCodeBridgeServer', () => {
   const servers = new Set<ClaudeCodeBridgeServer>()
@@ -10,6 +10,14 @@ describe('ClaudeCodeBridgeServer', () => {
   afterEach(async () => {
     await Promise.allSettled([...servers].map((server) => server.close()))
     servers.clear()
+  })
+
+  it('teaches Claude Code to use memory tools as a working notebook', () => {
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('treat the memory_* tools as your working notebook')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('call memory_read at the start of a task')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_write to store decisions, constraints, identifiers, and partial findings')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Use memory_create_task when the work naturally has its own subtask')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Store concise, reusable facts rather than dumping large transcripts')
   })
 
   it('exposes Claude browser tools over direct HTTP MCP', async () => {

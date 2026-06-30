@@ -49,6 +49,14 @@ export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
   'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, memory_create_task, repo_overview, ' +
   'search_repo, read_spans, research_dossier, and verify_change.\n' +
+  'For longer or multi-step tasks, treat the memory_* tools as your working notebook: call memory_read at the start of a task ' +
+  'or before asking for context that may already be known, use memory_write to store decisions, constraints, identifiers, and ' +
+  'partial findings that later steps will need, and use memory_list when you need a quick inventory of what is already saved.\n' +
+  'Use memory_create_task when the work naturally has its own subtask or durable thread, then keep task-specific notes there ' +
+  'instead of mixing them into workspace-wide memory. Use memory_forget to clear stale or superseded notes when they would ' +
+  'mislead later steps.\n' +
+  'Store concise, reusable facts rather than dumping large transcripts or obvious one-off observations. Read before re-asking, ' +
+  'write after meaningful decisions, and keep memory current when the plan changes.\n' +
   'Prefer grep_click and grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
   'NEVER reach for a browser through Claude Code\'s native shell or any other path. Do not run google-chrome, ' +
   'chromium, chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer ' +

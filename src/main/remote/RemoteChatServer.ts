@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import { WebSocketServer, WebSocket, type RawData } from 'ws'
@@ -46,15 +46,27 @@ interface ActiveRemoteTurn {
   assistantMessageId: string
 }
 
+interface SocketAckResult {
+  clientMessageId: string
+  requestId: string
+  conversationId: string
+  assistantMessageId: string
+}
+
 const DEFAULT_HOST = '127.0.0.1'
 const DEFAULT_PORT = 0
 const JSON_LIMIT_BYTES = 64 * 1024
+const SOCKET_RESULT_TTL_MS = 5 * 60 * 1000
+const MAX_SOCKET_RESULTS = 500
 
 export class RemoteChatServer {
   private server = createServer((req, res) => void this.handle(req, res))
   private clients = new Set<ServerResponse>()
   private wsServer = new WebSocketServer({ noServer: true })
   private wsClients = new Set<WebSocket>()
+  private wsClientKeys = new WeakMap<WebSocket, string>()
+  private pendingSocketResults = new Map<string, Promise<SocketAckResult>>()
+  private recentSocketResults = new Map<string, SocketAckResult & { seenAt: number }>()
   private activeTurns = new Map<string, ActiveRemoteTurn>()
   private ready: Promise<RemoteChatServerInfo> | null = null
   private info: RemoteChatServerInfo | null = null
@@ -68,12 +80,13 @@ export class RemoteChatServer {
     this.token = options.token?.trim() || randomUUID()
     this.unsubscribeChatStream = this.bridge.subscribeChatStream((event) => this.onChatStream(event))
     this.server.on('upgrade', (req, socket, head) => {
-      if (requestPath(req) !== '/ws' || !this.authorized(req)) {
+      const auth = this.authorize(req)
+      if (requestPath(req) !== '/ws' || !auth) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
         socket.destroy()
         return
       }
-      this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.openWebSocket(ws))
+      this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.openWebSocket(ws, auth.clientKey))
     })
   }
 
@@ -287,9 +300,11 @@ export class RemoteChatServer {
     res.on('close', () => this.clients.delete(res))
   }
 
-  private openWebSocket(ws: WebSocket): void {
+  private openWebSocket(ws: WebSocket, clientKey: string): void {
     this.wsClients.add(ws)
+    this.wsClientKeys.set(ws, clientKey)
     this.sendSocket(ws, { type: 'ready' })
+    this.sendSocket(ws, { type: 'status', state: 'connected' })
     ws.on('message', (data) => void this.onSocketMessage(ws, data))
     ws.on('close', () => this.wsClients.delete(ws))
   }
@@ -299,7 +314,25 @@ export class RemoteChatServer {
       const raw = rawDataToText(data)
       const message = JSON.parse(raw) as PhoneSocketCommand
       if (message.type === 'send') {
-        const result = await this.send(message)
+        const clientKey = this.wsClientKeys.get(ws) ?? 'unknown'
+        const clientMessageId = normalizeClientMessageId(message.clientMessageId)
+        const dedupeKey = `${clientKey}:${clientMessageId}`
+        const cached = this.recentSocketResults.get(dedupeKey)
+        if (cached) {
+          cached.seenAt = Date.now()
+          this.sendSocket(ws, {
+            type: 'ack',
+            clientMessageId: cached.clientMessageId,
+            requestId: cached.requestId,
+            conversationId: cached.conversationId,
+            assistantMessageId: cached.assistantMessageId
+          })
+          return
+        }
+        const pending = this.pendingSocketResults.get(dedupeKey)
+        const ack = pending ?? this.createPendingSocketAck(dedupeKey, clientMessageId, message)
+        const result = await ack
+        pruneSocketResults(this.recentSocketResults)
         this.sendSocket(ws, { type: 'ack', ...result })
         return
       }
@@ -328,10 +361,35 @@ export class RemoteChatServer {
   }
 
   private authorized(req: IncomingMessage): boolean {
+    return !!this.authorize(req)
+  }
+
+  private authorize(req: IncomingMessage): { clientKey: string } | null {
     const supplied = bearerToken(req) ?? queryToken(req)
-    if (!supplied) return false
-    if (this.options.authenticateDevice?.(supplied)) return true
-    return safeEqual(supplied, this.token)
+    if (!supplied) return null
+    if (this.options.authenticateDevice?.(supplied)) {
+      return { clientKey: tokenKey(supplied) }
+    }
+    if (safeEqual(supplied, this.token)) return { clientKey: tokenKey(supplied) }
+    return null
+  }
+
+  private createPendingSocketAck(
+    dedupeKey: string,
+    clientMessageId: string,
+    message: Extract<PhoneSocketCommand, { type: 'send' }>
+  ): Promise<SocketAckResult> {
+    const pending = this.send(message)
+      .then((result) => {
+        const ack: SocketAckResult = { clientMessageId, ...result }
+        this.recentSocketResults.set(dedupeKey, { ...ack, seenAt: Date.now() })
+        return ack
+      })
+      .finally(() => {
+        this.pendingSocketResults.delete(dedupeKey)
+      })
+    this.pendingSocketResults.set(dedupeKey, pending)
+    return pending
   }
 
   private applyCors(req: IncomingMessage, res: ServerResponse): void {
@@ -437,6 +495,24 @@ function rawDataToText(data: RawData): string {
   return Buffer.from(data as Uint8Array).toString('utf8')
 }
 
+function normalizeClientMessageId(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : `phone-msg-${randomUUID()}`
+}
+
+function tokenKey(token: string): string {
+  return createHash('sha1').update(token).digest('hex')
+}
+
+function pruneSocketResults(results: Map<string, SocketAckResult & { seenAt: number }>): void {
+  const cutoff = Date.now() - SOCKET_RESULT_TTL_MS
+  for (const [key, value] of results) {
+    if (value.seenAt < cutoff) results.delete(key)
+  }
+  if (results.size <= MAX_SOCKET_RESULTS) return
+  const oldest = [...results.entries()].sort((a, b) => a[1].seenAt - b[1].seenAt)
+  for (const [key] of oldest.slice(0, results.size - MAX_SOCKET_RESULTS)) results.delete(key)
+}
+
 function manifest(): object {
   return {
     name: 'Gladdis Remote Chat',
@@ -502,10 +578,11 @@ function remoteAppHtml(token: string): string {
     const token = new URLSearchParams(location.search).get('token') || ${tokenJson}
     const messages = document.querySelector('#messages')
     const status = document.querySelector('#status')
-    let current = null
     let conversationId = null
     let socket = null
-    let pendingText = ''
+    let reconnectTimer = null
+    const outbox = []
+    const assistants = new Map()
     function add(role, text) {
       const el = document.createElement('div')
       el.className = 'msg ' + role
@@ -514,48 +591,89 @@ function remoteAppHtml(token: string): string {
       messages.scrollTop = messages.scrollHeight
       return el
     }
+    function nextClientMessageId() {
+      if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID()
+      return 'phone-msg-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    }
+    function setStatus(base) {
+      const queued = outbox.filter((item) => !item.acked).length
+      status.textContent = queued ? base + ' - ' + queued + ' queued' : base
+    }
+    function flushOutbox() {
+      if (!socket || socket.readyState !== WebSocket.OPEN) return
+      for (const item of outbox) {
+        if (item.acked || item.sent) continue
+        item.sent = true
+        socket.send(JSON.stringify({
+          type: 'send',
+          clientMessageId: item.clientMessageId,
+          text: item.text,
+          conversationId: item.conversationId
+        }))
+      }
+      setStatus('Connected')
+    }
     function connect() {
-      status.textContent = 'Connecting...'
+      setStatus('Connecting...')
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
       socket = new WebSocket(protocol + '//' + location.host + '/ws?token=' + encodeURIComponent(token))
-      socket.addEventListener('open', () => { status.textContent = 'Connected' })
+      socket.addEventListener('open', () => { setStatus('Connected') })
       socket.addEventListener('message', (event) => {
         const data = JSON.parse(event.data)
         if (data.type === 'ready') {
-          status.textContent = 'Connected'
+          setStatus('Connected')
+          flushOutbox()
+          return
+        }
+        if (data.type === 'status') {
+          setStatus(data.state === 'connected' ? 'Connected' : data.state)
           return
         }
         if (data.type === 'ack') {
           conversationId = data.conversationId
-          if (!current) current = add('assistant', '')
+          const index = outbox.findIndex((candidate) => candidate.clientMessageId === data.clientMessageId)
+          const item = index >= 0 ? outbox[index] : null
+          if (!item) return
+          item.acked = true
+          outbox.splice(index, 1)
+          assistants.set(data.requestId, item.assistant)
+          item.assistant.dataset.requestId = data.requestId
+          setStatus('Connected')
           return
         }
         if (data.type === 'chat') {
           const stream = data.event
+          const assistant = assistants.get(stream.requestId)
+          if (!assistant) return
           if (stream.type === 'delta') {
-            if (!current) current = add('assistant', '')
-            current.textContent += stream.text
+            assistant.textContent += stream.text
           }
-          if (stream.type === 'done') current = null
+          if (stream.type === 'done') {
+            assistants.delete(stream.requestId)
+            return
+          }
           if (stream.type === 'error') {
-            if (!current) current = add('assistant', '')
-            current.textContent = current.textContent ? current.textContent + '\\n\\n' + stream.message : stream.message
-            current = null
+            assistant.textContent = assistant.textContent ? assistant.textContent + '\\n\\n' + stream.message : stream.message
+            assistants.delete(stream.requestId)
           }
           return
         }
         if (data.type === 'error') {
-          status.textContent = data.message
-          if (pendingText) {
-            add('assistant', data.message)
-            pendingText = ''
-            current = null
+          setStatus(data.message)
+          const pending = outbox.find((item) => item.sent && !item.acked)
+          if (pending) {
+            pending.sent = false
+            pending.assistant.textContent = pending.assistant.textContent || data.message
           }
         }
       })
       socket.addEventListener('close', () => {
-        status.textContent = 'Reconnecting...'
-        setTimeout(connect, 800)
+        for (const item of outbox) {
+          if (!item.acked) item.sent = false
+        }
+        setStatus('Reconnecting...')
+        if (reconnectTimer) clearTimeout(reconnectTimer)
+        reconnectTimer = setTimeout(connect, 800)
       })
     }
     connect()
@@ -563,13 +681,20 @@ function remoteAppHtml(token: string): string {
       event.preventDefault()
       const input = document.querySelector('#input')
       const text = input.value.trim()
-      if (!text || !socket || socket.readyState !== WebSocket.OPEN) return
+      if (!text) return
       input.value = ''
-      pendingText = text
       add('user', text)
-      current = null
-      socket.send(JSON.stringify({ type: 'send', text, conversationId }))
-      pendingText = ''
+      const assistant = add('assistant', '')
+      outbox.push({
+        clientMessageId: nextClientMessageId(),
+        text,
+        conversationId,
+        assistant,
+        acked: false,
+        sent: false
+      })
+      flushOutbox()
+      if (!socket || socket.readyState !== WebSocket.OPEN) setStatus('Queued offline')
     })
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
   </script>

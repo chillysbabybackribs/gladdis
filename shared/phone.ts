@@ -21,6 +21,7 @@ export interface PhoneBridgePairResult {
 export type PhoneSocketCommand =
   | {
     type: 'send'
+    clientMessageId?: string
     text: string
     conversationId?: string
     modelId?: string
@@ -35,7 +36,12 @@ export type PhoneSocketEvent =
     type: 'ready'
   }
   | {
+    type: 'status'
+    state: 'connected'
+  }
+  | {
     type: 'ack'
+    clientMessageId: string
     requestId: string
     conversationId: string
     assistantMessageId: string

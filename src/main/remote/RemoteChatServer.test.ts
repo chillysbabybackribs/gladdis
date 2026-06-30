@@ -177,4 +177,33 @@ describe('RemoteChatServer', () => {
     ).toBe(true)
     ws.close()
   })
+
+  it('dedupes resent websocket sends by clientMessageId', async () => {
+    const { bridge, send } = makeBridge()
+    server = new RemoteChatServer(bridge, { token: 'test-token' })
+    const info = await server.start()
+    const ws = new WebSocket(`ws://${info.host}:${info.port}/ws?token=test-token`)
+    const acks: Array<Record<string, unknown>> = []
+
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener('error', () => reject(new Error('websocket connection failed')))
+      ws.addEventListener('message', (event) => {
+        const message = JSON.parse(String(event.data)) as Record<string, unknown>
+        if (message.type === 'ready') {
+          ws.send(JSON.stringify({ type: 'send', clientMessageId: 'msg-1', text: 'hello once' }))
+          ws.send(JSON.stringify({ type: 'send', clientMessageId: 'msg-1', text: 'hello once' }))
+          return
+        }
+        if (message.type === 'ack') {
+          acks.push(message)
+          if (acks.length === 2) resolve()
+        }
+      })
+    })
+
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(acks).toHaveLength(2)
+    expect(acks[0]?.requestId).toBe(acks[1]?.requestId)
+    ws.close()
+  })
 })

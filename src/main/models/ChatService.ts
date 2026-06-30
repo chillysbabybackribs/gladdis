@@ -501,7 +501,9 @@ export class ChatService {
         anthropic: () => this.anthropic(),
         google: () => this.google(),
         openAiKey: () => this.openAiKey(),
-        grokKey: () => this.grokKey()
+        grokKey: () => this.grokKey(),
+        claudeCodeComplete: (providerModelId, system, user) =>
+          this.claudeCode().complete(providerModelId, system, user).then((result) => result.text)
       }
     })
   }

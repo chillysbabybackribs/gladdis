@@ -16,6 +16,11 @@ export interface ChatTitleDeps {
   google: () => GoogleGenAI
   openAiKey: () => string
   grokKey: () => string
+  claudeCodeComplete: (
+    modelId: string,
+    system: string,
+    user: string
+  ) => Promise<string>
 }
 
 /**
@@ -66,6 +71,12 @@ async function dispatchTitle(model: ModelOption, prompt: string, deps: ChatTitle
       return titleOpenAi({ apiKey: deps.openAiKey(), audit, modelId, prompt })
     case 'grok':
       return titleGrok({ apiKey: deps.grokKey(), audit, modelId, prompt })
+    case 'claudecode':
+      return deps.claudeCodeComplete(
+        modelId,
+        'Write a concise title (3-6 words, Title Case, no quotes, no trailing punctuation). Reply with the title only.',
+        prompt
+      )
     default:
       throw new Error(`title generation not supported for provider ${model.provider}`)
   }

@@ -429,15 +429,12 @@ export class ChatService {
       this.pauseGates.set(requestId, gate)
     }
     const gatePaused = gate.pause()
-    // Codex turns don't run inside our agent loop; their app-server owns the
-    // loop. The gate above is still useful (it correctly reflects "paused"
-    // for any non-Codex follow-on work in the same request), but the real
-    // pause for a Codex turn is a turn/interrupt + continuation re-prompt
-    // handled inside CodexClient. We always tell Codex too, in case the
-    // active request is currently a Codex turn — non-Codex requests are
-    // silently no-ops there.
+    // Codex and Claude Code turns don't run inside the agent loop gate; each
+    // owns its own pause/resume lifecycle. We tell both so whichever one is
+    // active handles it. Non-matching requests are silent no-ops.
     const codexPaused = this.codexClient?.pauseRequest(requestId) ?? false
-    if (!gatePaused && !codexPaused) return false
+    const claudeCodePaused = this.claudeCodeClient?.pauseRequest(requestId) ?? false
+    if (!gatePaused && !codexPaused && !claudeCodePaused) return false
     this.emit({
       requestId,
       type: 'loop_state',
@@ -447,7 +444,9 @@ export class ChatService {
       iteration: 0,
       summary: codexPaused
         ? 'Task paused — Codex interrupted the in-flight turn. Click resume to continue from the same step.'
-        : 'Task paused — the agent is holding before its next step. Click resume to continue.'
+        : claudeCodePaused
+          ? 'Task paused — Claude Code interrupted the in-flight turn. Click resume to continue from the same step.'
+          : 'Task paused — the agent is holding before its next step. Click resume to continue.'
     })
     return true
   }
@@ -461,11 +460,9 @@ export class ChatService {
   resumeRequest(requestId: string): boolean {
     const gate = this.pauseGates.get(requestId)
     const gateResumed = gate?.resume() ?? false
-    // Same logic as pauseRequest: Codex turns resume via a fresh turn/start
-    // with a continuation prompt, not via the gate. Tell both sides so
-    // whichever one was actually paused unblocks.
     const codexResumed = this.codexClient?.resumeRequest(requestId) ?? false
-    if (!gateResumed && !codexResumed) return false
+    const claudeCodeResumed = this.claudeCodeClient?.resumeRequest(requestId) ?? false
+    if (!gateResumed && !codexResumed && !claudeCodeResumed) return false
     this.emit({
       requestId,
       type: 'loop_state',
@@ -475,7 +472,9 @@ export class ChatService {
       iteration: 0,
       summary: codexResumed
         ? 'Task resumed — Codex is picking up the same step it was on when paused.'
-        : 'Task resumed — the agent is picking up where it left off.'
+        : claudeCodeResumed
+          ? 'Task resumed — Claude Code is picking up from the same session.'
+          : 'Task resumed — the agent is picking up where it left off.'
     })
     return true
   }

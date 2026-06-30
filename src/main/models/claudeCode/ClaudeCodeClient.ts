@@ -55,12 +55,38 @@ export function probeClaudeCodeBinary(): Promise<{ installed: boolean; version: 
 }
 
 export class ClaudeCodeClient {
+  /** requestId → live child process (for pause/resume) */
+  private readonly activeProcesses = new Map<string, import('node:child_process').ChildProcess>()
+  /** requestId → pause state */
+  private readonly pausedRequests = new Set<string>()
+  /** requestId → resume resolver (wakes the paused send() loop) */
+  private readonly resumeResolvers = new Map<string, () => void>()
+
   constructor(
     private readonly emit: (e: ChatStreamEvent) => void,
     private readonly getWorkspaceRoot: () => string | null,
     private readonly sessions: PersistedClaudeCodeSessions,
     private readonly createBridgeSession?: CreateClaudeCodeBridgeSession
   ) {}
+
+  pauseRequest(requestId: string): boolean {
+    if (!this.activeProcesses.has(requestId) || this.pausedRequests.has(requestId)) return false
+    this.pausedRequests.add(requestId)
+    const child = this.activeProcesses.get(requestId)
+    child?.kill('SIGTERM')
+    return true
+  }
+
+  resumeRequest(requestId: string): boolean {
+    if (!this.pausedRequests.has(requestId)) return false
+    this.pausedRequests.delete(requestId)
+    const resolve = this.resumeResolvers.get(requestId)
+    if (resolve) {
+      this.resumeResolvers.delete(requestId)
+      resolve()
+    }
+    return true
+  }
 
   async status(): Promise<ClaudeCodeStatus> {
     const probe = await probeClaudeCodeBinary()
@@ -157,7 +183,7 @@ export class ClaudeCodeClient {
           requestId: args.requestId
         })
       : null
-    const cliArgs = [
+    const baseCliArgs = [
       '-p',
       '--verbose',
       '--output-format',
@@ -169,18 +195,71 @@ export class ClaudeCodeClient {
       args.system
     ]
     if (bridge) {
-      cliArgs.push('--strict-mcp-config', '--mcp-config', bridge.mcpConfig)
+      baseCliArgs.push('--strict-mcp-config', '--mcp-config', bridge.mcpConfig)
     }
-    if (persistedSessionId) cliArgs.push('--resume', persistedSessionId)
-    else cliArgs.push('--session-id', sessionId)
-    cliArgs.push(args.user)
 
-    return new Promise<{ text: string; usage?: ClaudeUsage }>((resolve, reject) => {
+    const buildCliArgs = (resumeId: string | null): string[] => {
+      const a = [...baseCliArgs]
+      if (resumeId) a.push('--resume', resumeId)
+      else a.push('--session-id', sessionId)
+      a.push(args.user)
+      return a
+    }
+
+    // Pause/resume loop: re-spawn with --resume after each SIGTERM-based pause.
+    let accumulatedText = ''
+    let accumulatedUsage: ClaudeUsage | undefined
+    let currentResumeId = persistedSessionId
+
+    while (true) {
+      const runResult = await this.spawnTurn(args, buildCliArgs(currentResumeId), workdir, bridge)
+      accumulatedText = runResult.text
+      accumulatedUsage = mergeUsage(accumulatedUsage, runResult.usage)
+
+      if (!runResult.pausedForResume || args.signal?.aborted) break
+
+      // Wait for resumeRequest() to call the resolver before re-spawning.
+      await new Promise<void>((resolve) => {
+        if (!this.pausedRequests.has(args.requestId ?? '')) {
+          resolve()
+          return
+        }
+        this.resumeResolvers.set(args.requestId ?? '', resolve)
+      })
+
+      if (args.signal?.aborted) break
+
+      // Use the session ID persisted by the just-completed spawn.
+      currentResumeId = args.conversationId ? this.sessions.get(args.conversationId) : null
+      if (!currentResumeId) break
+    }
+
+    bridge?.dispose()
+    return { text: accumulatedText, usage: accumulatedUsage }
+  }
+
+  private async spawnTurn(
+    args: {
+      modelId: string
+      system: string
+      user: string
+      conversationId: string | null
+      requestId: string | null
+      signal: AbortSignal | null
+      enableBrowserTools: boolean
+    },
+    cliArgs: string[],
+    workdir: string,
+    bridge: ClaudeCodeBridgeRegistration | null
+  ): Promise<{ text: string; usage?: ClaudeUsage; pausedForResume: boolean }> {
+    return new Promise((resolve, reject) => {
       const child = spawn(CLAUDE_BIN, cliArgs, {
         cwd: workdir,
         env: bridge ? { ...process.env, ...bridge.env } : process.env,
         stdio: ['ignore', 'pipe', 'pipe']
       })
+
+      if (args.requestId) this.activeProcesses.set(args.requestId, child)
 
       let settled = false
       let collectedText = ''
@@ -189,15 +268,17 @@ export class ClaudeCodeClient {
       let finalError: Error | null = null
       let stderr = ''
       const toolJsonByIndex = new Map<number, string>()
-      const emittedToolCalls = new Set<string>()
+      // Track live tool chips emitted from content_block_start so we don't
+      // double-emit from the post-hoc assistant message block.
+      const liveChippedIds = new Set<string>()
 
       const finish = (fn: () => void): void => {
         if (settled) return
         settled = true
+        if (args.requestId) this.activeProcesses.delete(args.requestId)
         args.signal?.removeEventListener('abort', onAbort)
         stdoutRl.close()
         stderrRl.close()
-        bridge?.dispose()
         fn()
       }
 
@@ -235,7 +316,19 @@ export class ClaudeCodeClient {
         if (msg.type === 'stream_event') {
           const event = msg.event ?? {}
           if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+            const cb = event.content_block
             toolJsonByIndex.set(event.index, '')
+            // Emit live tool chip as soon as we know name + id, before args stream in.
+            if (args.requestId && typeof cb.id === 'string' && typeof cb.name === 'string') {
+              liveChippedIds.add(cb.id)
+              this.emit({
+                requestId: args.requestId,
+                type: 'tool_call',
+                tool: formatClaudeToolName(cb.name),
+                args: {},
+                callId: cb.id
+              })
+            }
           } else if (
             event.type === 'content_block_delta' &&
             event.delta?.type === 'input_json_delta' &&
@@ -254,8 +347,9 @@ export class ClaudeCodeClient {
 
         if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
           for (const block of msg.message.content) {
-            if (block?.type !== 'tool_use' || typeof block.id !== 'string' || emittedToolCalls.has(block.id)) continue
-            emittedToolCalls.add(block.id)
+            if (block?.type !== 'tool_use' || typeof block.id !== 'string') continue
+            // Already live-chipped — skip to avoid duplicate tool_call events.
+            if (liveChippedIds.has(block.id)) continue
             const blockArgs = block.input && typeof block.input === 'object'
               ? block.input
               : safeParseJson(blockJsonFor(block, toolJsonByIndex))
@@ -310,6 +404,15 @@ export class ClaudeCodeClient {
 
       child.on('close', (code, signalName) => {
         const aborted = args.signal?.aborted === true
+        // Paused via pauseRequest(): SIGTERM was sent, child died with non-zero
+        // code, and the request is still in pausedRequests. Resolve cleanly so
+        // the outer loop can wait for resumeRequest().
+        const paused = args.requestId ? this.pausedRequests.has(args.requestId) : false
+        if (paused) {
+          const text = finalText ?? collectedText
+          finish(() => resolve({ text, usage: finalUsage, pausedForResume: true }))
+          return
+        }
         if (aborted) {
           finish(() => reject(new Error('Claude Code turn aborted')))
           return
@@ -324,7 +427,7 @@ export class ClaudeCodeClient {
           return
         }
         const text = finalText ?? collectedText
-        finish(() => resolve({ text, usage: finalUsage }))
+        finish(() => resolve({ text, usage: finalUsage, pausedForResume: false }))
       })
     })
   }
@@ -455,4 +558,15 @@ function usageFromResult(usage: any): ClaudeUsage | undefined {
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function mergeUsage(a: ClaudeUsage | undefined, b: ClaudeUsage | undefined): ClaudeUsage | undefined {
+  if (!a && !b) return undefined
+  const add = (x: number | undefined, y: number | undefined): number | undefined =>
+    x !== undefined || y !== undefined ? (x ?? 0) + (y ?? 0) : undefined
+  return {
+    inputTokens: add(a?.inputTokens, b?.inputTokens),
+    outputTokens: add(a?.outputTokens, b?.outputTokens),
+    cachedInputTokens: add(a?.cachedInputTokens, b?.cachedInputTokens)
+  }
 }

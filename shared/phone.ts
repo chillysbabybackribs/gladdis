@@ -18,6 +18,21 @@ export interface PhoneBridgePairResult {
   appUrl: string | null
 }
 
+export interface PhoneSessionPendingTurn {
+  clientMessageId: string
+  text: string
+  conversationId: string | null
+  requestId: string | null
+  assistantMessageId: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PhoneSessionSnapshot {
+  conversationId: string | null
+  pending: PhoneSessionPendingTurn[]
+}
+
 export type PhoneSocketCommand =
   | {
     type: 'send'
@@ -34,6 +49,7 @@ export type PhoneSocketCommand =
 export type PhoneSocketEvent =
   | {
     type: 'ready'
+    session: PhoneSessionSnapshot
   }
   | {
     type: 'status'

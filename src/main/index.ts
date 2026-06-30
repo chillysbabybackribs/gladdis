@@ -53,12 +53,14 @@ import { loadDreamHistory } from './models/memory/dreamHistory'
 import { ServiceRegistry } from './ServiceRegistry'
 import { RemoteChatServer } from './remote/RemoteChatServer'
 import { PhoneDeviceStore } from './remote/PhoneDeviceStore'
+import { PhoneSessionStateStore } from './remote/PhoneSessionStateStore'
 
 let win: BaseWindow
 let uiView: WebContentsView
 let registry: ServiceRegistry
 let remoteChatServer: RemoteChatServer | null = null
 let phoneDeviceStore: PhoneDeviceStore
+let phoneSessionStateStore: PhoneSessionStateStore
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const appId = process.env.GLADDIS_APP_ID ?? 'com.gladdis.app'
@@ -222,6 +224,7 @@ function createWindow(): void {
     captureAppWindowPng
   )
   phoneDeviceStore = new PhoneDeviceStore()
+  phoneSessionStateStore = new PhoneSessionStateStore()
 
   // Start watching whichever workspace was open on launch (no-op if none).
   // Access via registry triggers lazy initialization of dependent services.
@@ -264,7 +267,8 @@ async function startRemoteChatServer(options: PhoneBridgeStartOptions = {}): Pro
       port: options.port ?? phoneBridgePort,
       token: phoneBridgeToken,
       corsOrigin: phoneBridgeCorsOrigin,
-      authenticateDevice: (token) => phoneDeviceStore.authenticate(token)
+      authenticateDevice: (token) => phoneDeviceStore.authenticate(token),
+      sessionStore: phoneSessionStateStore
     }
   )
   try {

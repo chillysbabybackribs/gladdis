@@ -9,11 +9,28 @@ import type {
   ConversationMeta,
   ModelOption,
   PhoneBridgeDevice,
+  PhoneSessionSnapshot,
   PhoneSocketCommand,
   PhoneSocketEvent,
   StoredMessage
 } from '../../../shared/types'
 import { MODELS } from '../../../shared/types'
+import { deviceSessionKey, tokenSessionKey } from './PhoneSessionStateStore'
+
+export interface RemotePhoneSessionStore {
+  get(sessionKey: string): PhoneSessionSnapshot
+  setConversation(sessionKey: string, conversationId: string | null): void
+  upsertPending(sessionKey: string, pending: {
+    clientMessageId: string
+    text: string
+    conversationId: string | null
+    requestId: string | null
+    assistantMessageId: string | null
+    createdAt: number
+    updatedAt: number
+  }): void
+  clearPendingByRequestId(sessionKey: string, requestId: string): void
+}
 
 export interface RemoteChatServerOptions {
   host?: string
@@ -21,6 +38,7 @@ export interface RemoteChatServerOptions {
   token?: string
   corsOrigin?: string
   authenticateDevice?: (token: string) => PhoneBridgeDevice | null
+  sessionStore?: RemotePhoneSessionStore
 }
 
 export interface RemoteChatBridge {
@@ -44,6 +62,9 @@ export interface RemoteChatServerInfo {
 interface ActiveRemoteTurn {
   conversationId: string
   assistantMessageId: string
+  sessionKey?: string
+  clientMessageId?: string
+  text?: string
 }
 
 interface SocketAckResult {
@@ -65,6 +86,7 @@ export class RemoteChatServer {
   private wsServer = new WebSocketServer({ noServer: true })
   private wsClients = new Set<WebSocket>()
   private wsClientKeys = new WeakMap<WebSocket, string>()
+  private wsSessionKeys = new WeakMap<WebSocket, string>()
   private pendingSocketResults = new Map<string, Promise<SocketAckResult>>()
   private recentSocketResults = new Map<string, SocketAckResult & { seenAt: number }>()
   private activeTurns = new Map<string, ActiveRemoteTurn>()
@@ -86,7 +108,7 @@ export class RemoteChatServer {
         socket.destroy()
         return
       }
-      this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.openWebSocket(ws, auth.clientKey))
+      this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.openWebSocket(ws, auth))
     })
   }
 
@@ -218,7 +240,10 @@ export class RemoteChatServer {
     }
   }
 
-  private async send(body: unknown): Promise<{ requestId: string; conversationId: string; assistantMessageId: string }> {
+  private async send(
+    body: unknown,
+    context: { clientMessageId?: string; sessionKey?: string } = {}
+  ): Promise<{ requestId: string; conversationId: string; assistantMessageId: string }> {
     if (!body || typeof body !== 'object') throw new Error('JSON body is required')
     const input = body as Record<string, unknown>
     const text = typeof input.text === 'string' ? input.text.trim() : ''
@@ -249,7 +274,28 @@ export class RemoteChatServer {
       messages
     })
 
-    this.activeTurns.set(requestId, { conversationId, assistantMessageId })
+    this.activeTurns.set(requestId, {
+      conversationId,
+      assistantMessageId,
+      sessionKey: context.sessionKey,
+      clientMessageId: context.clientMessageId,
+      text
+    })
+    if (context.sessionKey) {
+      const now = Date.now()
+      this.options.sessionStore?.setConversation(context.sessionKey, conversationId)
+      if (context.clientMessageId) {
+        this.options.sessionStore?.upsertPending(context.sessionKey, {
+          clientMessageId: context.clientMessageId,
+          text,
+          conversationId,
+          requestId,
+          assistantMessageId,
+          createdAt: now,
+          updatedAt: now
+        })
+      }
+    }
     this.bridge.nudgeWorkspace()
     const model = MODELS.find((candidate) => candidate.id === modelId)
     if (model?.provider === 'cursor') this.bridge.warmCursorBridge()
@@ -286,7 +332,23 @@ export class RemoteChatServer {
       return message
     })
     this.bridge.saveConversation({ ...conversation, updatedAt: Date.now(), messages: nextMessages })
-    if (event.type === 'done' || event.type === 'error') this.activeTurns.delete(event.requestId)
+    if (turn.sessionKey && turn.clientMessageId && turn.text) {
+      const existingPending = this.options.sessionStore?.get(turn.sessionKey).pending
+        .find((candidate) => candidate.clientMessageId === turn.clientMessageId)
+      this.options.sessionStore?.upsertPending(turn.sessionKey, {
+        clientMessageId: turn.clientMessageId,
+        text: turn.text,
+        conversationId: turn.conversationId,
+        requestId: event.requestId,
+        assistantMessageId: turn.assistantMessageId,
+        createdAt: existingPending?.createdAt ?? Date.now(),
+        updatedAt: Date.now()
+      })
+    }
+    if (event.type === 'done' || event.type === 'error') {
+      if (turn.sessionKey) this.options.sessionStore?.clearPendingByRequestId(turn.sessionKey, event.requestId)
+      this.activeTurns.delete(event.requestId)
+    }
   }
 
   private openEventStream(res: ServerResponse): void {
@@ -300,10 +362,14 @@ export class RemoteChatServer {
     res.on('close', () => this.clients.delete(res))
   }
 
-  private openWebSocket(ws: WebSocket, clientKey: string): void {
+  private openWebSocket(
+    ws: WebSocket,
+    auth: { clientKey: string; sessionKey: string }
+  ): void {
     this.wsClients.add(ws)
-    this.wsClientKeys.set(ws, clientKey)
-    this.sendSocket(ws, { type: 'ready' })
+    this.wsClientKeys.set(ws, auth.clientKey)
+    this.wsSessionKeys.set(ws, auth.sessionKey)
+    this.sendSocket(ws, { type: 'ready', session: this.currentSession(auth.sessionKey) })
     this.sendSocket(ws, { type: 'status', state: 'connected' })
     ws.on('message', (data) => void this.onSocketMessage(ws, data))
     ws.on('close', () => this.wsClients.delete(ws))
@@ -315,6 +381,7 @@ export class RemoteChatServer {
       const message = JSON.parse(raw) as PhoneSocketCommand
       if (message.type === 'send') {
         const clientKey = this.wsClientKeys.get(ws) ?? 'unknown'
+        const sessionKey = this.wsSessionKeys.get(ws) ?? tokenSessionKey(clientKey)
         const clientMessageId = normalizeClientMessageId(message.clientMessageId)
         const dedupeKey = `${clientKey}:${clientMessageId}`
         const cached = this.recentSocketResults.get(dedupeKey)
@@ -330,7 +397,7 @@ export class RemoteChatServer {
           return
         }
         const pending = this.pendingSocketResults.get(dedupeKey)
-        const ack = pending ?? this.createPendingSocketAck(dedupeKey, clientMessageId, message)
+        const ack = pending ?? this.createPendingSocketAck(dedupeKey, sessionKey, clientMessageId, message)
         const result = await ack
         pruneSocketResults(this.recentSocketResults)
         this.sendSocket(ws, { type: 'ack', ...result })
@@ -339,6 +406,8 @@ export class RemoteChatServer {
       if (message.type === 'abort') {
         const requestId = message.requestId?.trim()
         if (!requestId) throw new Error('requestId is required')
+        const sessionKey = this.wsSessionKeys.get(ws)
+        if (sessionKey) this.options.sessionStore?.clearPendingByRequestId(sessionKey, requestId)
         this.bridge.abort(requestId)
         return
       }
@@ -364,22 +433,23 @@ export class RemoteChatServer {
     return !!this.authorize(req)
   }
 
-  private authorize(req: IncomingMessage): { clientKey: string } | null {
+  private authorize(req: IncomingMessage): { clientKey: string; sessionKey: string } | null {
     const supplied = bearerToken(req) ?? queryToken(req)
     if (!supplied) return null
-    if (this.options.authenticateDevice?.(supplied)) {
-      return { clientKey: tokenKey(supplied) }
-    }
-    if (safeEqual(supplied, this.token)) return { clientKey: tokenKey(supplied) }
+    const clientKey = tokenKey(supplied)
+    const device = this.options.authenticateDevice?.(supplied)
+    if (device) return { clientKey, sessionKey: deviceSessionKey(device.id) }
+    if (safeEqual(supplied, this.token)) return { clientKey, sessionKey: tokenSessionKey(clientKey) }
     return null
   }
 
   private createPendingSocketAck(
     dedupeKey: string,
+    sessionKey: string,
     clientMessageId: string,
     message: Extract<PhoneSocketCommand, { type: 'send' }>
   ): Promise<SocketAckResult> {
-    const pending = this.send(message)
+    const pending = this.send(message, { clientMessageId, sessionKey })
       .then((result) => {
         const ack: SocketAckResult = { clientMessageId, ...result }
         this.recentSocketResults.set(dedupeKey, { ...ack, seenAt: Date.now() })
@@ -390,6 +460,10 @@ export class RemoteChatServer {
       })
     this.pendingSocketResults.set(dedupeKey, pending)
     return pending
+  }
+
+  private currentSession(sessionKey: string): PhoneSessionSnapshot {
+    return this.options.sessionStore?.get(sessionKey) ?? { conversationId: null, pending: [] }
   }
 
   private applyCors(req: IncomingMessage, res: ServerResponse): void {
@@ -576,6 +650,7 @@ function remoteAppHtml(token: string): string {
   </form>
   <script>
     const token = new URLSearchParams(location.search).get('token') || ${tokenJson}
+    const storageKey = 'gladdis-remote-v2:' + token
     const messages = document.querySelector('#messages')
     const status = document.querySelector('#status')
     let conversationId = null
@@ -583,17 +658,82 @@ function remoteAppHtml(token: string): string {
     let reconnectTimer = null
     const outbox = []
     const assistants = new Map()
-    function add(role, text) {
+    let persistedState = loadPersistedState()
+    if (persistedState.conversationId) conversationId = persistedState.conversationId
+    function add(role, text, messageId) {
       const el = document.createElement('div')
       el.className = 'msg ' + role
       el.textContent = text
+      if (messageId) el.dataset.messageId = messageId
       messages.appendChild(el)
       messages.scrollTop = messages.scrollHeight
       return el
     }
+    function clearMessages() {
+      messages.textContent = ''
+      assistants.clear()
+    }
+    function findMessage(messageId) {
+      for (const node of messages.children) {
+        if (node.dataset && node.dataset.messageId === messageId) return node
+      }
+      return null
+    }
     function nextClientMessageId() {
       if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') return globalThis.crypto.randomUUID()
       return 'phone-msg-' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+    }
+    function normalizePersistedItem(value) {
+      if (!value || typeof value !== 'object') return null
+      if (typeof value.clientMessageId !== 'string' || typeof value.text !== 'string') return null
+      return {
+        clientMessageId: value.clientMessageId,
+        text: value.text,
+        conversationId: typeof value.conversationId === 'string' && value.conversationId.trim() ? value.conversationId.trim() : null,
+        requestId: typeof value.requestId === 'string' && value.requestId.trim() ? value.requestId.trim() : null,
+        assistantMessageId: typeof value.assistantMessageId === 'string' && value.assistantMessageId.trim() ? value.assistantMessageId.trim() : null
+      }
+    }
+    function loadPersistedState() {
+      try {
+        const raw = localStorage.getItem(storageKey)
+        if (!raw) return { conversationId: null, outbox: [] }
+        const parsed = JSON.parse(raw)
+        return {
+          conversationId: typeof parsed.conversationId === 'string' && parsed.conversationId.trim()
+            ? parsed.conversationId.trim()
+            : null,
+          outbox: Array.isArray(parsed.outbox)
+            ? parsed.outbox.map(normalizePersistedItem).filter(Boolean)
+            : []
+        }
+      } catch (_error) {
+        return { conversationId: null, outbox: [] }
+      }
+    }
+    function serializeOutbox() {
+      return outbox.map((item) => ({
+        clientMessageId: item.clientMessageId,
+        text: item.text,
+        conversationId: item.conversationId || null,
+        requestId: item.requestId || null,
+        assistantMessageId: item.assistantMessageId || null
+      }))
+    }
+    function persistState() {
+      persistedState = {
+        conversationId,
+        outbox: serializeOutbox()
+      }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(persistedState))
+      } catch (_error) {}
+    }
+    function setConversation(nextConversationId) {
+      conversationId = typeof nextConversationId === 'string' && nextConversationId.trim()
+        ? nextConversationId.trim()
+        : null
+      persistState()
     }
     function setStatus(base) {
       const queued = outbox.filter((item) => !item.acked).length
@@ -604,6 +744,7 @@ function remoteAppHtml(token: string): string {
       for (const item of outbox) {
         if (item.acked || item.sent) continue
         item.sent = true
+        item.conversationId = item.conversationId || conversationId
         socket.send(JSON.stringify({
           type: 'send',
           clientMessageId: item.clientMessageId,
@@ -611,18 +752,97 @@ function remoteAppHtml(token: string): string {
           conversationId: item.conversationId
         }))
       }
+      persistState()
       setStatus('Connected')
+    }
+    async function fetchConversation(nextConversationId) {
+      const res = await fetch('/api/chats/' + encodeURIComponent(nextConversationId) + '?token=' + encodeURIComponent(token))
+      if (!res.ok) return null
+      const body = await res.json()
+      return body && body.conversation ? body.conversation : null
+    }
+    function renderConversation(conversation) {
+      clearMessages()
+      for (const message of conversation.messages || []) add(message.role, message.text || '', message.id)
+    }
+    function mergeLocalPending() {
+      const merged = new Map()
+      for (const item of persistedState.outbox) merged.set(item.clientMessageId, item)
+      for (const item of outbox.splice(0, outbox.length)) {
+        merged.set(item.clientMessageId, {
+          clientMessageId: item.clientMessageId,
+          text: item.text,
+          conversationId: item.conversationId || null,
+          requestId: item.requestId || null,
+          assistantMessageId: item.assistantMessageId || null
+        })
+      }
+      return [...merged.values()]
+    }
+    async function restoreSession(session) {
+      const localPending = mergeLocalPending()
+      const serverPending = new Map((session.pending || []).map((item) => [item.clientMessageId, item]))
+      const sessionConversationId = session.conversationId || conversationId
+      if (sessionConversationId) {
+        const conversation = await fetchConversation(sessionConversationId)
+        if (conversation) {
+          setConversation(conversation.id)
+          renderConversation(conversation)
+        } else {
+          clearMessages()
+          setConversation(sessionConversationId)
+        }
+      } else {
+        clearMessages()
+      }
+      for (const item of localPending) {
+        const remote = serverPending.get(item.clientMessageId)
+        if (!remote) add('user', item.text)
+        const bubble = remote && remote.assistantMessageId
+          ? (findMessage(remote.assistantMessageId) || add('assistant', '', remote.assistantMessageId))
+          : add('assistant', '')
+        if (remote && remote.requestId) assistants.set(remote.requestId, bubble)
+        outbox.push({
+          clientMessageId: item.clientMessageId,
+          text: item.text,
+          conversationId: remote && remote.conversationId ? remote.conversationId : (item.conversationId || conversationId),
+          requestId: remote && remote.requestId ? remote.requestId : (item.requestId || null),
+          assistantMessageId: remote && remote.assistantMessageId ? remote.assistantMessageId : (item.assistantMessageId || null),
+          assistant: bubble,
+          acked: false,
+          sent: false
+        })
+        serverPending.delete(item.clientMessageId)
+      }
+      for (const pending of serverPending.values()) {
+        const bubble = pending.assistantMessageId
+          ? (findMessage(pending.assistantMessageId) || add('assistant', '', pending.assistantMessageId))
+          : add('assistant', '')
+        if (pending.requestId) assistants.set(pending.requestId, bubble)
+        outbox.push({
+          clientMessageId: pending.clientMessageId,
+          text: pending.text,
+          conversationId: pending.conversationId || conversationId,
+          requestId: pending.requestId || null,
+          assistantMessageId: pending.assistantMessageId || null,
+          assistant: bubble,
+          acked: false,
+          sent: false
+        })
+      }
+      persistState()
+      flushOutbox()
     }
     function connect() {
       setStatus('Connecting...')
       const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
       socket = new WebSocket(protocol + '//' + location.host + '/ws?token=' + encodeURIComponent(token))
       socket.addEventListener('open', () => { setStatus('Connected') })
-      socket.addEventListener('message', (event) => {
+      socket.addEventListener('message', async (event) => {
         const data = JSON.parse(event.data)
         if (data.type === 'ready') {
+          await restoreSession(data.session || { conversationId: conversationId || null, pending: [] })
           setStatus('Connected')
-          flushOutbox()
           return
         }
         if (data.type === 'status') {
@@ -630,14 +850,18 @@ function remoteAppHtml(token: string): string {
           return
         }
         if (data.type === 'ack') {
-          conversationId = data.conversationId
+          setConversation(data.conversationId)
           const index = outbox.findIndex((candidate) => candidate.clientMessageId === data.clientMessageId)
           const item = index >= 0 ? outbox[index] : null
           if (!item) return
           item.acked = true
+          item.requestId = data.requestId
+          item.assistantMessageId = data.assistantMessageId
           outbox.splice(index, 1)
           assistants.set(data.requestId, item.assistant)
           item.assistant.dataset.requestId = data.requestId
+          item.assistant.dataset.messageId = data.assistantMessageId
+          persistState()
           setStatus('Connected')
           return
         }
@@ -650,11 +874,13 @@ function remoteAppHtml(token: string): string {
           }
           if (stream.type === 'done') {
             assistants.delete(stream.requestId)
+            persistState()
             return
           }
           if (stream.type === 'error') {
             assistant.textContent = assistant.textContent ? assistant.textContent + '\\n\\n' + stream.message : stream.message
             assistants.delete(stream.requestId)
+            persistState()
           }
           return
         }
@@ -665,12 +891,14 @@ function remoteAppHtml(token: string): string {
             pending.sent = false
             pending.assistant.textContent = pending.assistant.textContent || data.message
           }
+          persistState()
         }
       })
       socket.addEventListener('close', () => {
         for (const item of outbox) {
           if (!item.acked) item.sent = false
         }
+        persistState()
         setStatus('Reconnecting...')
         if (reconnectTimer) clearTimeout(reconnectTimer)
         reconnectTimer = setTimeout(connect, 800)
@@ -689,10 +917,13 @@ function remoteAppHtml(token: string): string {
         clientMessageId: nextClientMessageId(),
         text,
         conversationId,
+        requestId: null,
+        assistantMessageId: null,
         assistant,
         acked: false,
         sent: false
       })
+      persistState()
       flushOutbox()
       if (!socket || socket.readyState !== WebSocket.OPEN) setStatus('Queued offline')
     })

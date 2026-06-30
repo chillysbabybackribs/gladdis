@@ -1,7 +1,42 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
-import type { ChatRequest, ChatStreamEvent, Conversation, ConversationMeta } from '../../../shared/types'
+import type {
+  ChatRequest,
+  ChatStreamEvent,
+  Conversation,
+  ConversationMeta,
+  PhoneSessionPendingTurn
+} from '../../../shared/types'
 import { RemoteChatServer, type RemoteChatBridge } from './RemoteChatServer'
+
+function makeSessionStore() {
+  const sessions = new Map<string, { conversationId: string | null; pending: PhoneSessionPendingTurn[] }>()
+  return {
+    sessions,
+    get(sessionKey: string) {
+      return sessions.get(sessionKey) ?? { conversationId: null, pending: [] }
+    },
+    setConversation(sessionKey: string, conversationId: string | null) {
+      const session = sessions.get(sessionKey) ?? { conversationId: null, pending: [] }
+      session.conversationId = conversationId
+      sessions.set(sessionKey, session)
+    },
+    upsertPending(sessionKey: string, pending: PhoneSessionPendingTurn) {
+      const session = sessions.get(sessionKey) ?? { conversationId: null, pending: [] }
+      const index = session.pending.findIndex((candidate) => candidate.clientMessageId === pending.clientMessageId)
+      if (index >= 0) session.pending[index] = pending
+      else session.pending.push(pending)
+      if (pending.conversationId) session.conversationId = pending.conversationId
+      sessions.set(sessionKey, session)
+    },
+    clearPendingByRequestId(sessionKey: string, requestId: string) {
+      const session = sessions.get(sessionKey)
+      if (!session) return
+      session.pending = session.pending.filter((candidate) => candidate.requestId !== requestId)
+      sessions.set(sessionKey, session)
+    }
+  }
+}
 
 function makeBridge(): {
   bridge: RemoteChatBridge
@@ -175,6 +210,52 @@ describe('RemoteChatServer', () => {
     expect(
       seen.some((message) => message.type === 'chat' && (message.event as { text?: string }).text === 'Socket reply')
     ).toBe(true)
+    ws.close()
+  })
+
+  it('sends the persisted session snapshot in the websocket ready event', async () => {
+    const { bridge } = makeBridge()
+    const sessionStore = makeSessionStore()
+    sessionStore.setConversation('device:phone-1', 'remote-conv-1')
+    sessionStore.upsertPending('device:phone-1', {
+      clientMessageId: 'msg-1',
+      text: 'resume me',
+      conversationId: 'remote-conv-1',
+      requestId: 'req-1',
+      assistantMessageId: 'asst-1',
+      createdAt: 1,
+      updatedAt: 2
+    })
+    server = new RemoteChatServer(bridge, {
+      token: 'server-token',
+      authenticateDevice: (token) => token === 'device-token'
+        ? { id: 'phone-1', label: 'Phone', createdAt: Date.now(), lastSeenAt: Date.now() }
+        : null,
+      sessionStore
+    })
+    const info = await server.start()
+    const ws = new WebSocket(`ws://${info.host}:${info.port}/ws?token=device-token`)
+
+    const ready = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      ws.addEventListener('error', () => reject(new Error('websocket connection failed')))
+      ws.addEventListener('message', (event) => {
+        const message = JSON.parse(String(event.data)) as Record<string, unknown>
+        if (message.type === 'ready') resolve(message)
+      })
+    })
+
+    expect(ready.session).toEqual({
+      conversationId: 'remote-conv-1',
+      pending: [{
+        clientMessageId: 'msg-1',
+        text: 'resume me',
+        conversationId: 'remote-conv-1',
+        requestId: 'req-1',
+        assistantMessageId: 'asst-1',
+        createdAt: 1,
+        updatedAt: 2
+      }]
+    })
     ws.close()
   })
 

@@ -12,7 +12,7 @@ vi.mock('node:child_process', () => ({
   execFile: (...args: unknown[]) => execFileMock(...args)
 }))
 
-import { classifyAssistantEvent, computeCursorEmitDelta, ensureWorkspaceMcpConfig, formatCursorToolName, isMcpConfigWarm, normalizeCursorToolName, parseCursorModels, probeMcpConfigWarm, shouldEmitAssistantStreamText, CursorClient } from './CursorClient'
+import { classifyAssistantEvent, computeCursorEmitDelta, cursorToolOk, cursorToolPreview, ensureWorkspaceMcpConfig, formatCursorToolName, isMcpConfigWarm, normalizeCursorToolName, parseCursorModels, probeMcpConfigWarm, shouldEmitAssistantStreamText, CursorClient } from './CursorClient'
 import { CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from '../claudeCode/browserTools'
 
 beforeEach(() => {
@@ -204,6 +204,50 @@ Tip: use --model <id> to switch.
         }
       })
     ).toBe('gladdis.read_page')
+  })
+
+  it('normalizes successful native validation results into actionable summaries', () => {
+    expect(
+      cursorToolPreview({
+        runValidationToolCall: {
+          args: { check: 'typecheck' },
+          result: { success: true }
+        }
+      })
+    ).toBe('typecheck: pass')
+  })
+
+  it('surfaces failed native validation results as provider-style tool errors', () => {
+    expect(
+      cursorToolPreview({
+        runValidationToolCall: {
+          args: { check: 'typecheck' },
+          result: { success: false, stderr: 'src/main/index.ts:42 error TS2322' }
+        }
+      })
+    ).toBe('[tool error] typecheck: src/main/index.ts:42 error TS2322')
+    expect(
+      cursorToolOk({
+        runValidationToolCall: {
+          args: { check: 'typecheck' },
+          result: { status: 'failed', stderr: 'TS2322' }
+        }
+      })
+    ).toBe(false)
+  })
+
+  it('keeps failed shell tool previews concise and scoped to the command', () => {
+    expect(
+      cursorToolPreview({
+        shellToolCall: {
+          args: { command: 'npm test -- CursorClient.test.ts' },
+          result: {
+            exitCode: 1,
+            stderr: '\n FAIL  CursorClient.test.ts\n  expected true to be false\n'
+          }
+        }
+      })
+    ).toBe('[tool error] npm test -- CursorClient.test.ts: FAIL CursorClient.test.ts expected true to be false')
   })
 })
 

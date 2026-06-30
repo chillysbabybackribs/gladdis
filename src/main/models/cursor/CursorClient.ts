@@ -870,7 +870,7 @@ function cursorToolArgs(toolCall: any): unknown {
   return {}
 }
 
-function cursorToolOk(toolCall: any): boolean {
+export function cursorToolOk(toolCall: any): boolean {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
   const [, firstValue] = firstCursorToolEntry(payload)
   if (!firstValue || typeof firstValue !== 'object') return true
@@ -881,23 +881,23 @@ function cursorToolOk(toolCall: any): boolean {
   if ('success' in result && result.success === false) return false
   if ('ok' in result && result.ok === false) return false
   if ('isError' in result && result.isError === true) return false
+  if ('status' in result && typeof result.status === 'string' && /^(error|failed)$/i.test(result.status)) {
+    return false
+  }
+  if ('exitCode' in result && typeof result.exitCode === 'number' && result.exitCode !== 0) return false
   return true
 }
 
-function cursorToolPreview(toolCall: any): string {
+export function cursorToolPreview(toolCall: any): string {
   const payload = toolCall && typeof toolCall === 'object' ? toolCall : {}
   const [firstKey, firstValue] = firstCursorToolEntry(payload)
   if (!firstValue || typeof firstValue !== 'object') return 'Tool completed.'
+  const toolName = normalizeCursorToolName(firstKey)
   const args = cursorToolArgs(toolCall)
   const description = firstTextValue(firstValue.description)
   const result = firstValue.result
-  const resultText = firstNonEmptyText([
-    result,
-    (result as any)?.success,
-    (result as any)?.error,
-    (result as any)?.output,
-    (result as any)?.content
-  ])
+  const ok = cursorToolOk(toolCall)
+  const resultText = extractToolResultText(toolName, args, result, ok)
   if (resultText) return resultText
 
   if (description) return description
@@ -907,8 +907,7 @@ function cursorToolPreview(toolCall: any): string {
     if (argPreview) return argPreview
   }
 
-  const fallbackName = normalizeCursorToolName(firstKey)
-  return fallbackName === 'search_files' ? 'Search completed.' : 'Tool completed.'
+  return toolName === 'search_files' ? 'Search completed.' : 'Tool completed.'
 }
 
 function firstCursorToolEntry(payload: Record<string, any>): [string, any] {
@@ -963,7 +962,7 @@ function firstNonEmptyText(values: unknown[]): string {
 function extractPreviewText(value: unknown, seen = new Set<unknown>()): string {
   if (value == null) return ''
   if (typeof value === 'string') return value.trim()
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (typeof value === 'number' || typeof value === 'boolean') return ''
   if (seen.has(value)) return ''
   if (Array.isArray(value)) {
     seen.add(value)
@@ -1006,6 +1005,98 @@ function summarizeArgs(args: Record<string, unknown>): string {
   const method = typeof args.method === 'string' ? args.method.trim() : ''
   if (method) return method
   return ''
+}
+
+function extractToolResultText(
+  toolName: string,
+  args: unknown,
+  result: unknown,
+  ok: boolean
+): string {
+  const argRecord = args && typeof args === 'object' ? args as Record<string, unknown> : {}
+  const resultRecord = result && typeof result === 'object' ? result as Record<string, unknown> : {}
+  const scope = summarizeArgs(argRecord)
+  const validationCheck =
+    typeof argRecord.check === 'string' && argRecord.check.trim() ? argRecord.check.trim() : 'validation'
+
+  if (toolName === 'run_validation') {
+    const detail = compactPreview(
+      firstNonEmptyText([
+        resultRecord.error,
+        resultRecord.message,
+        resultRecord.stderr,
+        resultRecord.stdout,
+        resultRecord.output,
+        resultRecord.summary,
+        resultRecord.text,
+        resultRecord.content
+      ])
+    )
+    if (ok) return detail || `${validationCheck}: pass`
+    return formatToolError(detail ? prefixScope(validationCheck, detail) : `${validationCheck}: failed`)
+  }
+
+  if (toolName === 'run_command') {
+    const command =
+      typeof argRecord.command === 'string' && argRecord.command.trim()
+        ? argRecord.command.trim()
+        : typeof argRecord.cmd === 'string' && argRecord.cmd.trim()
+          ? argRecord.cmd.trim()
+          : scope
+    const detail = compactPreview(
+      firstNonEmptyText([
+        resultRecord.error,
+        resultRecord.message,
+        resultRecord.stderr,
+        resultRecord.stdout,
+        resultRecord.output,
+        resultRecord.summary,
+        resultRecord.text,
+        resultRecord.content
+      ])
+    )
+    if (ok) return detail || command || 'Command completed.'
+    return formatToolError(detail ? prefixScope(command, detail) : command || 'Command failed')
+  }
+
+  const detail = compactPreview(
+    firstNonEmptyText([
+      resultRecord.error,
+      resultRecord.message,
+      resultRecord.summary,
+      resultRecord.stderr,
+      resultRecord.stdout,
+      resultRecord.output,
+      resultRecord.text,
+      resultRecord.content,
+      result
+    ])
+  )
+  if (detail) return ok ? detail : formatToolError(scope ? prefixScope(scope, detail) : detail)
+
+  if (!ok) return formatToolError(scope || `${toolName} failed`)
+  return ''
+}
+
+function prefixScope(scope: string, detail: string): string {
+  if (!scope) return detail
+  const normalizedScope = scope.trim()
+  const normalizedDetail = detail.trim()
+  if (!normalizedScope || !normalizedDetail) return normalizedScope || normalizedDetail
+  if (normalizedDetail.toLowerCase().startsWith(normalizedScope.toLowerCase())) return normalizedDetail
+  return `${normalizedScope}: ${normalizedDetail}`
+}
+
+function formatToolError(detail: string): string {
+  const normalized = compactPreview(detail)
+  if (!normalized) return '[tool error]'
+  return normalized.startsWith('[tool error]') ? normalized : `[tool error] ${normalized}`
+}
+
+function compactPreview(text: string): string {
+  const normalized = text.replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  return normalized.length > 280 ? normalized.slice(0, 279) + '…' : normalized
 }
 
 async function withWorkspaceMcpLock<T>(workdir: string, task: () => Promise<T>): Promise<T> {

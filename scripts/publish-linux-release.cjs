@@ -32,6 +32,15 @@ function getArgValue(name) {
 const tag = getArgValue('--tag') || `v${pkg.version}`
 const commit = getArgValue('--commit') || 'HEAD'
 const shouldPush = hasArg('--push')
+const allowVersionMismatch = hasArg('--allow-version-mismatch')
+
+if (!allowVersionMismatch && tag !== `v${pkg.version}`) {
+  console.error(
+    `Refusing to create ${tag}: package.json is version ${pkg.version}. ` +
+      'Update the app version first or pass --allow-version-mismatch if you really mean it.'
+  )
+  process.exit(1)
+}
 
 try {
   runGit(['rev-parse', '--verify', `${commit}^{commit}`])

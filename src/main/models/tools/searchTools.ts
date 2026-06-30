@@ -7,6 +7,7 @@ import { digestPage } from '../PageDigest'
 import { runDeepSearch } from '../deepSearch'
 import { runUnifiedSearch } from '../unifiedSearch'
 import { cap, clampInt, normalizeUrl, sleep } from './toolUtils'
+import { summarizeNetworkCapture } from './perceiveTools'
 
 const PRE_NAVIGATION_CAPTURE = {
   resourceTypes: ['xhr', 'fetch'],
@@ -54,21 +55,27 @@ export async function runSearchTool(
       limitPerQuery: clampInt(args.limit, 1, 8, 4),
       digestTop: clampInt(args.digest_top, 0, 3, 2),
       focus: args.focus ? String(args.focus) : undefined,
-      navigateVisible: resolveSearchNavigationMode(args, ctx)
+      navigateVisible: resolveSearchNavigationMode(args, ctx),
+      visibleNavigationCapture: deps.tabs.takeArmedNetworkCapture(ctx.tabId) ?? undefined
     }
   )
   if (!outcome.ok) return { ok: false, text: outcome.text }
-  deps.rememberDone(ctx, memKey, outcome.text)
+  const visibleNavigationSummary = outcome.visibleNavigationNetwork
+    ? summarizeNetworkCapture(outcome.visibleNavigationNetwork, { label: 'PRE-NAV NETWORK' })
+    : null
+  const outputText = visibleNavigationSummary ? `${outcome.text}\n${visibleNavigationSummary.text}` : outcome.text
+  deps.rememberDone(ctx, memKey, outputText)
   return {
     ok: true,
-    text: outcome.text,
+    text: outputText,
     structuredContent: {
       query,
       navigateVisible: resolveSearchNavigationMode(args, ctx),
       limit: clampInt(args.limit, 1, 8, 4),
       digestTop: clampInt(args.digest_top, 0, 3, 2),
       results: outcome.results,
-      digests: outcome.digests
+      digests: outcome.digests,
+      ...(visibleNavigationSummary ? { preNavigationNetwork: visibleNavigationSummary.structuredContent } : {})
     }
   }
 }
@@ -249,7 +256,15 @@ export async function runFetchPage(
   const beforeNav = await currentPageReadiness(deps.tabs, ctx.tabId)
   const beforeNavigateMs = Date.now() - started
   const navigateStarted = Date.now()
-  const preNavigationNetwork = await deps.tabs.navigateWithNetworkCapture(ctx.tabId, url, PRE_NAVIGATION_CAPTURE)
+  const navigationCapture = deps.tabs.takeArmedNetworkCapture(ctx.tabId) ?? PRE_NAVIGATION_CAPTURE
+  const preNavigationNetwork = await deps.tabs.navigateWithNetworkCapture(ctx.tabId, url, {
+    ...navigationCapture,
+    timeoutMs: 'timeoutMs' in navigationCapture ? navigationCapture.timeoutMs : PRE_NAVIGATION_CAPTURE.timeoutMs,
+    quietWindowMs:
+      'quietWindowMs' in navigationCapture
+        ? navigationCapture.quietWindowMs
+        : ('windowMs' in navigationCapture ? navigationCapture.windowMs : PRE_NAVIGATION_CAPTURE.quietWindowMs)
+  })
   const navigateCaptureMs = Date.now() - navigateStarted
   const readableStarted = Date.now()
   await waitForVisibleNavigationReadable(deps.tabs, ctx.tabId, url, beforeNav.url)
@@ -296,13 +311,21 @@ export async function runFetchPage(
     '',
     digest
   ].filter((line): line is string => line !== null).join('\n')
+  const networkSummary = summarizeNetworkCapture(preNavigationNetwork, { label: 'PRE-NAV NETWORK' })
   deps.rememberDone(ctx, memKey, timedDigest)
   if (finalUrl && finalUrl !== memKey.slice('fetch:'.length)) {
     deps.rememberDone(ctx, `fetch:${finalUrl}`, timedDigest)
   }
   // cap is exposed for symmetry with other tool outcomes if callers later
   // post-process; the digest is already bounded by digestPage internally.
-  return { ok: true, text: cap(timedDigest, 60_000), structuredContent }
+  return {
+    ok: true,
+    text: cap(`${timedDigest}\n${networkSummary.text}`, 60_000),
+    structuredContent: {
+      ...structuredContent,
+      preNavigationNetwork: networkSummary.structuredContent
+    }
+  }
 }
 
 async function waitForVisibleNavigationReadable(

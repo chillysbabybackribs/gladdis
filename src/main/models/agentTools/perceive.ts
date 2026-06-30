@@ -137,12 +137,13 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
     name: 'watch_network',
     description:
       'Read the structured data a page is built from — the JSON behind the render, ' +
-      'not the rendered HTML. PASSIVELY observes the network traffic the current ' +
-      'page emits ON ITS OWN for a short window and returns the captured endpoints ' +
+      'not the rendered HTML. By default this arms a one-shot capture for the next ' +
+      'browser-driving action on the active tab, so watching starts BEFORE the page changes. ' +
+      'Set mode=\"passive\" to immediately observe the current page for a short window and return the captured endpoints ' +
       'plus their response bodies (size-capped). Use this when the answer is data the ' +
       'page loads from an API (search results, listings, prices, tables, feeds) — ' +
       'one captured API response often beats many scroll-and-grep cycles, and gives ' +
-      'complete un-paginated data. Passive: it only sees traffic the page fires by ' +
+      'complete un-paginated data. In passive mode it only sees traffic the page fires by ' +
       'itself, so if the page is idle, trigger the load first (navigate/scroll/click) ' +
       'then watch. Focus with url_filter/url_filters/url_regex plus optional resource_types, ' +
       'status_codes or status_min/status_max, and mime_includes to keep relevant calls and ' +
@@ -187,6 +188,11 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
           items: { type: 'string' },
           description: 'Optional case-insensitive substrings that must match the response mime type, e.g. ["json", "javascript"].'
         },
+        mode: {
+          type: 'string',
+          enum: ['next_action', 'passive'],
+          description: 'Capture mode. Default next_action arms the next browser-driving tool before it acts; passive watches the current page immediately.'
+        },
         include_request_body: {
           type: 'boolean',
           description: 'If true, include bounded previews of POST/PUT/PATCH request payloads when available.'
@@ -212,6 +218,8 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
     outputSchema: {
       type: 'object',
       properties: {
+        mode: { type: 'string' },
+        armed: { type: 'boolean' },
         urlFilter: { type: 'string' },
         urlFilters: {
           type: 'array',

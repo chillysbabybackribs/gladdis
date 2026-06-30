@@ -43,6 +43,8 @@ type NavigationNetworkCaptureOptions = Omit<WatchNetworkOptions, 'windowMs'> & {
   quietWindowMs?: number
 }
 
+type PendingNetworkCaptureArm = WatchNetworkOptions
+
 /**
  * A tab id is usable only if it is a non-empty string that is not the literal
  * `"null"` / `"undefined"` produced when a null id is serialized across IPC.
@@ -75,6 +77,7 @@ export class TabManager {
    */
   private zoomFactor = 1
   private onPageNavigation?: (tabId: string) => void
+  private pendingNetworkCapture = new Map<string, PendingNetworkCaptureArm>()
 
   constructor(
     private readonly win: BaseWindow,
@@ -408,6 +411,87 @@ export class TabManager {
         await tab.cdp.send('Network.disable', {})
       } catch {
         /* best effort — detach also clears it */
+      }
+    }
+  }
+
+  armNextNetworkCapture(id: string, opts: WatchNetworkOptions): void {
+    if (!this.tabs.has(id)) throw new Error(`Unknown tab ${id}`)
+    this.pendingNetworkCapture.set(id, { ...opts })
+  }
+
+  takeArmedNetworkCapture(id: string): PendingNetworkCaptureArm | null {
+    const armed = this.pendingNetworkCapture.get(id)
+    if (!armed) return null
+    this.pendingNetworkCapture.delete(id)
+    return armed
+  }
+
+  peekArmedNetworkCapture(id: string): PendingNetworkCaptureArm | null {
+    const armed = this.pendingNetworkCapture.get(id)
+    return armed ? { ...armed } : null
+  }
+
+  async runWithPendingNetworkCapture<T>(
+    id: string,
+    action: () => Promise<T> | T
+  ): Promise<{ value: T; network: NetworkCaptureResult | null }> {
+    const armed = this.takeArmedNetworkCapture(id)
+    if (!armed) {
+      return { value: await action(), network: null }
+    }
+
+    const tab = this.tabs.get(id)
+    if (!tab) throw new Error(`Unknown tab ${id}`)
+    const dbg = tab.view.webContents.debugger
+    const filter = buildNetworkFilter(armed)
+    const recorder = createWatchNetworkRecorder({
+      filter,
+      includeRequestBody: armed.includeRequestBody,
+      redactSensitive: armed.redactSensitive,
+      maxBodies: armed.maxBodies,
+      maxBodyChars: armed.maxBodyChars,
+      getResponseBody: async (requestId) => {
+        return (await tab.cdp.send('Network.getResponseBody', { requestId })) as {
+          body: string
+          base64Encoded: boolean
+        }
+      },
+      getRequestPostData: async (requestId) => {
+        return (await tab.cdp.send('Network.getRequestPostData', { requestId })) as {
+          postData: string
+        }
+      }
+    })
+
+    const onMessage = (_e: unknown, method: string, params: any): void => {
+      recorder.onMessage(method, params)
+    }
+
+    let networkEnabled = false
+    dbg.on('message', onMessage)
+    try {
+      try {
+        await tab.cdp.send('Network.enable', {})
+        networkEnabled = true
+      } catch {
+        /* best effort — still run the action even if Network cannot be armed */
+      }
+
+      const value = await action()
+      if (!networkEnabled) return { value, network: null }
+
+      await new Promise((resolve) => setTimeout(resolve, armed.windowMs))
+      const result = await recorder.finalize()
+      return { value, network: { ...result, filter } }
+    } finally {
+      dbg.removeListener('message', onMessage)
+      if (networkEnabled) {
+        try {
+          await tab.cdp.send('Network.disable', {})
+        } catch {
+          /* best effort — detach also clears it */
+        }
       }
     }
   }

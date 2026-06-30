@@ -13,6 +13,8 @@
 import type { TabManager } from '../TabManager'
 import { isUsableTabId } from '../TabManager'
 import type { PageExtractor } from '../extract/PageExtractor'
+import type { WatchNetworkOptions } from '../network/watchNetworkRecorder'
+import type { CapturedNetworkBody, CapturedNetworkRequest, NetworkFilterSpec } from '../network/watchNetworkRecorder'
 import { briefPageForSearch } from './searchBrief'
 import { runHiddenSearch, type HiddenSearchResult } from './hiddenSearch'
 
@@ -55,6 +57,8 @@ export interface UnifiedSearchOptions {
   focus?: string
   /** Whether to navigate the active visible tab to the best hit. Default false. */
   navigateVisible?: boolean
+  /** Optional one-shot watch config armed by watch_network for the visible navigation. */
+  visibleNavigationCapture?: WatchNetworkOptions
 }
 
 export interface UnifiedSearchOutcome {
@@ -62,6 +66,12 @@ export interface UnifiedSearchOutcome {
   text: string
   results: RankedSearchResult[]
   digests: LivePageDigest[]
+  visibleNavigationNetwork?: {
+    totalSeen: number
+    captured: CapturedNetworkRequest[]
+    bodies: CapturedNetworkBody[]
+    filter?: NetworkFilterSpec
+  }
   reason?: string
 }
 
@@ -270,10 +280,19 @@ async function probeTopHits(
   digestTop: number,
   query: string,
   focus?: string,
-  navigateVisible?: boolean
-): Promise<LivePageDigest[]> {
+  navigateVisible?: boolean,
+  visibleNavigationCapture?: WatchNetworkOptions
+): Promise<{
+  digests: LivePageDigest[]
+  visibleNavigationNetwork?: {
+    totalSeen: number
+    captured: CapturedNetworkRequest[]
+    bodies: CapturedNetworkBody[]
+    filter?: NetworkFilterSpec
+  }
+}> {
   const hits = ranked.slice(0, digestTop)
-  if (hits.length === 0) return []
+  if (hits.length === 0) return { digests: [] }
 
   const perPageBudget = EVIDENCE_PER_PAGE[digestTop] ?? EVIDENCE_DEFAULT
 
@@ -289,20 +308,32 @@ async function probeTopHits(
     .map((r) => r.value)
     .sort((a, b) => b.relevanceScore - a.relevanceScore)
 
+  let visibleNavigationNetwork:
+    | {
+        totalSeen: number
+        captured: CapturedNetworkRequest[]
+        bodies: CapturedNetworkBody[]
+        filter?: NetworkFilterSpec
+      }
+    | undefined
+
   // Navigate the active visible tab to the best successfully-probed hit
   // so the user can see where the answer came from
   if (navigateVisible) {
     const bestUrl = digests[0]?.url ?? ranked[0]?.url
     if (bestUrl) {
       try {
-        await deps.tabs.navigateWithNetworkCapture(visibleTabId, bestUrl, VISIBLE_NAVIGATION_CAPTURE)
+        visibleNavigationNetwork = await deps.tabs.navigateWithNetworkCapture(visibleTabId, bestUrl, {
+          ...(visibleNavigationCapture ?? VISIBLE_NAVIGATION_CAPTURE),
+          quietWindowMs: visibleNavigationCapture?.windowMs ?? VISIBLE_NAVIGATION_CAPTURE.quietWindowMs
+        })
       } catch {
         try { deps.tabs.navigate(visibleTabId, bestUrl) } catch { /* non-fatal */ }
       }
     }
   }
 
-  return digests
+  return { digests, visibleNavigationNetwork }
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -348,12 +379,28 @@ export async function runUnifiedSearch(
   const ranked = rankSearchResults(flat, query, [])
 
   // ── Live probe pass (parallel background tabs) ────────────────────────────
-  const digests = digestTop > 0
-    ? await probeTopHits(deps, ranked, tabId, digestTop, query, options.focus, options.navigateVisible)
-    : []
+  const probeResult = digestTop > 0
+    ? await probeTopHits(
+        deps,
+        ranked,
+        tabId,
+        digestTop,
+        query,
+        options.focus,
+        options.navigateVisible,
+        options.visibleNavigationCapture
+      )
+    : { digests: [] }
+  const digests = probeResult.digests
 
   const text = formatCompactSearchOutput(query, ranked, digests)
-  return { ok: ranked.length > 0, text, results: ranked, digests }
+  return {
+    ok: ranked.length > 0,
+    text,
+    results: ranked,
+    digests,
+    visibleNavigationNetwork: probeResult.visibleNavigationNetwork
+  }
 }
 
 // ── Output formatter ──────────────────────────────────────────────────────────

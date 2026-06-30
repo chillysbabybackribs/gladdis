@@ -1,7 +1,7 @@
 import type { TabManager } from '../../TabManager'
 import type { ToolOutcome } from '../browserTools'
 import { cap, safeJson } from './toolUtils'
-import { executeGrepInTab } from './perceiveTools'
+import { executeGrepInTab, summarizeNetworkCapture } from './perceiveTools'
 import { clampInt } from './toolUtils'
 
 export interface DriveToolsDeps {
@@ -36,17 +36,22 @@ export async function runExecuteInBrowser(
   args: Record<string, any>,
   ctx: DriveToolsContext
 ): Promise<ToolOutcome> {
-  const res = await deps.tabs.executeJavaScript(ctx.tabId, String(args.code ?? ''))
-  return res.success
-    ? {
-        ok: true,
-        text: cap(safeJson(res.result)),
-        structuredContent: {
-          code: String(args.code ?? ''),
-          result: normalizeStructuredValue(res.result)
-        }
+  const { value: res, network } = await deps.tabs.runWithPendingNetworkCapture(
+    ctx.tabId,
+    () => deps.tabs.executeJavaScript(ctx.tabId, String(args.code ?? ''))
+  )
+  if (!res.success) return { ok: false, text: `Error: ${res.error}` }
+  return withOptionalNetworkCapture(
+    {
+      ok: true,
+      text: cap(safeJson(res.result)),
+      structuredContent: {
+        code: String(args.code ?? ''),
+        result: normalizeStructuredValue(res.result)
       }
-    : { ok: false, text: `Error: ${res.error}` }
+    },
+    network
+  )
 }
 
 export async function runNavigate(
@@ -61,10 +66,19 @@ export async function runNavigate(
 
   const shouldWait = args.wait === undefined ? true : !!args.wait
   const timeoutMs = clampInt(args.timeout_ms, 500, 8_000, 2_000)
-
-  deps.tabs.navigate(ctx.tabId, rawUrl)
-  if (shouldWait) {
-    await deps.tabs.waitForNavigationSettled(ctx.tabId, timeoutMs)
+  const armed = deps.tabs.takeArmedNetworkCapture(ctx.tabId)
+  let network = null
+  if (armed) {
+    network = await deps.tabs.navigateWithNetworkCapture(ctx.tabId, rawUrl, {
+      ...armed,
+      timeoutMs: shouldWait ? timeoutMs : undefined,
+      quietWindowMs: armed.windowMs
+    })
+  } else {
+    deps.tabs.navigate(ctx.tabId, rawUrl)
+    if (shouldWait) {
+      await deps.tabs.waitForNavigationSettled(ctx.tabId, timeoutMs)
+    }
   }
 
   // Free calibration signal for the model's next read: how text-heavy this page
@@ -94,19 +108,22 @@ export async function runNavigate(
             ? ' (light — broad grep_page terms are safe).'
             : '.')
 
-  return {
-    ok: true,
-    text:
-      (shouldWait
-        ? `Navigated to ${rawUrl} (waited up to ${timeoutMs}ms).`
-        : `Navigating to ${rawUrl}.`) + sizeHint,
-    structuredContent: {
-      url: rawUrl,
-      wait: shouldWait,
-      timeoutMs,
-      pageTextChars
-    }
-  }
+  return withOptionalNetworkCapture(
+    {
+      ok: true,
+      text:
+        (shouldWait
+          ? `Navigated to ${rawUrl} (waited up to ${timeoutMs}ms).`
+          : `Navigating to ${rawUrl}.`) + sizeHint,
+      structuredContent: {
+        url: rawUrl,
+        wait: shouldWait,
+        timeoutMs,
+        pageTextChars
+      }
+    },
+    network
+  )
 }
 
 export async function runClickXY(
@@ -116,8 +133,14 @@ export async function runClickXY(
 ): Promise<ToolOutcome> {
   const x = Number(args.x)
   const y = Number(args.y)
-  await dispatchClick(deps.tabs, ctx.tabId, x, y)
-  return { ok: true, text: `Clicked at (${x}, ${y}).`, structuredContent: { x, y } }
+  const { network } = await deps.tabs.runWithPendingNetworkCapture(
+    ctx.tabId,
+    () => dispatchClick(deps.tabs, ctx.tabId, x, y)
+  )
+  return withOptionalNetworkCapture(
+    { ok: true, text: `Clicked at (${x}, ${y}).`, structuredContent: { x, y } },
+    network
+  )
 }
 
 export async function runTypeText(
@@ -126,8 +149,14 @@ export async function runTypeText(
   ctx: DriveToolsContext
 ): Promise<ToolOutcome> {
   const text = String(args.text ?? '')
-  await deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
-  return { ok: true, text: `Typed ${text.length} chars.`, structuredContent: { text, charsTyped: text.length } }
+  const { network } = await deps.tabs.runWithPendingNetworkCapture(
+    ctx.tabId,
+    () => deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
+  )
+  return withOptionalNetworkCapture(
+    { ok: true, text: `Typed ${text.length} chars.`, structuredContent: { text, charsTyped: text.length } },
+    network
+  )
 }
 
 export async function runPressKey(
@@ -147,9 +176,14 @@ export async function runPressKey(
     nativeVirtualKeyCode: def.keyCode,
     ...(def.text ? { text: def.text } : {})
   }
-  await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyDown', ...common })
-  await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', ...common })
-  return { ok: true, text: `Pressed ${key}.`, structuredContent: { key } }
+  const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+    await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyDown', ...common })
+    await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', ...common })
+  })
+  return withOptionalNetworkCapture(
+    { ok: true, text: `Pressed ${key}.`, structuredContent: { key } },
+    network
+  )
 }
 
 export async function runCdpCommand(
@@ -201,13 +235,16 @@ export async function runGrepClick(
 
     const bestMatch = validMatches[0]
     const { x, y } = bestMatch.coordinates
-    await dispatchClick(deps.tabs, ctx.tabId, x, y)
+    const { network } = await deps.tabs.runWithPendingNetworkCapture(
+      ctx.tabId,
+      () => dispatchClick(deps.tabs, ctx.tabId, x, y)
+    )
 
     let matchDesc = `Matched element: <${bestMatch.tagName || 'unknown'}>`
     if (bestMatch.selector) matchDesc += ` (${bestMatch.selector})`
     if (bestMatch.matchedLine) matchDesc += ` with text "${bestMatch.matchedLine}"`
 
-    return {
+    return withOptionalNetworkCapture({
       ok: true,
       text: `grep_click successful. Found and clicked element. ${matchDesc} at coordinate (${x}, ${y}).`,
       structuredContent: {
@@ -221,7 +258,7 @@ export async function runGrepClick(
           ...(bestMatch.matchedLine ? { matchedLine: bestMatch.matchedLine } : {})
         }
       }
-    }
+    }, network)
   } catch (err: any) {
     return { ok: false, text: `grep_click error: ${err.message}` }
   }
@@ -261,16 +298,16 @@ export async function runGrepType(
     const { x, y } = bestMatch.coordinates
     
     // First click to focus the element
-    await dispatchClick(deps.tabs, ctx.tabId, x, y)
-    
-    // Then type the text
-    await deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
+    const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+      await dispatchClick(deps.tabs, ctx.tabId, x, y)
+      await deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
+    })
 
     let matchDesc = `Matched element: <${bestMatch.tagName || 'unknown'}>`
     if (bestMatch.selector) matchDesc += ` (${bestMatch.selector})`
     if (bestMatch.matchedLine) matchDesc += ` with text "${bestMatch.matchedLine}"`
 
-    return {
+    return withOptionalNetworkCapture({
       ok: true,
       text: `grep_type successful. Focused element and typed text. ${matchDesc} at coordinate (${x}, ${y}).`,
       structuredContent: {
@@ -285,9 +322,25 @@ export async function runGrepType(
           ...(bestMatch.matchedLine ? { matchedLine: bestMatch.matchedLine } : {})
         }
       }
-    }
+    }, network)
   } catch (err: any) {
     return { ok: false, text: `grep_type error: ${err.message}` }
+  }
+}
+
+function withOptionalNetworkCapture(
+  outcome: ToolOutcome,
+  network: Awaited<ReturnType<TabManager['runWithPendingNetworkCapture']>>['network']
+): ToolOutcome {
+  if (!network) return outcome
+  const summary = summarizeNetworkCapture(network, { label: 'PRE-ACTION NETWORK' })
+  return {
+    ...outcome,
+    text: `${outcome.text}\n${summary.text}`,
+    structuredContent: {
+      ...(outcome.structuredContent ?? {}),
+      preActionNetwork: summary.structuredContent
+    }
   }
 }
 

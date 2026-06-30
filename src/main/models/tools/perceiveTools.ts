@@ -2,6 +2,8 @@ import type { TabManager } from '../../TabManager'
 import type { PageExtractor } from '../../extract/PageExtractor'
 import type { ToolOutcome } from '../browserTools'
 import { digestPage } from '../PageDigest'
+import type { CapturedNetworkBody, CapturedNetworkRequest } from '../../network/watchNetworkRecorder'
+import type { NetworkFilterSpec } from '../../network/watchNetworkRecorder'
 
 export interface ReadPageCacheEntry {
   pageUrl: string
@@ -511,6 +513,47 @@ export async function runWatchNetwork(
 ): Promise<ToolOutcome> {
   try {
     const watchArgs = normalizeWatchNetworkArgs(args)
+    if (watchArgs.mode === 'next_action') {
+      deps.tabs.armNextNetworkCapture(tabId, {
+        urlFilter: watchArgs.urlFilter,
+        urlFilters: watchArgs.urlFilters,
+        urlRegex: watchArgs.urlRegex,
+        resourceTypes: watchArgs.resourceTypes,
+        statusCodes: watchArgs.statusCodes,
+        statusMin: watchArgs.statusMin,
+        statusMax: watchArgs.statusMax,
+        mimeIncludes: watchArgs.mimeIncludes,
+        includeRequestBody: watchArgs.includeRequestBody,
+        redactSensitive: watchArgs.redactSensitive,
+        windowMs: watchArgs.windowMs,
+        maxBodies: watchArgs.maxBodies,
+        maxBodyChars: watchArgs.maxBodyChars
+      })
+      return {
+        ok: true,
+        text:
+          `Armed network capture for the next browser action on this tab.` +
+          (watchArgs.filterLabel ? ` Filter: ${watchArgs.filterLabel}.` : '') +
+          ` The next browser-driving tool will start watching before it acts and include the captured traffic in its result.`,
+        structuredContent: {
+          mode: watchArgs.mode,
+          armed: true,
+          urlFilter: watchArgs.urlFilter,
+          urlFilters: watchArgs.urlFilters,
+          urlRegex: watchArgs.urlRegex,
+          resourceTypes: watchArgs.resourceTypes,
+          statusCodes: watchArgs.statusCodes,
+          statusMin: watchArgs.statusMin,
+          statusMax: watchArgs.statusMax,
+          mimeIncludes: watchArgs.mimeIncludes,
+          includeRequestBody: watchArgs.includeRequestBody,
+          redactSensitive: watchArgs.redactSensitive,
+          windowMs: watchArgs.windowMs,
+          maxBodies: watchArgs.maxBodies,
+          maxBodyChars: watchArgs.maxBodyChars
+        }
+      }
+    }
 
     const result = await deps.tabs.watchNetwork(tabId, {
       urlFilter: watchArgs.urlFilter,
@@ -537,6 +580,7 @@ export async function runWatchNetwork(
           `. The page may be idle (passive capture only sees traffic the page fires itself) — ` +
           `trigger the data load first (scroll, click, navigate) then watch again.`,
         structuredContent: {
+          mode: watchArgs.mode,
           urlFilter: watchArgs.urlFilter,
           urlFilters: watchArgs.urlFilters,
           urlRegex: watchArgs.urlRegex,
@@ -608,6 +652,7 @@ export async function runWatchNetwork(
       ok: true,
       text: output.trim(),
       structuredContent: {
+        mode: watchArgs.mode,
         urlFilter: watchArgs.urlFilter,
         urlFilters: watchArgs.urlFilters,
         urlRegex: watchArgs.urlRegex,
@@ -642,6 +687,7 @@ export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
   statusMin?: number
   statusMax?: number
   mimeIncludes?: string[]
+  mode: 'next_action' | 'passive'
   includeRequestBody: boolean
   redactSensitive: boolean
   filterLabel?: string
@@ -743,6 +789,8 @@ export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
   const statusMin = parseNumericArg(args.status_min ?? args.statusMin, args.status_min !== undefined ? 'status_min' : 'statusMin')
   const statusMax = parseNumericArg(args.status_max ?? args.statusMax, args.status_max !== undefined ? 'status_max' : 'statusMax')
   const mimeIncludes = pickArrayArg('mime_includes', 'mimeIncludes', 'string') as string[] | undefined
+  const modeRaw = pickTextArg('mode', 'mode', 40)?.toLowerCase()
+  const mode = modeRaw === 'passive' ? 'passive' : 'next_action'
   const includeRequestBody = args.include_request_body === true || args.includeRequestBody === true
   const redactSensitive = args.redact_sensitive !== false && args.redactSensitive !== false
 
@@ -771,11 +819,43 @@ export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
     statusMin,
     statusMax,
     mimeIncludes,
+    mode,
     includeRequestBody,
     redactSensitive,
     filterLabel: filterParts.length > 0 ? filterParts.join('; ') : undefined,
     windowMs: pickNumericArg('window_ms', 'windowMs', 4_000, 500, 15_000),
     maxBodies: pickNumericArg('max_bodies', 'maxBodies', 3, 1, 10),
     maxBodyChars: pickNumericArg('max_body_chars', 'maxBodyChars', 4_000, 500, 20_000)
+  }
+}
+
+export function summarizeNetworkCapture(
+  capture: {
+    totalSeen: number
+    captured: CapturedNetworkRequest[]
+    bodies: CapturedNetworkBody[]
+    filter?: NetworkFilterSpec
+  },
+  opts?: { label?: string }
+): { text: string; structuredContent: Record<string, unknown> } {
+  const label = opts?.label ?? 'NETWORK CAPTURE'
+  const bodyWord = capture.bodies.length === 1 ? 'body' : 'bodies'
+  const summary = `${label}: ${capture.totalSeen} request(s), ${capture.captured.length} matched, ${capture.bodies.length} ${bodyWord} captured`
+  const endpointLines = capture.captured
+    .slice(0, 5)
+    .map((item) => `  [${item.status}] ${item.method} ${item.type} ${item.url}`)
+  const bodyLines = capture.bodies
+    .slice(0, 2)
+    .map((body) => `  body: ${body.url}${body.truncated ? ' [truncated]' : ''}`)
+  return {
+    text: [summary, ...endpointLines, ...bodyLines].join('\n'),
+    structuredContent: {
+      totalSeen: capture.totalSeen,
+      capturedCount: capture.captured.length,
+      bodyCount: capture.bodies.length,
+      filter: capture.filter,
+      captured: capture.captured,
+      bodies: capture.bodies
+    }
   }
 }

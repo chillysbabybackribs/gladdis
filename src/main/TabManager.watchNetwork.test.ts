@@ -256,6 +256,38 @@ describe('TabManager.watchNetwork sequencing', () => {
     expect(result.filter).toEqual(expect.objectContaining({ resourceTypes: ['fetch'] }))
   })
 
+  it('arms the next browser action before it runs and captures its traffic', async () => {
+    const timeline: string[] = []
+    const { manager, debuggerInstance, sentCommands } = createHarness({
+      onCommand: (method) => timeline.push(`cmd:${method}`)
+    })
+
+    manager.armNextNetworkCapture('tab-1', {
+      resourceTypes: ['fetch'],
+      windowMs: 0,
+      maxBodies: 1,
+      maxBodyChars: 1000
+    })
+
+    const capturePromise = manager.runWithPendingNetworkCapture('tab-1', async () => {
+      timeline.push('action:start')
+      emitRequestLifecycle(debuggerInstance, {
+        requestId: 'req-armed',
+        url: 'https://example.com/api/armed'
+      })
+      timeline.push('action:end')
+      return 'ok'
+    })
+
+    const result = await capturePromise
+
+    expect(result.value).toBe('ok')
+    expect(timeline.slice(0, 3)).toEqual(['cmd:Network.enable', 'action:start', 'action:end'])
+    expect(sentCommands.at(-1)?.method).toBe('Network.disable')
+    expect(result.network).not.toBeNull()
+    expect(manager.peekArmedNetworkCapture('tab-1')).toBeNull()
+  })
+
   it('captures and redacts request post data when enabled', async () => {
     const { manager, debuggerInstance, getRequestPostDataCalls } = createHarness()
 

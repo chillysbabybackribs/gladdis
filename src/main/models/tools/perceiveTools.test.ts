@@ -12,6 +12,7 @@ describe('normalizeWatchNetworkArgs', () => {
       statusMin: undefined,
       statusMax: undefined,
       mimeIncludes: undefined,
+      mode: 'next_action',
       includeRequestBody: false,
       redactSensitive: true,
       filterLabel: undefined,
@@ -47,6 +48,7 @@ describe('normalizeWatchNetworkArgs', () => {
       statusMin: 200,
       statusMax: 299,
       mimeIncludes: ['json', 'javascript'],
+      mode: 'next_action',
       includeRequestBody: true,
       redactSensitive: false,
       filterLabel: 'url~/graph(q|ql)/i; types:fetch,xhr; statuses:200,204; status>=200; status<=299; mime:json,javascript',
@@ -69,6 +71,7 @@ describe('normalizeWatchNetworkArgs', () => {
       statusMin: undefined,
       statusMax: undefined,
       mimeIncludes: undefined,
+      mode: 'next_action',
       includeRequestBody: false,
       redactSensitive: true,
       filterLabel: undefined,
@@ -127,7 +130,60 @@ describe('normalizeWatchNetworkArgs', () => {
 describe('runWatchNetwork', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it('passes normalized args through to TabManager.watchNetwork', async () => {
+  it('arms the next browser action by default', async () => {
+    const armNextNetworkCapture = vi.fn()
+    const watchNetwork = vi.fn(async () => ({
+      totalSeen: 0,
+      captured: [],
+      bodies: []
+    }))
+    const outcome = await runWatchNetwork({
+      tabs: { watchNetwork, armNextNetworkCapture } as any,
+      extractor: {} as any,
+      pageCache: new Map(),
+      pageCacheLimit: 0,
+      pageCacheTtlMs: 0,
+      appCapture: null,
+      getPageCacheStats: () => ({ hits: 0, misses: 0, expired: 0, evictions: 0, size: 0, limit: 0, ttlMs: 0 }),
+      recordPageCacheEvent: () => {
+        // no-op
+      }
+    },
+    {
+      url_filter: '/api/',
+      window_ms: 7_000,
+      max_bodies: 2,
+      max_body_chars: 9000
+    },
+    'tab-1'
+    )
+
+    expect(armNextNetworkCapture).toHaveBeenCalledWith('tab-1', {
+      urlFilter: '/api/',
+      urlFilters: undefined,
+      urlRegex: undefined,
+      resourceTypes: undefined,
+      statusCodes: undefined,
+      statusMin: undefined,
+      statusMax: undefined,
+      mimeIncludes: undefined,
+      includeRequestBody: false,
+      redactSensitive: true,
+      windowMs: 7_000,
+      maxBodies: 2,
+      maxBodyChars: 9_000
+    })
+    expect(watchNetwork).not.toHaveBeenCalled()
+    expect(outcome.ok).toBe(true)
+    expect(outcome.structuredContent).toMatchObject({
+      mode: 'next_action',
+      armed: true,
+      urlFilter: '/api/',
+      windowMs: 7_000
+    })
+  })
+
+  it('passes normalized args through to TabManager.watchNetwork in passive mode', async () => {
     const watchNetwork = vi.fn(async () => ({
       totalSeen: 1,
       captured: [
@@ -146,7 +202,7 @@ describe('runWatchNetwork', () => {
       bodies: []
     }))
     const outcome = await runWatchNetwork({
-      tabs: { watchNetwork } as any,
+      tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any,
       extractor: {} as any,
       pageCache: new Map(),
       pageCacheLimit: 0,
@@ -158,6 +214,7 @@ describe('runWatchNetwork', () => {
       }
     },
     {
+      mode: 'passive',
       url_filter: '/api/',
       url_filters: ['graphql', 'search'],
       url_regex: 'items',
@@ -192,6 +249,7 @@ describe('runWatchNetwork', () => {
     })
     expect(outcome.ok).toBe(true)
     expect(outcome.structuredContent).toMatchObject({
+      mode: 'passive',
       urlFilter: '/api/',
       urlFilters: ['graphql', 'search'],
       urlRegex: 'items',
@@ -217,7 +275,7 @@ describe('runWatchNetwork', () => {
 
     const outcome = await runWatchNetwork(
       {
-        tabs: { watchNetwork } as any,
+        tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any,
         extractor: {} as any,
         pageCache: new Map(),
         pageCacheLimit: 0,
@@ -228,7 +286,7 @@ describe('runWatchNetwork', () => {
           // no-op
         }
       },
-      {},
+      { mode: 'passive' },
       'tab-1'
     )
 
@@ -241,7 +299,7 @@ describe('runWatchNetwork', () => {
 
     const outcome = await runWatchNetwork(
       {
-        tabs: { watchNetwork } as any,
+        tabs: { watchNetwork, armNextNetworkCapture: vi.fn() } as any,
         extractor: {} as any,
         pageCache: new Map(),
         pageCacheLimit: 0,

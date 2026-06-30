@@ -1568,18 +1568,6 @@ main {
 
   .hero-title,
   .hero-subtitle {
-    white-space: normal;
-  }
-
-  .hero-title {
-    margin: 0 auto;
-    max-width: 9ch;
-    font-size: clamp(2rem, 10vw, 2.5rem);
-    line-height: 0.94;
-    text-wrap: balance;
-  }
-
-  .hero-subtitle {
     display: none;
   }
 

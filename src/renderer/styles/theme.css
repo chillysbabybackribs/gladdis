@@ -55,6 +55,10 @@ body,
   overflow: hidden;
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   font-family: var(--font-ui);
   font-size: 14px;

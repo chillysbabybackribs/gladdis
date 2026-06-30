@@ -248,7 +248,7 @@ export function buildNetworkFilter(opts: Omit<WatchNetworkOptions, 'windowMs' | 
   }
 }
 
-export function matchesNetworkFilter(url: string, filter?: NetworkFilterSpec): boolean {
+function matchesNetworkFilter(url: string, filter?: NetworkFilterSpec): boolean {
   if (!filter) return true
   const value = String(url ?? '')
   const lower = value.toLowerCase()

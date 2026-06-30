@@ -17,7 +17,7 @@ import { buildAgentSystem } from './prompts'
 import { isBareContinuation } from '../../../shared/types'
 import type { Provider } from '../../../shared/types'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
-import type { LlmComplete } from '../pipeline/Planner'
+import type { LlmComplete } from './llm'
 
 export class AgentConfigurationService {
   constructor(

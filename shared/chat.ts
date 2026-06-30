@@ -13,7 +13,7 @@ const ACTIVE_PAGE_CONTEXT_RE =
   /\b(?:this|current|active|visible|open|loaded)\s+(?:page|tab|site|website|webpage|url)\b|\b(?:on|in)\s+(?:this|the|current|active)\s+(?:page|tab|site|website|webpage)\b/i
 
 const ACTIVE_PAGE_ACTION_RE =
-  /\b(?:click|type into|press|scroll|screenshot|read_page|browse_task|reload|go back|go forward)\b/i
+  /\b(?:click|type into|press|scroll|screenshot|read_page|reload|go back|go forward)\b/i
 
 const ACTIVE_PAGE_FOLLOWUP_RE =
   /^\s*(?:yes|yeah|yep|ok(?:ay)?|sure|please|do that|go ahead|continue|same|also\b|and\b|then\b|what about\b|how about\b|for (?:that|this|those|these|it|them)\b|(?:that|this|those|these|it|them)\b|the (?:links?|buttons?|images?|results?|article|page|site|form|menu|header|footer)\b)/i

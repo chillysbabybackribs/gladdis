@@ -343,7 +343,7 @@ async function attachBounds(
   }
 }
 
-export async function captureAxSnapshot(
+async function captureAxSnapshot(
   send: CdpSend,
   meta: { url: string; title: string },
   opts: AxCaptureOptions = {}

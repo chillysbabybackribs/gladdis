@@ -30,7 +30,7 @@ type CreateClaudeCodeBridgeSession = (args: {
   requestId: string | null
 }) => Promise<ClaudeCodeBridgeRegistration>
 
-export function probeClaudeCodeBinary(): Promise<{ installed: boolean; version: string | null }> {
+function probeClaudeCodeBinary(): Promise<{ installed: boolean; version: string | null }> {
   const now = Date.now()
   if (cachedProbe && now - lastProbeTime < PROBE_CACHE_TTL_MS) return Promise.resolve(cachedProbe)
   if (activeProbe) return activeProbe

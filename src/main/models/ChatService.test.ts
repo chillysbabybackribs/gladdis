@@ -200,7 +200,7 @@ describe('ChatService provider hardening', () => {
     const browserProfile = selectAgentToolProfile('click the login button on the active page')
     expect(browserProfile.name).toBe('browser')
     expect(browserProfile.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(['read_page', 'read_a11y', 'click_xy', 'browse_task'])
+      expect.arrayContaining(['read_page', 'read_a11y', 'click_xy'])
     )
     expect(browserProfile.tools.map((tool) => tool.name)).not.toContain('write_file')
 
@@ -1452,7 +1452,7 @@ describe('ChatService provider hardening', () => {
     )
   })
 
-  it('runs browse_task/search on the user\'s picked model — no silent gemini substitution', () => {
+  it('runs nested LLM tool calls on the user\'s picked model — no silent gemini substitution', () => {
     const { service } = makeService()
     const completed: string[] = []
     vi.spyOn(service as any, 'complete').mockImplementation((async (modelId: string) => {
@@ -1460,7 +1460,7 @@ describe('ChatService provider hardening', () => {
       return 'ok'
     }) as any)
 
-    // browserPipelineLlm must hand back the requested model, for every provider.
+    // The agentic-turn LLM must hand back the requested model, for every provider.
     for (const id of ['claude-opus-4-8', 'gemini-3.1-pro', 'gpt-5.5']) {
       const { model, llm } = (service as any).browserPipelineLlm({ id, label: id, provider: 'x' })
       expect(model.id).toBe(id)

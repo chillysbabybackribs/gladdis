@@ -76,7 +76,7 @@ export async function runVerifyStage(
   return { verifications, rawResponse: raw, skipped: false }
 }
 
-export function sampleForVerification(
+function sampleForVerification(
   decisions: ReconcileDecision[],
   entries: MemoryEntry[],
   size: number,

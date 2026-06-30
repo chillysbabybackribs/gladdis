@@ -91,7 +91,7 @@ async function getOrCreateGeminiCache(args: {
 
   return undefined
 }
-import type { LlmComplete } from '../../pipeline/Planner'
+import type { LlmComplete } from '../llm'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
 import { resolveTurnTools } from '../agentTools'
 

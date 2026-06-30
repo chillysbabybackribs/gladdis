@@ -21,7 +21,7 @@ import type { BrowserTools } from '../browserTools'
 export interface ActiveTurn {
   requestId: string
   conversationId: string | null
-  /** The Codex model driving this turn — also used to plan any browse_task it invokes. */
+  /** The Codex model driving this turn — also used to plan any nested LLM work it invokes. */
   modelId: string
   threadId: string | null
   turnId: string | null
@@ -70,7 +70,7 @@ export interface ServerRequestContext {
   server: () => CodexAppServer | null
   turnForThread: (threadId: string | undefined) => ActiveTurn | undefined
   browserTools: BrowserTools
-  /** Re-runs a Codex turn with the active turn's model — used for browse_task planning. */
+  /** Re-runs a Codex turn with the active turn's model — used for nested LLM tool calls. */
   completeWithModel: (modelId: string, system: string, user: string) => Promise<string>
 }
 
@@ -322,8 +322,8 @@ async function respondToBrowserTool(msg: ServerRequest, ctx: ServerRequestContex
     msg,
     respond: (id, result) => server.respond(id, result),
     tools: ctx.browserTools,
-    // browse_task / pipeline planning runs on the SAME Codex model driving
-    // this turn — the user's picked model does the work, no substitution.
+    // Nested LLM tool calls run on the SAME Codex model driving this turn —
+    // the user's picked model does the work, no substitution.
     llm: turn ? (system, user) => ctx.completeWithModel(turn.modelId, system, user) : null,
     conversationId: turn?.conversationId ?? null,
     requestId: turn && !turn.silent ? turn.requestId : undefined,

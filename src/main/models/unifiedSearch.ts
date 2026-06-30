@@ -91,7 +91,7 @@ const EVIDENCE_DEFAULT = 1_200
  * Prefers {@link TabManager.liveTabId} when available; otherwise applies the
  * same {@link isUsableTabId} guard inline (so duck-typed mocks still work).
  */
-export function resolveVisibleTabId(tabs: TabManager, requested?: string): string {
+function resolveVisibleTabId(tabs: TabManager, requested?: string): string {
   if (typeof tabs.liveTabId === 'function') return tabs.liveTabId(requested)
   const validIds = tabs
     .list()

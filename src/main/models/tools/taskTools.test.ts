@@ -19,8 +19,6 @@ describe('runAuditCodebase', () => {
       .mockResolvedValue('# Audit report from fallback goal')
 
     const deps: TaskToolsDeps = {
-      tabs: {} as any,
-      extractor: {} as any,
       files: {} as any,
       keys: { get: vi.fn().mockReturnValue('test-google-key') } as any,
       capabilityBroker: null,
@@ -50,8 +48,6 @@ describe('runAuditCodebase', () => {
       .mockResolvedValue('# Audit report from explicit goal')
 
     const deps: TaskToolsDeps = {
-      tabs: {} as any,
-      extractor: {} as any,
       files: {} as any,
       keys: { get: vi.fn().mockReturnValue('test-google-key') } as any,
       capabilityBroker: null,

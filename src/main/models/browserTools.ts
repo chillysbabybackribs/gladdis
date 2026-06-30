@@ -3,8 +3,8 @@ import type { PageExtractor } from '../extract/PageExtractor'
 import type { ChatStore } from './ChatStore'
 import { FileTools } from '../fs/FileTools'
 import { AGENT_TOOLS } from './agentTools'
-import type { LlmComplete } from '../pipeline/Planner'
-import type { PipelineProgressEvent } from '../pipeline/Runner'
+import type { LlmComplete } from './llm'
+import type { PipelineProgressStep } from '../../../shared/chat'
 import { KeyStore } from './KeyStore'
 import type { CapabilityBroker } from './capabilities/CapabilityBroker'
 import type { AxSnapshotNode } from '../extract/axTree'
@@ -53,7 +53,6 @@ import { runShellCommand } from './tools/shellTools'
 import { runLaunchWebDevServer } from './tools/devServerTool'
 import {
   runAuditCodebase,
-  runBrowseTask,
   runPublishChanges,
   runValidation
 } from './tools/taskTools'
@@ -91,7 +90,7 @@ export interface ToolContext {
   iteration?: number
   fullResults?: Map<string, string>
   llm?: LlmComplete
-  onProgress?: (event: PipelineProgressEvent) => void
+  onProgress?: (event: PipelineProgressStep) => void
   /**
    * Tools the model has pulled in this turn via request_tools, on top of the
    * lean starting profile. The provider loop rebuilds its tool list from
@@ -335,8 +334,6 @@ export class BrowserTools {
 
   private taskDeps() {
     return {
-      tabs: this.tabs,
-      extractor: this.extractor,
       files: this.files,
       keys: this.keys,
       capabilityBroker: this.capabilityBroker,
@@ -390,9 +387,7 @@ export class BrowserTools {
         case 'verify_change':
           return runVerifyChange(this.repoCapabilityDeps(), args, ctx)
 
-        // ── Task / pipeline ─────────────────────────────────────────────────
-        case 'browse_task':
-          return runBrowseTask(this.taskDeps(), args, ctx)
+        // ── Task ─────────────────────────────────────────────────────────────
         case 'audit_codebase':
           return runAuditCodebase(this.taskDeps(), args, ctx)
 

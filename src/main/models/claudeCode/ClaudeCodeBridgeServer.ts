@@ -10,7 +10,7 @@ import {
   ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js'
 import type { BrowserTools, ToolContext, ToolOutcome } from '../browserTools'
-import type { LlmComplete } from '../../pipeline/Planner'
+import type { LlmComplete } from '../llm'
 import type { ChatStreamEvent } from '../../../../shared/types'
 import {
   CLAUDE_CODE_BROWSER_TOOL_NAMES,
@@ -44,7 +44,7 @@ interface ActiveTransport {
 
 const MCP_PATH = '/mcp'
 const GUARDRAIL_GUIDANCE =
-  'Use the Gladdis MCP tools for browser work: search, fetch_page, navigate, browse_task, read_page, read_a11y, watch_network, ' +
+  'Use the Gladdis MCP tools for browser work: search, fetch_page, navigate, read_page, read_a11y, watch_network, ' +
   'grep_page, grep_click, grep_type, screenshot, or screenshot_app. ' +
   'Never use native shell/CLI browser commands (google-chrome, chromium, playwright, puppeteer, xdg-open on URLs, ' +
   'curl/wget against localhost:9222) - they bypass Gladdis and the user cannot see them.'

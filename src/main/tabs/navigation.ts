@@ -43,7 +43,7 @@ export function ensureNavigableUrl(input: string): string {
   )
 }
 
-export function isLikelyHostname(value: string): boolean {
+function isLikelyHostname(value: string): boolean {
   if (/\s/.test(value)) return false
   if (value === 'localhost') return true
   if (/^localhost:\d+$/i.test(value)) return true

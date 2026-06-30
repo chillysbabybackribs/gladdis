@@ -247,7 +247,11 @@ describe('BrowserTools', () => {
 
   it('formats undefined execute_in_browser results without failing the tool call', async () => {
     const tools = new BrowserTools({
-      executeJavaScript: vi.fn(async () => ({ success: true, result: undefined }))
+      executeJavaScript: vi.fn(async () => ({ success: true, result: undefined })),
+      runWithPendingNetworkCapture: vi.fn(async (_tabId: string, fn: () => Promise<any>) => ({
+        value: await fn(),
+        network: null
+      }))
     } as any, {} as any, {} as any)
 
     const result = await tools.run('execute_in_browser', { code: '"test"' }, { tabId: 'tab-1' })
@@ -351,7 +355,7 @@ describe('BrowserTools', () => {
 
     expect(result.ok).toBe(true)
     expect(result.text).toContain('showing lines 1-120 of 260; default window')
-    expect(result.text).toContain('Use search_files to locate relevant symbols')
+    expect(result.text).toContain('Prefer search_repo/search_files or read_spans before reading more.')
     expect(result.text).toContain('"start_line":121')
     expect(result.text).toContain('line 120')
     expect(result.text).not.toContain('line 121')
@@ -1071,7 +1075,11 @@ describe('BrowserTools', () => {
       ]
     }))
     const cdpSend = vi.fn(async () => ({}))
-    const tools = new BrowserTools({ executeJavaScript, cdpSend } as any, {} as any, {} as any)
+    const runWithPendingNetworkCapture = vi.fn(async (_tabId: string, fn: () => Promise<any>) => {
+      await fn()
+      return { network: null }
+    })
+    const tools = new BrowserTools({ executeJavaScript, cdpSend, runWithPendingNetworkCapture } as any, {} as any, {} as any)
 
     const result = await tools.run(
       'grep_click',
@@ -1104,7 +1112,11 @@ describe('BrowserTools', () => {
       ]
     }))
     const cdpSend = vi.fn(async () => ({}))
-    const tools = new BrowserTools({ executeJavaScript, cdpSend } as any, {} as any, {} as any)
+    const runWithPendingNetworkCapture = vi.fn(async (_tabId: string, fn: () => Promise<any>) => {
+      await fn()
+      return { network: null }
+    })
+    const tools = new BrowserTools({ executeJavaScript, cdpSend, runWithPendingNetworkCapture } as any, {} as any, {} as any)
 
     const result = await tools.run(
       'grep_type',

@@ -20,10 +20,8 @@ function hostInitial(t: TabInfo): string {
 }
 
 export function TabStrip({ tabs, activeId, onSwitch, onClose, onNew, onReorder }: Props) {
-  // Index of the tab being dragged, and the slot it's hovering over.
   const [dragId, setDragId] = useState<string | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
-  // Track favicons that failed to load so we fall back to the letter glyph.
   const [brokenFav, setBrokenFav] = useState<Set<string>>(new Set())
   const stripRef = useRef<HTMLDivElement>(null)
 

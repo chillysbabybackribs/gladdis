@@ -7,7 +7,6 @@ const TOOL_LABEL: Record<string, string> = {
   shell: 'Running shell',
   search: 'Searching',
   fetch_page: 'Opening page',
-  browse_task: 'Running task',
   read_page: 'Reading page',
   navigate: 'Navigating',
   screenshot_confirmation: 'Confirming screenshot',
@@ -33,7 +32,6 @@ const TOOL_VERB: Record<string, [string, string]> = {
   shell: ['Running shell', 'Ran shell'],
   search: ['Searching the web for', 'Searched the web for'],
   fetch_page: ['Opening', 'Opened'],
-  browse_task: ['Running task', 'Ran task'],
   read_page: ['Reading the page', 'Read the page'],
   navigate: ['Navigating to', 'Navigated to'],
   screenshot_confirmation: ['Confirming', 'Confirmed'],
@@ -110,8 +108,6 @@ function toolSentence(tool: ToolActivity): string {
   } else if (name === 'write_clipboard') {
     const text = String(a.text ?? '')
     object = text.trim() ? `“${text.slice(0, 60)}”` : '(empty text)'
-  } else if (name === 'browse_task') {
-    object = a.task ? String(a.task).slice(0, 60) : ''
   }
 
   const sentence = object ? `${verb} ${object}` : verb

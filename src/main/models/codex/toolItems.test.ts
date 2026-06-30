@@ -6,7 +6,7 @@ describe('codex tool items', () => {
     // A gladdis browser tool: chipped by respondToCodexBrowserToolCall, so the
     // generic item-lifecycle path must skip it.
     expect(
-      isGladdisDynamicToolCall({ type: 'dynamicToolCall', id: '1', namespace: 'gladdis', tool: 'browse_task' } as any)
+      isGladdisDynamicToolCall({ type: 'dynamicToolCall', id: '1', namespace: 'gladdis', tool: 'read_page' } as any)
     ).toBe(true)
   })
 
@@ -19,6 +19,6 @@ describe('codex tool items', () => {
   })
 
   it('names dynamic tool calls by their tool field', () => {
-    expect(codexToolName({ type: 'dynamicToolCall', id: '5', tool: 'browse_task' } as any)).toBe('browse_task')
+    expect(codexToolName({ type: 'dynamicToolCall', id: '5', tool: 'read_page' } as any)).toBe('read_page')
   })
 })

@@ -25,7 +25,7 @@ interface RunningServer {
 }
 
 // Global registry of running dev servers to persist across tool calls
-export const activeServers = new Map<string, RunningServer>()
+const activeServers = new Map<string, RunningServer>()
 
 // Cleanup all active processes on main process exit
 process.on('exit', () => {

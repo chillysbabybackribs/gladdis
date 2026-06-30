@@ -13,8 +13,15 @@ export const IPC = {
   TAB_REORDER: 'tab:reorder',
   TAB_LIST: 'tab:list',
   APP_COMMAND: 'app:command',
+  /** Renderer-initiated app command (menu clicks) — main forwards to APP_COMMAND listeners. */
+  APP_DISPATCH: 'app:dispatch',
+  /** Invoke a native edit/view/window role on the focused WebContents or shell window. */
+  MENU_INVOKE_ROLE: 'menu:invokeRole',
+  WORKSPACE_PROMPT_NEW_FOLDER: 'workspace:promptNewFolder',
   LAYOUT_SET_BOUNDS: 'layout:setBounds',
   LAYOUT_SET_BROWSER_VISIBLE: 'layout:setBrowserVisible',
+  /** Renderer finished first paint — main may reveal the window. */
+  SHELL_READY: 'shell:ready',
   CDP_SEND: 'cdp:send',
   CHAT_SEND: 'chat:send',
   CHAT_INTERJECT: 'chat:interject',
@@ -87,5 +94,15 @@ export const IPC = {
   AGENTS_UPDATED: 'agents:updated',
   AUDIT_EVENT: 'audit:event',
   TERMINAL_DATA: 'terminal:data',
-  TERMINAL_EXIT: 'terminal:exit'
+  TERMINAL_EXIT: 'terminal:exit',
+  // Window controls (frameless titlebar)
+  WIN_MINIMIZE: 'win:minimize',
+  WIN_MAXIMIZE: 'win:maximize',
+  WIN_CLOSE: 'win:close',
+  WIN_IS_MAXIMIZED: 'win:isMaximized',
+  WIN_MAXIMIZED_CHANGED: 'win:maximizedChanged',
+  WIN_IS_FULLSCREEN: 'win:isFullScreen',
+  WIN_FULLSCREEN_CHANGED: 'win:fullScreenChanged',
+  /** main → renderer: re-measure browser slot after chrome geometry changes. */
+  WIN_LAYOUT_REFRESH: 'win:layoutRefresh'
 } as const

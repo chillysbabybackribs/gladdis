@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   IPC,
   type AppCommand,
+  type AppMenuPlatform,
   type CdpCommand,
   type CdpEventPayload,
   type ChatPanelSide,
@@ -50,7 +51,16 @@ const api: GladdisApi = {
   layout: {
     setBounds: (bounds: ViewBounds) => ipcRenderer.send(IPC.LAYOUT_SET_BOUNDS, bounds),
     setBrowserVisible: (visible: boolean) =>
-      ipcRenderer.send(IPC.LAYOUT_SET_BROWSER_VISIBLE, visible)
+      ipcRenderer.send(IPC.LAYOUT_SET_BROWSER_VISIBLE, visible),
+    onRefresh: (cb: () => void) => {
+      const listener = () => cb()
+      ipcRenderer.on(IPC.WIN_LAYOUT_REFRESH, listener)
+      return () => ipcRenderer.removeListener(IPC.WIN_LAYOUT_REFRESH, listener)
+    }
+  },
+  shell: {
+    ready: () => ipcRenderer.send(IPC.SHELL_READY),
+    platform: () => Promise.resolve(process.platform as AppMenuPlatform)
   },
   app: {
     capture: () => ipcRenderer.invoke(IPC.APP_CAPTURE),
@@ -58,7 +68,11 @@ const api: GladdisApi = {
       const listener = (_e: unknown, command: AppCommand) => cb(command)
       ipcRenderer.on(IPC.APP_COMMAND, listener)
       return () => ipcRenderer.removeListener(IPC.APP_COMMAND, listener)
-    }
+    },
+    dispatch: (command: AppCommand) => ipcRenderer.send(IPC.APP_DISPATCH, command)
+  },
+  menu: {
+    invokeRole: (role) => ipcRenderer.send(IPC.MENU_INVOKE_ROLE, role)
   },
   cdp: {
     send: (cmd: CdpCommand) => ipcRenderer.invoke(IPC.CDP_SEND, cmd),
@@ -110,6 +124,7 @@ const api: GladdisApi = {
     setFolder: (folder: string | null) => ipcRenderer.invoke(IPC.WORKSPACE_SET_FOLDER, folder),
     pickFolder: () => ipcRenderer.invoke(IPC.WORKSPACE_PICK_FOLDER),
     createFolder: (folder: string) => ipcRenderer.invoke(IPC.WORKSPACE_CREATE_FOLDER, folder),
+    promptNewFolder: () => ipcRenderer.invoke(IPC.WORKSPACE_PROMPT_NEW_FOLDER),
     onUpdated: (cb) => {
       const listener = (_e: unknown, workspace: Awaited<ReturnType<GladdisApi['workspace']['get']>>) =>
         cb(workspace)
@@ -185,6 +200,23 @@ const api: GladdisApi = {
     history: {
       list: (workspaceRoot: string) =>
         ipcRenderer.invoke(IPC.DREAM_HISTORY_LIST, workspaceRoot)
+    }
+  },
+  win: {
+    minimize: () => ipcRenderer.send(IPC.WIN_MINIMIZE),
+    toggleMaximize: () => ipcRenderer.send(IPC.WIN_MAXIMIZE),
+    close: () => ipcRenderer.send(IPC.WIN_CLOSE),
+    isMaximized: () => ipcRenderer.invoke(IPC.WIN_IS_MAXIMIZED),
+    onMaximizedChanged: (cb: (maximized: boolean) => void) => {
+      const listener = (_e: unknown, maximized: boolean) => cb(maximized)
+      ipcRenderer.on(IPC.WIN_MAXIMIZED_CHANGED, listener)
+      return () => ipcRenderer.removeListener(IPC.WIN_MAXIMIZED_CHANGED, listener)
+    },
+    isFullScreen: () => ipcRenderer.invoke(IPC.WIN_IS_FULLSCREEN),
+    onFullScreenChanged: (cb: (fullScreen: boolean) => void) => {
+      const listener = (_e: unknown, fullScreen: boolean) => cb(fullScreen)
+      ipcRenderer.on(IPC.WIN_FULLSCREEN_CHANGED, listener)
+      return () => ipcRenderer.removeListener(IPC.WIN_FULLSCREEN_CHANGED, listener)
     }
   },
   terminal: {

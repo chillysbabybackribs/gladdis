@@ -9,7 +9,7 @@ import type { BrowserTools, ToolContext } from './browserTools'
 import type { AgentConfigurationService } from './AgentConfigurationService'
 import type { ModelCallLedger } from './ModelCallLedger'
 import type { ChatStreamEvent } from '../../../shared/types'
-import type { LlmComplete } from '../pipeline/Planner'
+import type { LlmComplete } from './llm'
 
 export const VERBATIM_TOOL_RESULTS = 4
 

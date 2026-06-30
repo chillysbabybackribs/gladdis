@@ -2,10 +2,58 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="color-scheme" content="dark" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' blob: data:;" />
-    <title>gladdis</title>
+    <title></title>
+    <style>
+      /* Critical path — paints before bundled CSS/JS so launch never flashes white. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #181818;
+        color-scheme: dark;
+      }
+      #root {
+        height: 100%;
+        opacity: 0;
+        transition: opacity 0.18s ease;
+      }
+      #root.shell-ready {
+        opacity: 1;
+      }
+      #shell-boot {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: grid;
+        place-items: center;
+        background: #181818;
+        transition: opacity 0.22s ease;
+      }
+      #shell-boot.shell-boot--hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .shell-boot-spinner {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 2.5px solid rgba(255, 255, 255, 0.1);
+        border-top-color: #4493f8;
+        animation: shell-boot-spin 0.75s linear infinite;
+      }
+      @keyframes shell-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
   </head>
   <body>
+    <div id="shell-boot" aria-hidden="true">
+      <div class="shell-boot-spinner"></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/main.tsx"></script>
   </body>

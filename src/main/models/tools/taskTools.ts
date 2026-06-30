@@ -1,17 +1,12 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { GoogleGenAI } from '@google/genai'
-import type { TabManager } from '../../TabManager'
-import type { PageExtractor } from '../../extract/PageExtractor'
 import type { FileTools } from '../../fs/FileTools'
 import type { KeyStore } from '../KeyStore'
 import type { ToolContext, ToolOutcome } from '../browserTools'
 import { CodebaseAuditor } from '../CodebaseAuditor'
 import type { CapabilityBroker } from '../capabilities/CapabilityBroker'
-import { orchestrate } from '../../pipeline/orchestrate'
-import { generatePipelineFinalResponse } from '../../pipeline/finalResponse'
 import { cap } from './toolUtils'
-import { summarizeNetworkCapture } from './perceiveTools'
 
 const execFileAsync = promisify(execFile)
 
@@ -24,73 +19,13 @@ const VALIDATION_COMMANDS = {
   check: ['npm', ['run', 'check']]
 } as const
 
-export type LegacyValidationCheck = keyof typeof VALIDATION_COMMANDS
+type LegacyValidationCheck = keyof typeof VALIDATION_COMMANDS
 
 export interface TaskToolsDeps {
-  tabs: TabManager
-  extractor: PageExtractor
   files: FileTools
   keys?: KeyStore
   capabilityBroker?: CapabilityBroker | null
   getWorkspaceRoot: () => string | null
-}
-
-/**
- * Multi-step browser task. Hands off to the deterministic Planner+Runner
- * pipeline, then asks the model to write the final answer from the captured
- * trajectory. Requires a wired LLM in {@link ToolContext}.
- */
-export async function runBrowseTask(
-  deps: TaskToolsDeps,
-  args: Record<string, any>,
-  ctx: ToolContext
-): Promise<ToolOutcome> {
-  const task = String(args.task ?? '').trim()
-  if (!task) return { ok: false, text: 'browse_task: "task" is required.' }
-  const llm = ctx.llm
-  if (!llm) return { ok: false, text: 'browse_task: LLM not wired for this request.' }
-  const site = args.site ? String(args.site) : undefined
-  const pipelineDeps = {
-    cdpSend: (id: string, m: string, p?: Record<string, unknown>) => deps.tabs.cdpSend(id, m, p),
-    capture: (id: string) => deps.extractor.run(id),
-    runWithPendingNetworkCapture: <T>(id: string, action: () => Promise<T> | T) =>
-      deps.tabs.runWithPendingNetworkCapture(id, action)
-  }
-  const trajectory = await orchestrate({
-    tabId: ctx.tabId,
-    task,
-    site,
-    deps: pipelineDeps,
-    llm,
-    onProgress: ctx.onProgress,
-    onLog: (msg) => console.log(msg)
-  })
-  const finalCapture = await deps.extractor.run(ctx.tabId)
-  const answer = await generatePipelineFinalResponse({
-    task,
-    trajectory,
-    finalCapture,
-    llm
-  })
-  const preActionNetworkSummary = trajectory.preActionNetwork
-    ? summarizeNetworkCapture(trajectory.preActionNetwork, { label: 'PRE-ACTION NETWORK' })
-    : null
-  return {
-    ok: true,
-    text: preActionNetworkSummary ? `${answer}\n${preActionNetworkSummary.text}` : answer,
-    structuredContent: {
-      task,
-      ...(site ? { site } : {}),
-      success: trajectory.success,
-      tookMs: trajectory.tookMs,
-      llmCalls: trajectory.llmCalls,
-      deterministicChecks: trajectory.deterministicChecks,
-      finalUrl: finalCapture.url,
-      finalTitle: finalCapture.content?.title ?? '',
-      steps: trajectory.steps.map((step) => ({ intent: step.step.intent })),
-      ...(preActionNetworkSummary ? { preActionNetwork: preActionNetworkSummary.structuredContent } : {})
-    }
-  }
 }
 
 /**

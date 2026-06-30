@@ -3,6 +3,7 @@
 export * from './api'
 export * from './agents'
 export * from './appCommand'
+export * from './appMenu'
 export * from './browser'
 export * from './chat'
 export * from './dream'

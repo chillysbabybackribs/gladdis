@@ -4,9 +4,12 @@ import { BrowserPanel } from './BrowserPanel'
 import { Splitter, DRAWER_MIN } from './Splitter'
 import { TerminalDock, type TerminalDockPos } from './TerminalDock'
 import { TerminalToggle } from './TerminalToggle'
+import { NotepadToggle } from './NotepadToggle'
+import { NotepadDock, type NotepadDockPos } from './NotepadDock'
 import { useTerminal } from '../hooks/useTerminal'
 import AgentBuilderModal from './AgentBuilderModal'
 import { MemoryController } from './MemoryController'
+import { TitleBar } from './TitleBar'
 import type { AppCommand, SavedAgent } from '../../../shared/types'
 
 const LEFT_KEY = 'gladdis:drawer:left'
@@ -19,6 +22,8 @@ const BROWSER_ZOOM_KEY = 'gladdis:browser:zoom'
 const TERMINAL_DOCK_KEY = 'gladdis:terminal:dock'
 const TERMINAL_LAST_DOCK_KEY = 'gladdis:terminal:lastDock'
 const TERMINAL_HEIGHT_KEY = 'gladdis:terminal:height'
+const NOTEPAD_DOCK_KEY = 'gladdis:notepad:dock'
+const NOTEPAD_LAST_DOCK_KEY = 'gladdis:notepad:lastDock'
 
 const DEFAULT_LEFT_FRAC = 0.16
 const DEFAULT_RIGHT_FRAC = 0.16
@@ -36,6 +41,7 @@ const BROWSER_ZOOM_STEP = 0.1
 const BROWSER_ZOOM_DEFAULT = 1
 
 type TerminalDockState = 'closed' | TerminalDockPos
+type NotepadDockState = 'closed' | NotepadDockPos
 
 function loadTerminalDock(): TerminalDockState {
   const v = safeGetItem(TERMINAL_DOCK_KEY)
@@ -48,6 +54,14 @@ function loadLastDock(): TerminalDockPos {
 function loadTerminalHeight(): number {
   const v = parseFloat(safeGetItem(TERMINAL_HEIGHT_KEY) ?? '')
   return Number.isFinite(v) && v >= 120 ? v : DEFAULT_TERMINAL_HEIGHT
+}
+function loadNotepadDock(): NotepadDockState {
+  const v = safeGetItem(NOTEPAD_DOCK_KEY)
+  return v === 'left' || v === 'right' || v === 'bottom' ? v : 'closed'
+}
+function loadLastNotepadDock(): NotepadDockPos {
+  const v = safeGetItem(NOTEPAD_LAST_DOCK_KEY)
+  return v === 'left' || v === 'bottom' ? v : 'right'
 }
 
 function safeGetItem(key: string): string | null {
@@ -133,10 +147,12 @@ export function Workspace() {
   const [rightZoom, setRightZoom] = useState(() => loadZoom(RIGHT_ZOOM_KEY))
   const [browserZoom, setBrowserZoom] = useState(loadBrowserZoom)
   const [terminalDock, setTerminalDockState] = useState<TerminalDockState>(loadTerminalDock)
+  const [notepadDock, setNotepadDockState] = useState<NotepadDockState>(loadNotepadDock)
   const [isAgentBuilderOpen, setIsAgentBuilderOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<SavedAgent | null>(null)
   const [terminalHeight, setTerminalHeight] = useState<number>(loadTerminalHeight)
   const [lastDock, setLastDock] = useState<TerminalDockPos>(loadLastDock)
+  const [lastNotepadDock, setLastNotepadDock] = useState<NotepadDockPos>(loadLastNotepadDock)
   const terminalHostRef = useRef<HTMLDivElement>(null)
   const terminalHandle = useTerminal(terminalHostRef)
 
@@ -147,11 +163,36 @@ export function Workspace() {
   // (otherwise the terminal would render into a width:0 column and vanish).
   // Closing the dock or moving it elsewhere leaves drawer state untouched.
   const setTerminalDock = (next: TerminalDockState) => {
+    if (next !== 'closed' && next === notepadDock) {
+      setNotepadDockState('closed')
+      safeSetItem(NOTEPAD_DOCK_KEY, 'closed')
+    }
     setTerminalDockState(next)
     safeSetItem(TERMINAL_DOCK_KEY, next)
     if (next !== 'closed') {
       setLastDock(next)
       safeSetItem(TERMINAL_LAST_DOCK_KEY, next)
+    }
+    if (next === 'left' && !leftOpen) {
+      setLeftOpen(true)
+      safeSetItem(LEFT_KEY, '1')
+    }
+    if (next === 'right' && !rightOpen) {
+      setRightOpen(true)
+      safeSetItem(RIGHT_KEY, '1')
+    }
+  }
+
+  const setNotepadDock = (next: NotepadDockState) => {
+    if (next !== 'closed' && next === terminalDock) {
+      setTerminalDockState('closed')
+      safeSetItem(TERMINAL_DOCK_KEY, 'closed')
+    }
+    setNotepadDockState(next)
+    safeSetItem(NOTEPAD_DOCK_KEY, next)
+    if (next !== 'closed') {
+      setLastNotepadDock(next)
+      safeSetItem(NOTEPAD_LAST_DOCK_KEY, next)
     }
     if (next === 'left' && !leftOpen) {
       setLeftOpen(true)
@@ -173,6 +214,7 @@ export function Workspace() {
       const next = !open
       safeSetItem(LEFT_KEY, next ? '1' : '0')
       if (terminalDock === 'left') setTerminalDock('bottom')
+      if (notepadDock === 'left') setNotepadDock('closed')
       return next
     })
   }
@@ -181,6 +223,7 @@ export function Workspace() {
       const next = !open
       safeSetItem(RIGHT_KEY, next ? '1' : '0')
       if (terminalDock === 'right') setTerminalDock('bottom')
+      if (notepadDock === 'right') setNotepadDock('closed')
       return next
     })
   }
@@ -227,6 +270,10 @@ export function Workspace() {
 
   const toggleTerminal = () => {
     setTerminalDock(terminalDock === 'closed' ? lastDock : 'closed')
+  }
+
+  const toggleNotepad = () => {
+    setNotepadDock(notepadDock === 'closed' ? lastNotepadDock : 'closed')
   }
 
   const openTerminal = () => {
@@ -292,6 +339,19 @@ export function Workspace() {
     return () => window.gladdis.layout.setBrowserVisible(true)
   }, [isAgentBuilderOpen])
 
+  // Restore drawer openness when notepad was left docked to a side panel.
+  useEffect(() => {
+    if (notepadDock === 'left' && !leftOpen) {
+      setLeftOpen(true)
+      safeSetItem(LEFT_KEY, '1')
+    }
+    if (notepadDock === 'right' && !rightOpen) {
+      setRightOpen(true)
+      safeSetItem(RIGHT_KEY, '1')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const onTerminalHeightChange = (h: number) => {
     setTerminalHeight(h)
     safeSetItem(TERMINAL_HEIGHT_KEY, String(h))
@@ -305,12 +365,18 @@ export function Workspace() {
   // flex:1 inside .browser inside .workspace-center, and useSlotBounds reports
   // the new rect to TabManager.
 
-  const bottomDockActive = terminalDock === 'bottom'
+  const bottomDockActive = terminalDock === 'bottom' || notepadDock === 'bottom'
   const leftDockActive = terminalDock === 'left' && leftOpen
   const rightDockActive = terminalDock === 'right' && rightOpen
+  const leftNotepadActive = notepadDock === 'left' && leftOpen
+  const rightNotepadActive = notepadDock === 'right' && rightOpen
+  const bottomTerminalActive = terminalDock === 'bottom'
+  const bottomNotepadActive = notepadDock === 'bottom'
 
   return (
     <div className="workspace">
+      <TitleBar />
+
       {/* Singleton xterm canvas lives inside this hidden host div. TerminalSlot
           adopts the xterm container via appendChild so the same shell session
           and the same scrollback survive moving between dock positions. */}
@@ -358,6 +424,12 @@ export function Workspace() {
                   onDockChange={setTerminalDock}
                 />
               </>
+            ) : leftNotepadActive ? (
+              <NotepadDock
+                dock="left"
+                onClose={() => setNotepadDock('closed')}
+                onDockChange={setNotepadDock}
+              />
             ) : (
               <ChatPanel
                 panelId="left"
@@ -384,12 +456,21 @@ export function Workspace() {
             }
           >
             <BrowserPanel />
-            {bottomDockActive && (
+            {bottomTerminalActive && (
               <TerminalDock
                 dock="bottom"
                 handle={terminalHandle}
                 onClose={() => setTerminalDock('closed')}
                 onDockChange={setTerminalDock}
+                height={terminalHeight}
+                onHeightChange={onTerminalHeightChange}
+              />
+            )}
+            {bottomNotepadActive && (
+              <NotepadDock
+                dock="bottom"
+                onClose={() => setNotepadDock('closed')}
+                onDockChange={setNotepadDock}
                 height={terminalHeight}
                 onHeightChange={onTerminalHeightChange}
               />
@@ -426,6 +507,12 @@ export function Workspace() {
                   onDockChange={setTerminalDock}
                 />
               </>
+            ) : rightNotepadActive ? (
+              <NotepadDock
+                dock="right"
+                onClose={() => setNotepadDock('closed')}
+                onDockChange={setNotepadDock}
+              />
             ) : (
               <ChatPanel
                 panelId="right"
@@ -457,7 +544,7 @@ export function Workspace() {
           >
             <DrawerChevron side="left" open={leftOpen} />
           </button>
-          {leftOpen && !leftDockActive && (
+          {leftOpen && !leftDockActive && !leftNotepadActive && (
             <>
               <div className="footer-token-slot" ref={setLeftFooterTokenSlot} />
               <div className="footer-action-slot" ref={setLeftFooterSlot} />
@@ -465,13 +552,16 @@ export function Workspace() {
           )}
         </div>
         <div className="workspace-footer-spacer" />
-        <TerminalToggle open={terminalDock !== 'closed'} onClick={toggleTerminal} />
+        <div className="footer-center-controls">
+          <NotepadToggle open={notepadDock !== 'closed'} onClick={toggleNotepad} />
+          <TerminalToggle open={terminalDock !== 'closed'} onClick={toggleTerminal} />
+        </div>
         <div className="workspace-footer-spacer" />
         <div
           className={`footer-chat-controls right ${rightOpen ? 'is-open' : ''}`}
           style={{ width: rightOpen ? rightWidth : undefined }}
         >
-          {rightOpen && !rightDockActive && (
+          {rightOpen && !rightDockActive && !rightNotepadActive && (
             <>
               <div className="footer-action-slot right" ref={setRightFooterSlot} />
               <div className="footer-token-slot" ref={setRightFooterTokenSlot} />

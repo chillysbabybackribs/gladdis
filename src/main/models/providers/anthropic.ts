@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
-import type { LlmComplete } from '../../pipeline/Planner'
+import type { LlmComplete } from '../llm'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
 import { resolveTurnTools } from '../agentTools'
 import {

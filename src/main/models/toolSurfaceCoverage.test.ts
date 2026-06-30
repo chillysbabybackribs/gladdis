@@ -64,7 +64,6 @@ vi.mock('./tools/shellTools', () => ({ runShellCommand: vi.fn(ack) }))
 vi.mock('./tools/devServerTool', () => ({ runLaunchWebDevServer: vi.fn(ack) }))
 vi.mock('./tools/taskTools', () => ({
   runAuditCodebase: vi.fn(ack),
-  runBrowseTask: vi.fn(ack),
   runPublishChanges: vi.fn(ack),
   runValidation: vi.fn(ack)
 }))

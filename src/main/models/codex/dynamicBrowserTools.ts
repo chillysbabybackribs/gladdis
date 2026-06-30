@@ -1,6 +1,6 @@
 import { AGENT_TOOLS } from '../agentTools'
 import type { BrowserTools, ToolContext, ToolOutcome } from '../browserTools'
-import type { LlmComplete } from '../../pipeline/Planner'
+import type { LlmComplete } from '../llm'
 import type { ChatStreamEvent } from '../../../../shared/types'
 import type { JsonValue, RequestId, ServerRequest } from './protocol'
 
@@ -28,7 +28,6 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'deep_search',
   'fetch_page',
   'navigate',
-  'browse_task',
   'read_page',
   'read_a11y',
   'grep_page',
@@ -80,7 +79,7 @@ export const GLADDIS_WEB_TOOLS_RULE =
 // explicit "even via your shell" line.
 export const CODEX_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the gladdis.* tools too: navigate, browse_task, read_page, read_a11y, grep_page, ' +
+  'For browser work beyond search use the gladdis.* tools too: navigate, read_page, read_a11y, grep_page, ' +
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
   'recall_history, repo_overview, repo_grep_task, search_repo, read_spans, research_dossier, and verify_change. ' +

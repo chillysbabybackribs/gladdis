@@ -48,7 +48,7 @@ type CreateCursorBridgeSession = (args: {
   requestId: string | null
 }) => Promise<BridgeRegistration>
 
-export function probeCursorBinary(): Promise<{ installed: boolean; version: string | null }> {
+function probeCursorBinary(): Promise<{ installed: boolean; version: string | null }> {
   const now = Date.now()
   if (cachedProbe?.installed) return Promise.resolve(cachedProbe)
   if (cachedProbe && now - lastProbeTime < FAILED_PROBE_RETRY_MS) return Promise.resolve(cachedProbe)
@@ -742,7 +742,7 @@ function cursorCliModel(modelId: string): string {
   }
 }
 
-export function collapseWhitespace(text: string): string {
+function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, '')
 }
 

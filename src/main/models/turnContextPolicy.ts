@@ -105,7 +105,7 @@ export function buildContractTrace(options: BuildTraceOptions): ContractTrace {
   }
 }
 
-export function extractActivePageContextLabel(text: string): string | null {
+function extractActivePageContextLabel(text: string): string | null {
   const match = text.trim().match(/^\[Active page:\s*([^\]]+)\]\s*\n{2,}/i)
   return match?.[1]?.trim() || null
 }

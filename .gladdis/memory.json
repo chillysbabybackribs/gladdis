@@ -2,7 +2,7 @@
   "version": 2,
   "workspace": {
     "root": "/home/dp/Desktop/myworkspace/Gladdis",
-    "updatedAt": "2026-06-30T00:54:12.478Z"
+    "updatedAt": "2026-06-30T19:55:48.096Z"
   },
   "entries": [
     {
@@ -633,6 +633,1358 @@
         "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": []
+    },
+    {
+      "id": "mem_mr0pza51_uf1vaz",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0pz66uquw",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "Inspect current packaging/build config in repo",
+          "Verify existing signing/notarization/update wiring",
+          "Check current web/platform requirements for low-warning downloads",
+          "Produce prioritized tie-up checklist and next implementation step"
+        ],
+        "plan": [
+          "Inspect package.json and Electron builder/vite config",
+          "Search repo for build/sign/notarize/update/release code",
+          "Search web for 2026 macOS + Windows distribution/signing requirements",
+          "Summarize gaps and recommend implementation order"
+        ],
+        "status": "in_progress"
+      },
+      "text": "checklist: {\"done_means\":[\"Inspect current packaging/build config in repo\",\"Verify existing signing/notarization/update wiring\",\"Check current web/platform requirements for low-warning downloads\",\"Produce prioritized tie-up checklist and next implementation step\"],\"plan\":[\"Inspect package.json and Electron builder/vite config\",\"Search repo for build/sign/notarize/update/release code\",\"Search web for 2026 macOS + Windows distribution/signing requirements\",\"Summarize gaps and recommend implementation order\"],\"status\":\"in_progress\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T14:06:09.685Z",
+        "lastReinforcedAt": "2026-06-30T14:06:09.685Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0q1t5s_w7ghei",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0pz66uquw",
+      "key": "findings",
+      "value": {
+        "repo_state": {
+          "packaging_config": "None found in package.json or electron.vite.config.ts",
+          "release_deps": "electron-builder, electron-updater, @electron/notarize not installed",
+          "assets": "No app icon pack or build/resources folders present",
+          "release_ci": "No release-oriented directories or workflow assets detected",
+          "baseline_validation": "npm run check and npm run build both pass"
+        },
+        "web_state": {
+          "macos": "Apple requires Developer ID signing for outside-App-Store distribution; notarization plus stapling is the path to avoid Gatekeeper trust warnings",
+          "windows": "Signed apps still may show SmartScreen warnings until reputation accumulates; Microsoft Store is the only clean no-warning path per current guidance",
+          "cursor_pattern": "Cursor exposes a dedicated download page with version history and per-OS/per-arch direct artifacts behind a stable updates/download backend"
+        }
+      },
+      "text": "findings: {\"repo_state\":{\"packaging_config\":\"None found in package.json or electron.vite.config.ts\",\"release_deps\":\"electron-builder, electron-updater, @electron/notarize not installed\",\"assets\":\"No app icon pack or build/resources folders present\",\"release_ci\":\"No release-oriented directories or workflow assets detected\",\"baseline_validation\":\"npm run check and npm run build both pass\"},\"web_state\":{\"macos\":\"Apple requires Developer ID signing for outside-App-Store distribution; notarization plus stapling is the path to avoid Gatekeeper trust warnings\",\"windows\":\"Signed apps still may show SmartScreen warnings until reputation accumulates; Microsoft Store is the only clean no-warning path per current guidance\",\"cursor_pattern\":\"Cursor exposes a dedicated download page with version history and per-OS/per-arch direct artifacts behind a stable updates/download backend\"}}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T14:08:07.648Z",
+        "lastReinforcedAt": "2026-06-30T14:08:07.648Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0q5arl_sh0c6a",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0q54qz5z6",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "package.json and packaging config scaffolded",
+          "signing/notarization hooks stubbed with env-driven placeholders",
+          "resource/config folders created and repo validates"
+        ],
+        "plan": [
+          "inspect current repo packaging surface",
+          "add scaffold files and scripts",
+          "validate, commit, and push"
+        ],
+        "status": "completed",
+        "notes": [
+          "commit 70f0220 pushed to origin/grep-page-reliability",
+          "left unrelated user changes untouched in .gladdis/memory.json and two test files"
+        ]
+      },
+      "text": "checklist: {\"done_means\":[\"package.json and packaging config scaffolded\",\"signing/notarization hooks stubbed with env-driven placeholders\",\"resource/config folders created and repo validates\"],\"plan\":[\"inspect current repo packaging surface\",\"add scaffold files and scripts\",\"validate, commit, and push\"],\"status\":\"completed\",\"notes\":[\"commit 70f0220 pushed to origin/grep-page-reliability\",\"left unrelated user changes untouched in .gladdis/memory.json and two test files\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.8,
+      "freshness": {
+        "createdAt": "2026-06-30T14:10:50.433Z",
+        "lastReinforcedAt": "2026-06-30T14:14:49.733Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0qblin_xaoevc",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qbiefgl0",
+      "key": "checklist",
+      "value": {
+        "items": [
+          {
+            "text": "Inspect current packaging/release scaffold and repo state",
+            "status": "completed"
+          },
+          {
+            "text": "Add next starter packaging pieces without final branding/download page",
+            "status": "completed"
+          },
+          {
+            "text": "Validate changes locally",
+            "status": "completed"
+          },
+          {
+            "text": "Commit and push packaging scaffold updates",
+            "status": "completed"
+          }
+        ],
+        "result": {
+          "branch": "grep-page-reliability",
+          "commit": "a2f58ec",
+          "notes": [
+            "Added dynamic Electron Builder config so final app name/app ID can stay flexible",
+            "Added release doctor script and GitHub Actions packaging workflow",
+            "Left unrelated local changes in .gladdis/memory.json and existing test files untouched"
+          ]
+        }
+      },
+      "text": "checklist: {\"items\":[{\"text\":\"Inspect current packaging/release scaffold and repo state\",\"status\":\"completed\"},{\"text\":\"Add next starter packaging pieces without final branding/download page\",\"status\":\"completed\"},{\"text\":\"Validate changes locally\",\"status\":\"completed\"},{\"text\":\"Commit and push packaging scaffold updates\",\"status\":\"completed\"}],\"result\":{\"branch\":\"grep-page-reliability\",\"commit\":\"a2f58ec\",\"notes\":[\"Added dynamic Electron Builder config so final app name/app ID can stay flexible\",\"Added release doctor script and GitHub Actions packaging workflow\",\"Left unrelated local changes in .gladdis/memory.json and existing test files untouched\"]}}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.8500000000000001,
+      "freshness": {
+        "createdAt": "2026-06-30T14:15:44.303Z",
+        "lastReinforcedAt": "2026-06-30T14:18:25.071Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0qgem1_cvy0y8",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qgch1x7p",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "Confirm current repo wiring for signing/notarization",
+          "List required accounts, certs, and secrets",
+          "Provide repo-specific setup walkthrough"
+        ],
+        "plan": [
+          "Inspect current packaging files",
+          "Extract env vars and workflow expectations",
+          "Write step-by-step setup guidance"
+        ],
+        "status": "completed",
+        "notes": [
+          "Verified current config in package.json, electron-builder.config.cjs, scripts/notarize.cjs, workflow, and packaging checklist",
+          "Ran npm run release:doctor and confirmed Apple and Windows signing env are still missing"
+        ]
+      },
+      "text": "checklist: {\"done_means\":[\"Confirm current repo wiring for signing/notarization\",\"List required accounts, certs, and secrets\",\"Provide repo-specific setup walkthrough\"],\"plan\":[\"Inspect current packaging files\",\"Extract env vars and workflow expectations\",\"Write step-by-step setup guidance\"],\"status\":\"completed\",\"notes\":[\"Verified current config in package.json, electron-builder.config.cjs, scripts/notarize.cjs, workflow, and packaging checklist\",\"Ran npm run release:doctor and confirmed Apple and Windows signing env are still missing\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T14:19:28.633Z",
+        "lastReinforcedAt": "2026-06-30T14:19:40.832Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0qr9n0_p1z4m3",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qr6u8v3t",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "Confirm repo Windows signing expectations",
+          "Verify current certificate options/tradeoffs",
+          "Provide Linux + GitHub Actions setup path"
+        ],
+        "plan": [
+          "Inspect workflow/config for Windows signing",
+          "Search current vendor/type guidance",
+          "Write recommendation and step-by-step setup"
+        ],
+        "status": "completed",
+        "notes": [
+          "Repo currently expects WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD via GitHub Actions",
+          "Microsoft Learn says Azure Artifact/Trusted Signing is recommended for non-Store distribution",
+          "electron-builder supports Azure Trusted Signing via win.azureSignOptions and Azure env vars",
+          "electron-builder confirms EV is not exportable for normal CI and regular certs build reputation over time"
+        ]
+      },
+      "text": "checklist: {\"done_means\":[\"Confirm repo Windows signing expectations\",\"Verify current certificate options/tradeoffs\",\"Provide Linux + GitHub Actions setup path\"],\"plan\":[\"Inspect workflow/config for Windows signing\",\"Search current vendor/type guidance\",\"Write recommendation and step-by-step setup\"],\"status\":\"completed\",\"notes\":[\"Repo currently expects WIN_CSC_LINK and WIN_CSC_KEY_PASSWORD via GitHub Actions\",\"Microsoft Learn says Azure Artifact/Trusted Signing is recommended for non-Store distribution\",\"electron-builder supports Azure Trusted Signing via win.azureSignOptions and Azure env vars\",\"electron-builder confirms EV is not exportable for normal CI and regular certs build reputation over time\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T14:27:55.404Z",
+        "lastReinforcedAt": "2026-06-30T14:29:13.354Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0quk9h_f07tmj",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "Confirm current Linux packaging configuration from live files",
+          "Adjust release scaffold to make Linux the active first-class target",
+          "Validate Linux packaging path and doctor checks",
+          "Commit and push only the Linux-first scaffold changes"
+        ],
+        "plan": [
+          "Inspect package/build/workflow/docs files",
+          "Patch config/workflow/docs for Linux-first release",
+          "Run validation",
+          "Commit and push"
+        ]
+      },
+      "text": "checklist: {\"done_means\":[\"Confirm current Linux packaging configuration from live files\",\"Adjust release scaffold to make Linux the active first-class target\",\"Validate Linux packaging path and doctor checks\",\"Commit and push only the Linux-first scaffold changes\"],\"plan\":[\"Inspect package/build/workflow/docs files\",\"Patch config/workflow/docs for Linux-first release\",\"Run validation\",\"Commit and push\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T14:30:29.141Z",
+        "lastReinforcedAt": "2026-06-30T14:30:29.141Z",
+        "lastReferencedAt": "2026-06-30T14:44:21.520Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0qvf17_xnpwtb",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "progress",
+      "value": {
+        "status": "patched",
+        "completed": [
+          "Inspected current packaging, workflow, and doctor files",
+          "Updated scaffold to make Linux the only active release target for now"
+        ],
+        "next": [
+          "Run release doctor and Linux packaging validation",
+          "Commit and push scoped changes"
+        ]
+      },
+      "text": "progress: {\"status\":\"patched\",\"completed\":[\"Inspected current packaging, workflow, and doctor files\",\"Updated scaffold to make Linux the only active release target for now\"],\"next\":[\"Run release doctor and Linux packaging validation\",\"Commit and push scoped changes\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T14:31:09.019Z",
+        "lastReinforcedAt": "2026-06-30T14:31:09.019Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0r18rn_gdmhia",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "validation",
+      "value": {
+        "release_doctor": "passed",
+        "linux_dist": "passed with AppImage and deb artifacts created; remaining expected warning is missing Linux icon branding",
+        "artifacts": [
+          "release/Gladys-0.1.0-linux-x86_64.AppImage",
+          "release/Gladys-0.1.0-linux-amd64.deb"
+        ]
+      },
+      "text": "validation: {\"release_doctor\":\"passed\",\"linux_dist\":\"passed with AppImage and deb artifacts created; remaining expected warning is missing Linux icon branding\",\"artifacts\":[\"release/Gladys-0.1.0-linux-x86_64.AppImage\",\"release/Gladys-0.1.0-linux-amd64.deb\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T14:35:40.835Z",
+        "lastReinforcedAt": "2026-06-30T14:35:40.835Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0r1i5b_u74c7o",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "result",
+      "value": {
+        "status": "done",
+        "commit": "3e4dce9",
+        "branch": "grep-page-reliability",
+        "summary": [
+          "Release workflow now builds Linux packages only on Ubuntu",
+          "Release doctor now treats macOS and Windows as deferred instead of active blockers",
+          "Linux packaging metadata now includes desktop integration naming and package descriptions",
+          "Linux build validated with AppImage and deb outputs"
+        ]
+      },
+      "text": "result: {\"status\":\"done\",\"commit\":\"3e4dce9\",\"branch\":\"grep-page-reliability\",\"summary\":[\"Release workflow now builds Linux packages only on Ubuntu\",\"Release doctor now treats macOS and Windows as deferred instead of active blockers\",\"Linux packaging metadata now includes desktop integration naming and package descriptions\",\"Linux build validated with AppImage and deb outputs\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T14:35:52.991Z",
+        "lastReinforcedAt": "2026-06-30T14:35:52.991Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0ra84x_wfe6oi",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "next_phase",
+      "value": {
+        "status": "done",
+        "goal": "Generate matching Windows and macOS icon assets from the provisional Gladys icon and validate packaging sees them",
+        "completed": [
+          "Created build/icon.ico from the Gladys source icon",
+          "Created build/icon.icns from a full macOS iconset derived from the same source",
+          "Validated icon files on disk and reran release doctor",
+          "Committed and pushed the new icon assets as db31c39"
+        ]
+      },
+      "text": "next_phase: {\"status\":\"done\",\"goal\":\"Generate matching Windows and macOS icon assets from the provisional Gladys icon and validate packaging sees them\",\"completed\":[\"Created build/icon.ico from the Gladys source icon\",\"Created build/icon.icns from a full macOS iconset derived from the same source\",\"Validated icon files on disk and reran release doctor\",\"Committed and pushed the new icon assets as db31c39\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T14:42:39.921Z",
+        "lastReinforcedAt": "2026-06-30T14:43:41.786Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0rcgsq_hw7r1z",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "status",
+      "value": {
+        "phase": "distribution-strategy-documented",
+        "summary": "Verified the live Linux download flow, documented the recommended Linux distribution/domain roadmap, and pushed it on grep-page-reliability.",
+        "checklist": [
+          {
+            "item": "Verify latest download page deployment and release assets",
+            "done": true
+          },
+          {
+            "item": "Research Linux distribution/repository options and signing expectations",
+            "done": true
+          },
+          {
+            "item": "Turn findings into a Gladys-specific next-step plan and scaffold if appropriate",
+            "done": true
+          }
+        ],
+        "artifacts": [
+          {
+            "path": "docs/linux-distribution-strategy.md",
+            "note": "New decision doc for direct downloads, APT repo, Flathub, and domain split"
+          },
+          {
+            "path": "docs/packaging-checklist.md",
+            "note": "Checklist now includes distribution-path and domain decisions"
+          },
+          {
+            "path": "docs/linux-release-runbook.md",
+            "note": "Runbook now points to the distribution strategy doc"
+          }
+        ],
+        "commit": "7c7a2ea"
+      },
+      "text": "status: {\"phase\":\"distribution-strategy-documented\",\"summary\":\"Verified the live Linux download flow, documented the recommended Linux distribution/domain roadmap, and pushed it on grep-page-reliability.\",\"checklist\":[{\"item\":\"Verify latest download page deployment and release assets\",\"done\":true},{\"item\":\"Research Linux distribution/repository options and signing expectations\",\"done\":true},{\"item\":\"Turn findings into a Gladys-specific next-step plan and scaffold if appropriate\",\"done\":true}],\"artifacts\":[{\"path\":\"docs/linux-distribution-strategy.md\",\"note\":\"New decision doc for direct downloads, APT repo, Flathub, and domain split\"},{\"path\":\"docs/packaging-checklist.md\",\"note\":\"Checklist now includes distribution-path and domain decisions\"},{\"path\":\"docs/linux-release-runbook.md\",\"note\":\"Runbook now points to the distribution strategy doc\"}],\"commit\":\"7c7a2ea\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.95,
+      "freshness": {
+        "createdAt": "2026-06-30T14:44:24.458Z",
+        "lastReinforcedAt": "2026-06-30T15:33:41.767Z",
+        "lastReferencedAt": "2026-06-30T15:12:57.074Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0rj7bg_ipm5zd",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "decisions",
+      "value": {
+        "linux_release_host": "GitHub Releases scaffolded as first delivery path",
+        "download_page_host": "GitHub Pages workflow deployment at https://chillysbabybackribs.github.io/gladdis/",
+        "download_page_preview_branch": "grep-page-reliability allowed in github-pages environment for scaffold preview deploys",
+        "notes": "The Pages workflow now triggers from the packaging branch, but the latest rerun was still in progress during verification. Public release tagging was intentionally left opt-in because it would create a user-visible GitHub release."
+      },
+      "text": "decisions: {\"linux_release_host\":\"GitHub Releases scaffolded as first delivery path\",\"download_page_host\":\"GitHub Pages workflow deployment at https://chillysbabybackribs.github.io/gladdis/\",\"download_page_preview_branch\":\"grep-page-reliability allowed in github-pages environment for scaffold preview deploys\",\"notes\":\"The Pages workflow now triggers from the packaging branch, but the latest rerun was still in progress during verification. Public release tagging was intentionally left opt-in because it would create a user-visible GitHub release.\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T14:49:38.763Z",
+        "lastReinforcedAt": "2026-06-30T14:56:31.656Z",
+        "lastReferencedAt": "2026-06-30T15:12:57.074Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0rlrhg_owtjzo",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "plan",
+      "value": {
+        "steps": [
+          {
+            "step": "Inspect tagged release workflow failure and identify blocker",
+            "status": "completed"
+          },
+          {
+            "step": "Patch Linux release workflow with the required GitHub token wiring",
+            "status": "completed"
+          },
+          {
+            "step": "Validate packaging scaffolding and publish a fresh clean tag",
+            "status": "completed"
+          },
+          {
+            "step": "Verify GitHub Release assets and download page end-to-end",
+            "status": "completed"
+          }
+        ]
+      },
+      "text": "plan: {\"steps\":[{\"step\":\"Inspect tagged release workflow failure and identify blocker\",\"status\":\"completed\"},{\"step\":\"Patch Linux release workflow with the required GitHub token wiring\",\"status\":\"completed\"},{\"step\":\"Validate packaging scaffolding and publish a fresh clean tag\",\"status\":\"completed\"},{\"step\":\"Verify GitHub Release assets and download page end-to-end\",\"status\":\"completed\"}]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.8,
+      "freshness": {
+        "createdAt": "2026-06-30T14:51:38.212Z",
+        "lastReinforcedAt": "2026-06-30T15:11:26.544Z",
+        "lastReferencedAt": "2026-06-30T15:12:57.074Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0t8zw4_hzgzox",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0qui44ejh",
+      "key": "domain-naming-pass",
+      "value": {
+        "phase": "non-gladys-domain-brainstorm",
+        "checked_live_candidates": {
+          "available_signals": [
+            "workviewapp.com",
+            "chromiumdesk.com",
+            "tabworkshop.com"
+          ],
+          "taken_or_registered": [
+            "workview.com",
+            "workbenchos.com",
+            "workbenchapp.com",
+            "tabforge.com",
+            "tabfoundry.com",
+            "browserforge.com",
+            "deskforge.com",
+            "taskforge.com",
+            "workshopos.com",
+            "workshopapp.com",
+            "openworkshop.com",
+            "nativeworkshop.com",
+            "operatory.com",
+            "operatorhub.com",
+            "browsecraft.com",
+            "craftdesk.com",
+            "deskpilot.com",
+            "taskworkshop.com",
+            "localoperator.com",
+            "deskfoundry.com",
+            "localfoundry.com",
+            "agentfoundry.com",
+            "forgepanel.com",
+            "workshop.so",
+            "browserdesk.com",
+            "localdesk.com",
+            "tabdesk.com",
+            "workpanel.com",
+            "fieldforge.com",
+            "orbitdesk.com",
+            "studiooperator.com"
+          ],
+          "notes": "Most polished broad brands in this space are already registered. The clearest live .com/.descriptive options from this pass were workviewapp.com and chromiumdesk.com, with tabworkshop.com also open."
+        }
+      },
+      "text": "domain-naming-pass: {\"phase\":\"non-gladys-domain-brainstorm\",\"checked_live_candidates\":{\"available_signals\":[\"workviewapp.com\",\"chromiumdesk.com\",\"tabworkshop.com\"],\"taken_or_registered\":[\"workview.com\",\"workbenchos.com\",\"workbenchapp.com\",\"tabforge.com\",\"tabfoundry.com\",\"browserforge.com\",\"deskforge.com\",\"taskforge.com\",\"workshopos.com\",\"workshopapp.com\",\"openworkshop.com\",\"nativeworkshop.com\",\"operatory.com\",\"operatorhub.com\",\"browsecraft.com\",\"craftdesk.com\",\"deskpilot.com\",\"taskworkshop.com\",\"localoperator.com\",\"deskfoundry.com\",\"localfoundry.com\",\"agentfoundry.com\",\"forgepanel.com\",\"workshop.so\",\"browserdesk.com\",\"localdesk.com\",\"tabdesk.com\",\"workpanel.com\",\"fieldforge.com\",\"orbitdesk.com\",\"studiooperator.com\"],\"notes\":\"Most polished broad brands in this space are already registered. The clearest live .com/.descriptive options from this pass were workviewapp.com and chromiumdesk.com, with tabworkshop.com also open.\"}}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782828262713-6"
+        },
+        {
+          "conversationId": "conv-1782828262713-6"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T15:37:41.812Z",
+        "lastReinforcedAt": "2026-06-30T15:39:59.814Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0vsiii_yy71vb",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0vsfc6wvo",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "Read cdp-browser-automation skill instructions",
+          "Find repo/browser automation docs or code touchpoints",
+          "Return concise pointers with locations and use cases"
+        ],
+        "plan": [
+          {
+            "step": "Read skill file",
+            "status": "completed"
+          },
+          {
+            "step": "Search repo for browser automation references",
+            "status": "completed"
+          },
+          {
+            "step": "Summarize findings",
+            "status": "completed"
+          }
+        ],
+        "summary": {
+          "local_docs": [
+            ".codex/skills/cdp-browser-automation/SKILL.md",
+            "src/main/skills/browser-expert.md",
+            "skills/browser-expert.md",
+            "CLAUDE.md"
+          ],
+          "core_code": [
+            "src/main/models/browserTools.ts",
+            "src/main/models/tools/driveTools.ts",
+            "src/main/models/tools/perceiveTools.ts",
+            "src/main/extract/PageExtractor.ts",
+            "src/main/models/codex/toolPolicy.ts"
+          ],
+          "official_refs": [
+            "https://chromedevtools.github.io/devtools-protocol/",
+            "https://www.electronjs.org/docs/latest/api/web-contents-view"
+          ]
+        }
+      },
+      "text": "checklist: {\"done_means\":[\"Read cdp-browser-automation skill instructions\",\"Find repo/browser automation docs or code touchpoints\",\"Return concise pointers with locations and use cases\"],\"plan\":[{\"step\":\"Read skill file\",\"status\":\"completed\"},{\"step\":\"Search repo for browser automation references\",\"status\":\"completed\"},{\"step\":\"Summarize findings\",\"status\":\"completed\"}],\"summary\":{\"local_docs\":[\".codex/skills/cdp-browser-automation/SKILL.md\",\"src/main/skills/browser-expert.md\",\"skills/browser-expert.md\",\"CLAUDE.md\"],\"core_code\":[\"src/main/models/browserTools.ts\",\"src/main/models/tools/driveTools.ts\",\"src/main/models/tools/perceiveTools.ts\",\"src/main/extract/PageExtractor.ts\",\"src/main/models/codex/toolPolicy.ts\"],\"official_refs\":[\"https://chromedevtools.github.io/devtools-protocol/\",\"https://www.electronjs.org/docs/latest/api/web-contents-view\"]}}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838109083-12"
+        },
+        {
+          "conversationId": "conv-1782838109083-12"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T16:48:51.642Z",
+        "lastReinforcedAt": "2026-06-30T16:49:18.272Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0w19zo_g73ewh",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "Identify existing daemon/server/PWA/mobile-web surface from repo evidence",
+          "Trace desktop architecture enough to see blockers/enablers for phone access",
+          "Separate PWA feasibility from daemon/remote-control approach",
+          "Provide concrete files/risks/next steps"
+        ],
+        "plan": [
+          "Orient repo architecture",
+          "Search daemon/PWA/mobile-relevant code paths",
+          "Read relevant files",
+          "Synthesize recommendation"
+        ],
+        "status": "in_progress: orient repo architecture"
+      },
+      "text": "checklist: {\"done_means\":[\"Identify existing daemon/server/PWA/mobile-web surface from repo evidence\",\"Trace desktop architecture enough to see blockers/enablers for phone access\",\"Separate PWA feasibility from daemon/remote-control approach\",\"Provide concrete files/risks/next steps\"],\"plan\":[\"Orient repo architecture\",\"Search daemon/PWA/mobile-relevant code paths\",\"Read relevant files\",\"Synthesize recommendation\"],\"status\":\"in_progress: orient repo architecture\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T16:55:40.500Z",
+        "lastReinforcedAt": "2026-06-30T16:55:40.500Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0w2jzm_215afu",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "findings",
+      "value": {
+        "status": "synthesis_ready",
+        "existing_surfaces": [
+          "Electron desktop app with main/preload/renderer split; no PWA manifest/service worker/Vite PWA plugin in package or source searches",
+          "Renderer depends on window.gladdis preload IPC API",
+          "Existing localhost HTTP surface is Claude Code MCP bridge bound to 127.0.0.1 with bearer token; not user-facing phone API",
+          "Remote debugging can expose CDP only when opt-in but is loopback-only",
+          "Renderer layout is desktop split-pane with native WebContentsView overlay tracked by DOM slot bounds"
+        ],
+        "recommended_direction": "Implement local companion daemon/web gateway first for phone chat/control, not full PWA port. Use shared GladdisApi/IPCs as contract, start with chat/conversation/workspace/status endpoints and WebSocket/SSE streams; keep browser page rendering via screenshots or simplified remote controls. Full PWA requires replacing Electron-only browser/terminal/file features or a server backend facade."
+      },
+      "text": "findings: {\"status\":\"synthesis_ready\",\"existing_surfaces\":[\"Electron desktop app with main/preload/renderer split; no PWA manifest/service worker/Vite PWA plugin in package or source searches\",\"Renderer depends on window.gladdis preload IPC API\",\"Existing localhost HTTP surface is Claude Code MCP bridge bound to 127.0.0.1 with bearer token; not user-facing phone API\",\"Remote debugging can expose CDP only when opt-in but is loopback-only\",\"Renderer layout is desktop split-pane with native WebContentsView overlay tracked by DOM slot bounds\"],\"recommended_direction\":\"Implement local companion daemon/web gateway first for phone chat/control, not full PWA port. Use shared GladdisApi/IPCs as contract, start with chat/conversation/workspace/status endpoints and WebSocket/SSE streams; keep browser page rendering via screenshots or simplified remote controls. Full PWA requires replacing Electron-only browser/terminal/file features or a server backend facade.\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T16:56:40.114Z",
+        "lastReinforcedAt": "2026-06-30T16:56:40.114Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0w6ern_d4872j",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "clarified_phone_chat_bridge",
+      "value": {
+        "status": "review_complete",
+        "clarified_goal": "Phone is only a remote chat input/output surface. A phone message should enter the same main-process chat path as the desktop composer and streamed response events should be piped back to phone.",
+        "evidence": [
+          "Desktop send path: src/renderer/components/ChatPanel.tsx constructs ChatRequest then calls window.gladdis.chat.send",
+          "Preload exposes chat.send on GladdisApi in shared/api.ts and src/preload/index.ts",
+          "Main IPC handler src/main/index.ts calls registry.chat.send(req), nudges autoDream, and prewarms Cursor bridge for Cursor models",
+          "ServiceRegistry constructs ChatService with stream callback using chatStreamBatcher",
+          "ChatService.send is the lifecycle owner and already emits ChatStreamEvent typed in shared/chat.ts",
+          "Existing ChatRequest and ChatStreamEvent types are sufficient for HTTP/WebSocket bridge"
+        ],
+        "recommendation": "Build an opt-in authenticated RemoteChatServer/PhoneBridge inside main that calls registry.chat.send(req) and subscribes to same stream emitter. Do not build PWA first; do not expose CDP/terminal/filesystem broadly."
+      },
+      "text": "clarified_phone_chat_bridge: {\"status\":\"review_complete\",\"clarified_goal\":\"Phone is only a remote chat input/output surface. A phone message should enter the same main-process chat path as the desktop composer and streamed response events should be piped back to phone.\",\"evidence\":[\"Desktop send path: src/renderer/components/ChatPanel.tsx constructs ChatRequest then calls window.gladdis.chat.send\",\"Preload exposes chat.send on GladdisApi in shared/api.ts and src/preload/index.ts\",\"Main IPC handler src/main/index.ts calls registry.chat.send(req), nudges autoDream, and prewarms Cursor bridge for Cursor models\",\"ServiceRegistry constructs ChatService with stream callback using chatStreamBatcher\",\"ChatService.send is the lifecycle owner and already emits ChatStreamEvent typed in shared/chat.ts\",\"Existing ChatRequest and ChatStreamEvent types are sufficient for HTTP/WebSocket bridge\"],\"recommendation\":\"Build an opt-in authenticated RemoteChatServer/PhoneBridge inside main that calls registry.chat.send(req) and subscribes to same stream emitter. Do not build PWA first; do not expose CDP/terminal/filesystem broadly.\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T16:59:39.971Z",
+        "lastReinforcedAt": "2026-06-30T16:59:39.971Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0w9dd2_1imypk",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "pwa_followup_question",
+      "value": {
+        "status": "completed",
+        "answer_summary": "PWA is not wrong as a phone UI shell, but wrong as primary implementation path for Gladdis because the actual app runtime depends on Electron main, preload IPC, WebContentsView/CDP, filesystem/shell/tool access, and local stores. For clarified goal, build an opt-in authenticated phone bridge in main process that serves a tiny installable web UI and calls registry.chat.send, streaming ChatStreamEvent back to phone. A PWA can sit on top of that bridge later for home-screen/offline shell benefits.",
+        "evidence": [
+          "src/main/index.ts uses Electron BaseWindow/WebContentsView/ipcMain and routes CHAT_SEND to registry.chat.send",
+          "src/preload/index.ts exposes window.gladdis via ipcRenderer",
+          "src/renderer/components/ChatPanel.tsx builds ChatRequest and calls window.gladdis.chat.send",
+          "ServiceRegistry wires ChatService stream callback to chatStreamBatcher",
+          "shared/chat.ts already defines ChatRequest and ChatStreamEvent",
+          "PWA artifact search found no app manifest/service worker/vite-pwa/workbox implementation"
+        ]
+      },
+      "text": "pwa_followup_question: {\"status\":\"completed\",\"answer_summary\":\"PWA is not wrong as a phone UI shell, but wrong as primary implementation path for Gladdis because the actual app runtime depends on Electron main, preload IPC, WebContentsView/CDP, filesystem/shell/tool access, and local stores. For clarified goal, build an opt-in authenticated phone bridge in main process that serves a tiny installable web UI and calls registry.chat.send, streaming ChatStreamEvent back to phone. A PWA can sit on top of that bridge later for home-screen/offline shell benefits.\",\"evidence\":[\"src/main/index.ts uses Electron BaseWindow/WebContentsView/ipcMain and routes CHAT_SEND to registry.chat.send\",\"src/preload/index.ts exposes window.gladdis via ipcRenderer\",\"src/renderer/components/ChatPanel.tsx builds ChatRequest and calls window.gladdis.chat.send\",\"ServiceRegistry wires ChatService stream callback to chatStreamBatcher\",\"shared/chat.ts already defines ChatRequest and ChatStreamEvent\",\"PWA artifact search found no app manifest/service worker/vite-pwa/workbox implementation\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        },
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T17:01:58.118Z",
+        "lastReinforcedAt": "2026-06-30T17:02:19.108Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0weno1_c7rs4f",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "anywhere_phone_options",
+      "value": {
+        "status": "completed",
+        "answer_summary": "PWA is likely best first client because it installs from landing page without app stores. For anywhere access while desktop is on, use desktop daemon outbound-connected to a cloud relay, with phone PWA connecting to relay. If computer is truly off, local Gladdis cannot act; options are queued messages, Wake-on-LAN/sleep wake, or a hosted/headless Gladdis/cloud agent with synced state and permissions. True 'acts as user at the computer while computer is off' requires another always-on compute environment."
+      },
+      "text": "anywhere_phone_options: {\"status\":\"completed\",\"answer_summary\":\"PWA is likely best first client because it installs from landing page without app stores. For anywhere access while desktop is on, use desktop daemon outbound-connected to a cloud relay, with phone PWA connecting to relay. If computer is truly off, local Gladdis cannot act; options are queued messages, Wake-on-LAN/sleep wake, or a hosted/headless Gladdis/cloud agent with synced state and permissions. True 'acts as user at the computer while computer is off' requires another always-on compute environment.\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        },
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T17:06:04.753Z",
+        "lastReinforcedAt": "2026-06-30T17:06:16.283Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0wtqjn_dtrnmb",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "remote_bridge_scaffold_commit",
+      "value": {
+        "status": "completed",
+        "commit": "a5f9d50",
+        "branch": "positioning-one-local-workspace",
+        "pushed": true,
+        "summary": [
+          "Added opt-in RemoteChatServer with bearer-token auth, SSE stream endpoint, chat send/abort APIs, conversation/model APIs, and a minimal installable PWA shell served at /app.",
+          "Added ServiceRegistry chat stream subscription fan-out so remote clients can receive ChatStreamEvent without bypassing existing renderer batching.",
+          "Wired server startup behind GLADDIS_PHONE_BRIDGE=1 with host/port/token/CORS env vars.",
+          "Added unit tests for unauthorized send rejection and authenticated remote turn persistence/stream delta handling."
+        ],
+        "validation": [
+          "npm run check passed: 75 test files, 585 passing, 9 skipped",
+          "npm run build passed"
+        ],
+        "notes": [
+          "Worktree still contains many unrelated pre-existing unstaged changes; commit staged only the bridge scaffold."
+        ]
+      },
+      "text": "remote_bridge_scaffold_commit: {\"status\":\"completed\",\"commit\":\"a5f9d50\",\"branch\":\"positioning-one-local-workspace\",\"pushed\":true,\"summary\":[\"Added opt-in RemoteChatServer with bearer-token auth, SSE stream endpoint, chat send/abort APIs, conversation/model APIs, and a minimal installable PWA shell served at /app.\",\"Added ServiceRegistry chat stream subscription fan-out so remote clients can receive ChatStreamEvent without bypassing existing renderer batching.\",\"Wired server startup behind GLADDIS_PHONE_BRIDGE=1 with host/port/token/CORS env vars.\",\"Added unit tests for unauthorized send rejection and authenticated remote turn persistence/stream delta handling.\"],\"validation\":[\"npm run check passed: 75 test files, 585 passing, 9 skipped\",\"npm run build passed\"],\"notes\":[\"Worktree still contains many unrelated pre-existing unstaged changes; commit staged only the bridge scaffold.\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T17:17:48.323Z",
+        "lastReinforcedAt": "2026-06-30T17:17:48.323Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0wvynv_o5filh",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "continue_plan",
+      "value": {
+        "status": "validation_in_progress",
+        "completed": [
+          "Re-checked current remote daemon scaffold from live files",
+          "Found settings/API/IPC patterns for phone-access control",
+          "Implemented typed phone status/start/stop IPC plus Chat settings Phone tab"
+        ],
+        "current": "Run build, visually confirm UI, review scoped diff, commit and push",
+        "validation": [
+          "npm run check passed: 75 files, 585 passed, 9 skipped"
+        ]
+      },
+      "text": "continue_plan: {\"status\":\"validation_in_progress\",\"completed\":[\"Re-checked current remote daemon scaffold from live files\",\"Found settings/API/IPC patterns for phone-access control\",\"Implemented typed phone status/start/stop IPC plus Chat settings Phone tab\"],\"current\":\"Run build, visually confirm UI, review scoped diff, commit and push\",\"validation\":[\"npm run check passed: 75 files, 585 passed, 9 skipped\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        },
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.75,
+      "freshness": {
+        "createdAt": "2026-06-30T17:19:32.155Z",
+        "lastReinforcedAt": "2026-06-30T17:24:40.266Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0xbvpw_o4g8uf",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "phone_bridge_controls_commit",
+      "value": {
+        "status": "completed",
+        "commit": "9057d60",
+        "branch": "positioning-one-local-workspace",
+        "pushed": true,
+        "summary": [
+          "Added shared phone bridge types and typed window.gladdis.phone status/start/stop IPC.",
+          "Refactored RemoteChatServer startup so the daemon can be started/stopped from UI, with status exposed to renderer.",
+          "Added Chat settings Phone tab with Start local, Start LAN, Copy URL, Stop, and Refresh controls.",
+          "LAN mode now advertises a reachable IPv4 LAN address instead of 0.0.0.0 when possible."
+        ],
+        "validation": [
+          "npm run check passed: 75 test files, 585 passing, 9 skipped",
+          "npm run build passed with the existing memoryStore chunk warning"
+        ],
+        "notes": [
+          "Visual confirmation was attempted, but the app-level screenshot tools kept targeting the host Gladdis window rather than the fresh dev window; do not claim full visual confirmation.",
+          "Unrelated pre-existing worktree changes remain unstaged, including src/main/index.ts broadcastCdpEvent deletion."
+        ]
+      },
+      "text": "phone_bridge_controls_commit: {\"status\":\"completed\",\"commit\":\"9057d60\",\"branch\":\"positioning-one-local-workspace\",\"pushed\":true,\"summary\":[\"Added shared phone bridge types and typed window.gladdis.phone status/start/stop IPC.\",\"Refactored RemoteChatServer startup so the daemon can be started/stopped from UI, with status exposed to renderer.\",\"Added Chat settings Phone tab with Start local, Start LAN, Copy URL, Stop, and Refresh controls.\",\"LAN mode now advertises a reachable IPv4 LAN address instead of 0.0.0.0 when possible.\"],\"validation\":[\"npm run check passed: 75 test files, 585 passing, 9 skipped\",\"npm run build passed with the existing memoryStore chunk warning\"],\"notes\":[\"Visual confirmation was attempted, but the app-level screenshot tools kept targeting the host Gladdis window rather than the fresh dev window; do not claim full visual confirmation.\",\"Unrelated pre-existing worktree changes remain unstaged, including src/main/index.ts broadcastCdpEvent deletion.\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T17:31:54.835Z",
+        "lastReinforcedAt": "2026-06-30T17:31:54.835Z",
+        "lastReferencedAt": "2026-06-30T17:37:29.379Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0xj4p4_spgdm0",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "speed_first_class_design_discussion",
+      "value": {
+        "status": "in_progress",
+        "question": "How do we build phone/PWA access extremely well with speed as first-class?",
+        "basis": [
+          "Current scaffold is direct main-process phone bridge with SSE streaming and PWA shell",
+          "Future anywhere mode likely needs outbound desktop-to-relay connection plus phone-to-relay connection",
+          "User cares about phone as fast chat remote, not app-store native app"
+        ]
+      },
+      "text": "speed_first_class_design_discussion: {\"status\":\"in_progress\",\"question\":\"How do we build phone/PWA access extremely well with speed as first-class?\",\"basis\":[\"Current scaffold is direct main-process phone bridge with SSE streaming and PWA shell\",\"Future anywhere mode likely needs outbound desktop-to-relay connection plus phone-to-relay connection\",\"User cares about phone as fast chat remote, not app-store native app\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T17:37:33.064Z",
+        "lastReinforcedAt": "2026-06-30T17:37:33.064Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0xunzh_fvaxrz",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "paired_phone_device_sessions_commit",
+      "value": {
+        "status": "completed",
+        "commit": "6751ee9",
+        "branch": "positioning-one-local-workspace",
+        "pushed": true,
+        "summary": [
+          "Added persistent PhoneDeviceStore with hashed durable phone tokens, last-seen tracking, and revoke support.",
+          "Extended phone bridge IPC/API/status to pair and revoke devices, and allowed RemoteChatServer auth through device tokens.",
+          "Updated Phone settings UI with Pair phone, Copy URL, paired-device list, and revoke controls."
+        ],
+        "validation": [
+          "npm run check passed: 76 test files, 588 passing, 9 skipped",
+          "npm run build passed with the existing memoryStore chunk warning"
+        ],
+        "visual_check": "App window screenshot succeeded, but it only confirmed the host app was running after refresh; it did not conclusively verify the Phone modal controls on screen."
+      },
+      "text": "paired_phone_device_sessions_commit: {\"status\":\"completed\",\"commit\":\"6751ee9\",\"branch\":\"positioning-one-local-workspace\",\"pushed\":true,\"summary\":[\"Added persistent PhoneDeviceStore with hashed durable phone tokens, last-seen tracking, and revoke support.\",\"Extended phone bridge IPC/API/status to pair and revoke devices, and allowed RemoteChatServer auth through device tokens.\",\"Updated Phone settings UI with Pair phone, Copy URL, paired-device list, and revoke controls.\"],\"validation\":[\"npm run check passed: 76 test files, 588 passing, 9 skipped\",\"npm run build passed with the existing memoryStore chunk warning\"],\"visual_check\":\"App window screenshot succeeded, but it only confirmed the host app was running after refresh; it did not conclusively verify the Phone modal controls on screen.\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T17:46:31.276Z",
+        "lastReinforcedAt": "2026-06-30T17:46:31.276Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0y2ue9_zhsn6k",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "next_slice_plan",
+      "value": {
+        "status": "in_progress",
+        "focus": "durable phone session resume across page reloads",
+        "steps": [
+          {
+            "step": "inspect current bridge/auth/app flow",
+            "status": "completed"
+          },
+          {
+            "step": "add persisted per-device session state in main process",
+            "status": "in_progress"
+          },
+          {
+            "step": "restore/retry state in remote phone app",
+            "status": "pending"
+          },
+          {
+            "step": "validate and push",
+            "status": "pending"
+          }
+        ]
+      },
+      "text": "next_slice_plan: {\"status\":\"in_progress\",\"focus\":\"durable phone session resume across page reloads\",\"steps\":[{\"step\":\"inspect current bridge/auth/app flow\",\"status\":\"completed\"},{\"step\":\"add persisted per-device session state in main process\",\"status\":\"in_progress\"},{\"step\":\"restore/retry state in remote phone app\",\"status\":\"pending\"},{\"step\":\"validate and push\",\"status\":\"pending\"}]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        },
+        {
+          "conversationId": "conv-1782838481479-13"
+        },
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.8,
+      "freshness": {
+        "createdAt": "2026-06-30T17:52:52.829Z",
+        "lastReinforcedAt": "2026-06-30T18:09:43.228Z",
+        "lastReferencedAt": "2026-06-30T18:08:07.920Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0ycdom_dkncwx",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "websocket_phone_transport_commit",
+      "value": {
+        "status": "completed",
+        "commit": "5fe36bd",
+        "branch": "positioning-one-local-workspace",
+        "pushed": true,
+        "summary": [
+          "Added `ws`-based persistent transport to the local phone bridge with a small command/event protocol.",
+          "RemoteChatServer now accepts `/ws` upgrades, sends `ready` and `ack` events, and broadcasts chat stream events over websocket alongside SSE.",
+          "The installable phone web client now uses websocket send/stream/reconnect behavior instead of separate EventSource + POST flow."
+        ],
+        "validation": [
+          "npm run check passed: 76 test files, 589 passing, 9 skipped",
+          "npm run build passed with the existing memoryStore chunk warning"
+        ],
+        "notes": [
+          "Added `ws` and `@types/ws` to package manifests.",
+          "Visual confirmation of the phone UI inside the running app was not conclusive from the app-level screenshot alone."
+        ]
+      },
+      "text": "websocket_phone_transport_commit: {\"status\":\"completed\",\"commit\":\"5fe36bd\",\"branch\":\"positioning-one-local-workspace\",\"pushed\":true,\"summary\":[\"Added `ws`-based persistent transport to the local phone bridge with a small command/event protocol.\",\"RemoteChatServer now accepts `/ws` upgrades, sends `ready` and `ack` events, and broadcasts chat stream events over websocket alongside SSE.\",\"The installable phone web client now uses websocket send/stream/reconnect behavior instead of separate EventSource + POST flow.\"],\"validation\":[\"npm run check passed: 76 test files, 589 passing, 9 skipped\",\"npm run build passed with the existing memoryStore chunk warning\"],\"notes\":[\"Added `ws` and `@types/ws` to package manifests.\",\"Visual confirmation of the phone UI inside the running app was not conclusive from the app-level screenshot alone.\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T18:00:17.733Z",
+        "lastReinforcedAt": "2026-06-30T18:00:17.733Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0yjbyr_8a5as3",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "phone_reconnect_queue_commit",
+      "value": {
+        "status": "completed",
+        "commit": "4813872",
+        "branch": "positioning-one-local-workspace",
+        "pushed": true,
+        "summary": [
+          "Added client message ids to the phone socket protocol and explicit `status` events for connection state.",
+          "RemoteChatServer now dedupes websocket sends by client token + clientMessageId, including concurrent retries, so reconnects do not create duplicate desktop turns.",
+          "The installable phone client now keeps an outbox, retries unacked sends after reconnect, and routes streamed assistant output back into the correct placeholder bubble."
+        ],
+        "validation": [
+          "npm run check passed: 76 test files, 590 passing, 9 skipped",
+          "npm run build passed with the existing memoryStore chunk warning"
+        ]
+      },
+      "text": "phone_reconnect_queue_commit: {\"status\":\"completed\",\"commit\":\"4813872\",\"branch\":\"positioning-one-local-workspace\",\"pushed\":true,\"summary\":[\"Added client message ids to the phone socket protocol and explicit `status` events for connection state.\",\"RemoteChatServer now dedupes websocket sends by client token + clientMessageId, including concurrent retries, so reconnects do not create duplicate desktop turns.\",\"The installable phone client now keeps an outbox, retries unacked sends after reconnect, and routes streamed assistant output back into the correct placeholder bubble.\"],\"validation\":[\"npm run check passed: 76 test files, 590 passing, 9 skipped\",\"npm run build passed with the existing memoryStore chunk warning\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T18:05:42.099Z",
+        "lastReinforcedAt": "2026-06-30T18:05:42.099Z",
+        "lastReferencedAt": "2026-06-30T18:08:07.920Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0z5pn1_ldjijt",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0w17g5srx",
+      "key": "phone_session_resume_commit",
+      "value": {
+        "status": "completed",
+        "commit": "c3cdc09",
+        "branch": "positioning-one-local-workspace",
+        "pushed": true,
+        "summary": [
+          "Added a persisted PhoneSessionStateStore so each paired phone can recover its active conversation and in-flight turn state after reloads.",
+          "RemoteChatServer now authenticates websocket clients into durable session keys, sends a session snapshot on `ready`, and updates/clears pending turn state during the chat stream lifecycle.",
+          "The remote phone app now persists its local outbox in localStorage, restores the saved conversation from the desktop daemon, reconciles local pending messages with server session state, and safely retries after reconnect."
+        ],
+        "validation": [
+          "npm run check passed: 77 test files, 593 passing, 9 skipped",
+          "npm run build passed with the existing memoryStore chunk warning"
+        ],
+        "notes": [
+          "Committed without staging unrelated user changes in src/main/index.ts; the persisted-session wiring there was staged selectively.",
+          "I visually confirmed the Gladdis app window was running, but I did not fully drive the served remote phone page in-browser during this slice."
+        ]
+      },
+      "text": "phone_session_resume_commit: {\"status\":\"completed\",\"commit\":\"c3cdc09\",\"branch\":\"positioning-one-local-workspace\",\"pushed\":true,\"summary\":[\"Added a persisted PhoneSessionStateStore so each paired phone can recover its active conversation and in-flight turn state after reloads.\",\"RemoteChatServer now authenticates websocket clients into durable session keys, sends a session snapshot on `ready`, and updates/clears pending turn state during the chat stream lifecycle.\",\"The remote phone app now persists its local outbox in localStorage, restores the saved conversation from the desktop daemon, reconciles local pending messages with server session state, and safely retries after reconnect.\"],\"validation\":[\"npm run check passed: 77 test files, 593 passing, 9 skipped\",\"npm run build passed with the existing memoryStore chunk warning\"],\"notes\":[\"Committed without staging unrelated user changes in src/main/index.ts; the persisted-session wiring there was staged selectively.\",\"I visually confirmed the Gladdis app window was running, but I did not fully drive the served remote phone page in-browser during this slice.\"]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.7,
+      "freshness": {
+        "createdAt": "2026-06-30T18:23:06.252Z",
+        "lastReinforcedAt": "2026-06-30T18:23:06.252Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr0z6u9h_qn5t8x",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr0z6shc75k",
+      "key": "checklist",
+      "value": {
+        "items": [
+          {
+            "text": "Inspect docs/repo conventions for handoff file placement",
+            "status": "completed"
+          },
+          {
+            "text": "Draft handoff content for remote phone/PWA work",
+            "status": "completed"
+          },
+          {
+            "text": "Create file and verify final content",
+            "status": "completed"
+          }
+        ]
+      },
+      "text": "checklist: {\"items\":[{\"text\":\"Inspect docs/repo conventions for handoff file placement\",\"status\":\"completed\"},{\"text\":\"Draft handoff content for remote phone/PWA work\",\"status\":\"completed\"},{\"text\":\"Create file and verify final content\",\"status\":\"completed\"}]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782838481479-13"
+        },
+        {
+          "conversationId": "conv-1782838481479-13"
+        },
+        {
+          "conversationId": "conv-1782838481479-13"
+        }
+      ],
+      "confidence": 0.8,
+      "freshness": {
+        "createdAt": "2026-06-30T18:23:58.901Z",
+        "lastReinforcedAt": "2026-06-30T18:24:53.955Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr11hfey_1f4byi",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr11hcn0ta7",
+      "key": "checklist",
+      "value": {
+        "done_means": [
+          "Mobile landing page reads as a compact phone-first surface rather than a recycled desktop layout",
+          "Mobile text density and type scale are reduced across the hero and remaining sections",
+          "Updated mobile layout is visually confirmed in-browser",
+          "Repo validation passes and the landing-page changes are committed and pushed"
+        ],
+        "plan": [
+          {
+            "step": "Re-check the landing page markup and responsive CSS driving the current mobile view",
+            "status": "completed"
+          },
+          {
+            "step": "Trim mobile copy and tighten mobile-only sizing/spacing",
+            "status": "completed"
+          },
+          {
+            "step": "Hide long desktop explainer sections on phones and keep hero plus download flow",
+            "status": "completed"
+          },
+          {
+            "step": "Visually verify the updated mobile page, run checks, and push the change",
+            "status": "completed"
+          }
+        ]
+      },
+      "text": "checklist: {\"done_means\":[\"Mobile landing page reads as a compact phone-first surface rather than a recycled desktop layout\",\"Mobile text density and type scale are reduced across the hero and remaining sections\",\"Updated mobile layout is visually confirmed in-browser\",\"Repo validation passes and the landing-page changes are committed and pushed\"],\"plan\":[{\"step\":\"Re-check the landing page markup and responsive CSS driving the current mobile view\",\"status\":\"completed\"},{\"step\":\"Trim mobile copy and tighten mobile-only sizing/spacing\",\"status\":\"completed\"},{\"step\":\"Hide long desktop explainer sections on phones and keep hero plus download flow\",\"status\":\"completed\"},{\"step\":\"Visually verify the updated mobile page, run checks, and push the change\",\"status\":\"completed\"}]}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        }
+      ],
+      "confidence": 0.95,
+      "freshness": {
+        "createdAt": "2026-06-30T19:28:12.105Z",
+        "lastReinforcedAt": "2026-06-30T19:44:51.463Z",
+        "lastReferencedAt": "2026-06-30T19:42:40.397Z"
+      },
+      "tags": []
+    },
+    {
+      "id": "mem_mr126dok_v3o1lv",
+      "kind": "playbook",
+      "scope": "task",
+      "workspaceRoot": "/home/dp/Desktop/myworkspace/Gladdis",
+      "taskId": "task-mr11hcn0ta7",
+      "key": "mobile_refinement",
+      "value": {
+        "status": "done",
+        "problem": "mobile hero was left-stacked and desktop-like",
+        "fix": "centered the mobile hero, widened/balanced headline, centered copy/cta, and centered the video shell",
+        "verified": "live mobile browser at 390x844 with screenshot",
+        "commit": "44c3469"
+      },
+      "text": "mobile_refinement: {\"status\":\"done\",\"problem\":\"mobile hero was left-stacked and desktop-like\",\"fix\":\"centered the mobile hero, widened/balanced headline, centered copy/cta, and centered the video shell\",\"verified\":\"live mobile browser at 390x844 with screenshot\",\"commit\":\"44c3469\"}",
+      "evidence": [
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        },
+        {
+          "conversationId": "conv-1782847631996-4"
+        }
+      ],
+      "confidence": 0.95,
+      "freshness": {
+        "createdAt": "2026-06-30T19:47:36.260Z",
+        "lastReinforcedAt": "2026-06-30T19:55:48.094Z"
+      },
+      "tags": []
     }
   ],
   "tasks": {
@@ -647,6 +1999,66 @@
       "label": "Create software.dev agent harness checklist for PR + local dev tasks",
       "createdAt": "2026-06-23T01:41:44.374Z",
       "updatedAt": "2026-06-23T01:41:44.374Z"
+    },
+    "task-mr0pz66uquw": {
+      "id": "task-mr0pz66uquw",
+      "label": "packaging-distribution-audit",
+      "createdAt": "2026-06-30T14:06:04.566Z",
+      "updatedAt": "2026-06-30T14:08:07.648Z"
+    },
+    "task-mr0q54qz5z6": {
+      "id": "task-mr0q54qz5z6",
+      "label": "packaging scaffold",
+      "createdAt": "2026-06-30T14:10:42.635Z",
+      "updatedAt": "2026-06-30T14:14:49.733Z"
+    },
+    "task-mr0qbiefgl0": {
+      "id": "task-mr0qbiefgl0",
+      "label": "Packaging scaffold follow-up",
+      "createdAt": "2026-06-30T14:15:40.263Z",
+      "updatedAt": "2026-06-30T14:18:25.071Z"
+    },
+    "task-mr0qgch1x7p": {
+      "id": "task-mr0qgch1x7p",
+      "label": "signing-notarization-walkthrough",
+      "createdAt": "2026-06-30T14:19:25.861Z",
+      "updatedAt": "2026-06-30T14:19:40.832Z"
+    },
+    "task-mr0qr6u8v3t": {
+      "id": "task-mr0qr6u8v3t",
+      "label": "windows-signing-setup",
+      "createdAt": "2026-06-30T14:27:51.776Z",
+      "updatedAt": "2026-06-30T14:29:13.354Z"
+    },
+    "task-mr0qui44ejh": {
+      "id": "task-mr0qui44ejh",
+      "label": "linux-first-packaging-scaffold",
+      "createdAt": "2026-06-30T14:30:26.356Z",
+      "updatedAt": "2026-06-30T15:39:59.814Z"
+    },
+    "task-mr0vsfc6wvo": {
+      "id": "task-mr0vsfc6wvo",
+      "label": "Find browser automation info",
+      "createdAt": "2026-06-30T16:48:47.526Z",
+      "updatedAt": "2026-06-30T16:49:18.272Z"
+    },
+    "task-mr0w17g5srx": {
+      "id": "task-mr0w17g5srx",
+      "label": "daemon-pwa-phone-access-review",
+      "createdAt": "2026-06-30T16:55:37.205Z",
+      "updatedAt": "2026-06-30T18:23:06.252Z"
+    },
+    "task-mr0z6shc75k": {
+      "id": "task-mr0z6shc75k",
+      "label": "model-handoff-md",
+      "createdAt": "2026-06-30T18:23:56.592Z",
+      "updatedAt": "2026-06-30T18:24:53.955Z"
+    },
+    "task-mr11hcn0ta7": {
+      "id": "task-mr11hcn0ta7",
+      "label": "Landing page UI review",
+      "createdAt": "2026-06-30T19:28:08.508Z",
+      "updatedAt": "2026-06-30T19:55:48.094Z"
     }
   }
 }

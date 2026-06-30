@@ -16,23 +16,23 @@ export function createToolValidationState(): ToolValidationState {
   }
 }
 
-export function hasValidationTool(toolDefs: { name: string }[]): boolean {
+function hasValidationTool(toolDefs: { name: string }[]): boolean {
   return toolDefs.some((tool) => tool.name === 'verify_change' || tool.name === 'run_validation')
 }
 
-export function preferredValidationTool(toolDefs: { name: string }[]): 'verify_change' | 'run_validation' | null {
+function preferredValidationTool(toolDefs: { name: string }[]): 'verify_change' | 'run_validation' | null {
   if (toolDefs.some((tool) => tool.name === 'verify_change')) return 'verify_change'
   if (toolDefs.some((tool) => tool.name === 'run_validation')) return 'run_validation'
   return null
 }
 
-export function validationToolArgs(
+function validationToolArgs(
   name: 'verify_change' | 'run_validation'
 ): Record<string, unknown> {
   return name === 'verify_change' ? { check: 'typecheck' } : { check: 'typecheck' }
 }
 
-export async function runAutomaticValidation(args: {
+async function runAutomaticValidation(args: {
   state: ToolValidationState
   toolDefs: { name: string }[]
   turn: number
@@ -277,7 +277,7 @@ export const VALIDATION_REPAIR_REQUIRED =
 export const VALIDATION_FAILED_FINAL =
   'I edited files, but validation has not passed, so I cannot honestly mark this complete yet.'
 
-export function validationInstruction(state: ToolValidationState): string {
+function validationInstruction(state: ToolValidationState): string {
   if (!state.lastValidationFailure) return VALIDATION_REMINDER
   return `${VALIDATION_REPAIR_REQUIRED}\n\nLatest validation failure:\n${clipFailure(state.lastValidationFailure)}`
 }

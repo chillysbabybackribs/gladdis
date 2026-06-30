@@ -21,7 +21,6 @@ export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
   'deep_search',
   'fetch_page',
   'navigate',
-  'browse_task',
   'read_page',
   'read_a11y',
   'grep_page',
@@ -71,7 +70,6 @@ export const CURSOR_MCP_TOOL_NAMES = new Set([
   'deep_search',
   'fetch_page',
   'navigate',
-  'browse_task',
   'read_page',
   'read_a11y',
   'grep_page',
@@ -98,7 +96,7 @@ export const CURSOR_MCP_TOOLS = AGENT_TOOLS
 
 export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the Gladdis MCP tools too: search_open, navigate, browse_task, read_page, read_a11y, grep_page, ' +
+  'For browser work beyond search use the Gladdis MCP tools too: search_open, navigate, read_page, read_a11y, grep_page, ' +
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
   'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, memory_create_task, repo_overview, ' +
@@ -125,7 +123,7 @@ export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
 // the model never learns to call.
 export const CURSOR_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the Gladdis MCP tools too: navigate, browse_task, read_page, read_a11y, grep_page, ' +
+  'For browser work beyond search use the Gladdis MCP tools too: navigate, read_page, read_a11y, grep_page, ' +
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
   'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, and memory_create_task.\n' +

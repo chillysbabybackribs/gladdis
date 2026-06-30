@@ -78,10 +78,13 @@ export function useSlotBounds(ref: RefObject<HTMLElement | null>, deps: unknown[
       window.addEventListener('resize', onResize)
       document.addEventListener('transitionend', onTransitionEnd)
 
+      const offLayoutRefresh = window.gladdis.layout.onRefresh(onResize)
+
       cleanupRef.current = () => {
         ro.disconnect()
         window.removeEventListener('resize', onResize)
         document.removeEventListener('transitionend', onTransitionEnd)
+        offLayoutRefresh()
         pendingRectRef.current = null
         if (rafRef.current != null) {
           cancelAnimationFrame(rafRef.current)

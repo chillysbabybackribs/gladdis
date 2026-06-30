@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -99,15 +100,21 @@ describe('useStreamConsumer flush liveness', () => {
     vi.useRealTimers()
   })
 
-  it('flushes buffered deltas via the timer fallback when rAF never fires', () => {
+  it('flushes buffered deltas via the timer fallback when rAF never fires', async () => {
     mount()
     act(() => {
       listener?.({ requestId: 'req-1', assistantMessageId: 'asst-1', type: 'delta', text: 'abc' })
     })
-    // No rAF callback has run, but the fallback timer must still drain.
+    // No rAF callback has run, but the fallback timer must still start draining.
     expect(messages[1].text).toBe('')
-    act(() => {
+    await act(async () => {
+      vi.advanceTimersByTime(200)
+      await Promise.resolve()
+    })
+    expect(messages[1].text).toBe('ab')
+    await act(async () => {
       vi.advanceTimersByTime(100)
+      await Promise.resolve()
     })
     expect(messages[1].text).toBe('abc')
     expect(onCommit).toHaveBeenCalled()

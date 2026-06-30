@@ -7,9 +7,10 @@ import {
   desktopCapturer,
   screen,
   Menu,
-  type MenuItemConstructorOptions
+  type Rectangle
 } from 'electron'
 import { attachContextMenu } from './contextMenu'
+import { SHELL_BACKGROUND } from './browserPolish'
 import { join, resolve } from 'path'
 import { homedir } from 'os'
 import { mkdir } from 'fs/promises'
@@ -23,7 +24,6 @@ import { PageExtractor } from './extract/PageExtractor'
 import { BrowserTools } from './models/browserTools'
 import { ModelCallLedger } from './models/ModelCallLedger'
 import { synthesizeSpeech } from './models/tts'
-import { broadcastCdpEvent } from './pipeline/activeRunners'
 import { registerTerminalIpc, sendIfLive } from './terminal'
 import type { PtyHost } from './terminal/PtyHost'
 import installExtension, {
@@ -55,13 +55,26 @@ import { RemoteChatServer } from './remote/RemoteChatServer'
 import { PhoneDeviceStore } from './remote/PhoneDeviceStore'
 import { PhoneSessionStateStore, deviceSessionKey } from './remote/PhoneSessionStateStore'
 import { resolvePhoneBridgeToken } from './remote/phoneBridgeToken'
+import {
+  invokeMenuRole,
+  setApplicationMenu,
+  type AppMenuBridgeDeps
+} from './appMenuBridge'
+import type { MenuRole } from '../../shared/appMenu'
 
 let win: BaseWindow
 let uiView: WebContentsView
 let registry: ServiceRegistry
 let remoteChatServer: RemoteChatServer | null = null
+let appMenu: Menu | null = null
 let phoneDeviceStore: PhoneDeviceStore
 let phoneSessionStateStore: PhoneSessionStateStore
+let shellRevealed = false
+
+/** Linux WM fullscreen triggers a resolution OSD toast; fill the display via bounds instead. */
+const USE_PSEUDO_FULLSCREEN = process.platform === 'linux'
+let pseudoFullScreen = false
+let boundsBeforeFullScreen: Rectangle | null = null
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const appId = process.env.GLADDIS_APP_ID ?? 'com.gladdis.app'
@@ -94,6 +107,7 @@ function applyWorkspaceFolder(folder: string | null) {
   if (previous && previous !== ws.folder) registry.autoDream.stop(previous)
   if (ws.folder) void registry.autoDream.start(ws.folder)
   if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.WORKSPACE_UPDATED, ws)
+  registerApplicationMenu()
   return ws
 }
 
@@ -159,13 +173,76 @@ function isTrustedLocalCertificateHost(url: string): boolean {
   }
 }
 
+function revealShellWindow(): void {
+  if (shellRevealed || win.isDestroyed()) return
+  shellRevealed = true
+  if (!win.isVisible()) win.show()
+}
+
+function isWindowFullScreen(): boolean {
+  return USE_PSEUDO_FULLSCREEN ? pseudoFullScreen : win.isFullScreen()
+}
+
+function toggleWindowFullScreen(): void {
+  if (win.isDestroyed()) return
+  if (USE_PSEUDO_FULLSCREEN) {
+    if (pseudoFullScreen) {
+      pseudoFullScreen = false
+      if (boundsBeforeFullScreen) win.setBounds(boundsBeforeFullScreen)
+      boundsBeforeFullScreen = null
+    } else {
+      boundsBeforeFullScreen = win.getBounds()
+      pseudoFullScreen = true
+      const display = screen.getDisplayMatching(boundsBeforeFullScreen)
+      win.setBounds(display.bounds)
+    }
+    scheduleChromeSync()
+    notifyFullScreenChanged()
+    return
+  }
+  win.setFullScreen(!win.isFullScreen())
+}
+
+function syncUiViewBounds(): void {
+  if (win.isDestroyed() || uiView.webContents.isDestroyed()) return
+  const { width, height } = win.getContentBounds()
+  uiView.setBounds({ x: 0, y: 0, width, height })
+}
+
+function notifyLayoutRefresh(): void {
+  if (uiView.webContents.isDestroyed()) return
+  uiView.webContents.send(IPC.WIN_LAYOUT_REFRESH)
+}
+
+function notifyFullScreenChanged(): void {
+  if (uiView.webContents.isDestroyed()) return
+  uiView.webContents.send(IPC.WIN_FULLSCREEN_CHANGED, isWindowFullScreen())
+}
+
+/** Re-sync UI view geometry after chrome transitions (Linux stale-bounds workaround). */
+function scheduleChromeSync(): void {
+  syncUiViewBounds()
+  setTimeout(syncUiViewBounds, 0)
+  setTimeout(() => {
+    syncUiViewBounds()
+    notifyLayoutRefresh()
+  }, 50)
+  setTimeout(() => {
+    syncUiViewBounds()
+    notifyLayoutRefresh()
+  }, 150)
+}
+
 function createWindow(): void {
   win = new BaseWindow({
     width: 1440,
     height: 900,
-    backgroundColor: '#181818',
-    title: 'gladdis'
+    backgroundColor: SHELL_BACKGROUND,
+    title: '',
+    frame: false,
+    show: false
   })
+  if (USE_PSEUDO_FULLSCREEN) win.setFullScreenable(false)
 
   // Root UI view: the React chat + tabstrip. Fills the whole window;
   // browser tab views are layered ON TOP, clipped to the right pane.
@@ -178,18 +255,28 @@ function createWindow(): void {
       // Audible replies play seconds after the send click, by which point
       // Chromium's default user-gesture requirement has lapsed and would block
       // the <audio> silently. This is a trusted local UI, so allow autoplay.
-      autoplayPolicy: 'no-user-gesture-required'
+      autoplayPolicy: 'no-user-gesture-required',
+      backgroundThrottling: false
     }
   })
+  uiView.setBackgroundColor(SHELL_BACKGROUND)
   attachContextMenu(uiView.webContents)
   win.contentView.addChildView(uiView)
 
-  const fit = () => {
-    const { width, height } = win.getContentBounds()
-    uiView.setBounds({ x: 0, y: 0, width, height })
+  syncUiViewBounds()
+  win.on('resize', syncUiViewBounds)
+  win.on('maximize', scheduleChromeSync)
+  win.on('unmaximize', scheduleChromeSync)
+  if (!USE_PSEUDO_FULLSCREEN) {
+    win.on('enter-full-screen', () => {
+      scheduleChromeSync()
+      notifyFullScreenChanged()
+    })
+    win.on('leave-full-screen', () => {
+      scheduleChromeSync()
+      notifyFullScreenChanged()
+    })
   }
-  fit()
-  win.on('resize', fit)
 
   if (isDev) {
     void uiView.webContents.loadURL(process.env.ELECTRON_RENDERER_URL!)
@@ -197,6 +284,11 @@ function createWindow(): void {
   } else {
     void uiView.webContents.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  // Safety net: never leave the window hidden if the renderer fails to boot.
+  uiView.webContents.once('did-finish-load', () => {
+    setTimeout(revealShellWindow, 5000)
+  })
 
   // A single navigation fires a burst of WebContents events (did-start-navigation,
   // did-start-loading, page-title-updated, did-navigate, did-stop-loading, …),
@@ -219,9 +311,6 @@ function createWindow(): void {
     uiView,
     pushTabs,
     (e) => {
-      // Forward CDP events to active pipeline Runner(s) for the tab that changed.
-      // Supports concurrent turns from two chat panels with bounded overhead.
-      broadcastCdpEvent(e)
       if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.CDP_EVENT, e)
     },
     captureAppWindowPng
@@ -443,6 +532,30 @@ function registerIpc(): void {
   ipcMain.handle(IPC.WORKSPACE_CREATE_FOLDER, (_e, folder: string) =>
     createAndUseWorkspaceFolder(folder)
   )
+  ipcMain.handle(IPC.WORKSPACE_PROMPT_NEW_FOLDER, async () => {
+    await promptCreateWorkspaceFolder()
+    return registry.workspace.get()
+  })
+
+  // Window controls (frameless titlebar)
+  ipcMain.on(IPC.WIN_MINIMIZE, () => win.minimize())
+  ipcMain.on(IPC.WIN_MAXIMIZE, () => toggleWindowFullScreen())
+  ipcMain.on(IPC.WIN_CLOSE, () => win.close())
+  ipcMain.on(IPC.SHELL_READY, () => revealShellWindow())
+  ipcMain.handle(IPC.WIN_IS_MAXIMIZED, () => win.isMaximized())
+  ipcMain.handle(IPC.WIN_IS_FULLSCREEN, () => isWindowFullScreen())
+  ipcMain.on(IPC.APP_DISPATCH, (_e, command: AppCommand) => sendAppCommand(command))
+  ipcMain.on(IPC.MENU_INVOKE_ROLE, (_e, role: MenuRole) => {
+    invokeMenuRole(role, getMenuBridgeDeps())
+  })
+  win.on('maximize', () => {
+    if (!uiView.webContents.isDestroyed())
+      uiView.webContents.send(IPC.WIN_MAXIMIZED_CHANGED, true)
+  })
+  win.on('unmaximize', () => {
+    if (!uiView.webContents.isDestroyed())
+      uiView.webContents.send(IPC.WIN_MAXIMIZED_CHANGED, false)
+  })
 
   ipcMain.handle(IPC.AUDIT_LIST, () => registry.audit.list())
 
@@ -552,183 +665,43 @@ function sendAppCommand(command: AppCommand): void {
   if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.APP_COMMAND, command)
 }
 
-function registerApplicationMenu(): void {
-  const hasWorkspace = !!registry.workspace.get().folder
-  const template: MenuItemConstructorOptions[] = [
-    {
-      label: 'File',
-      submenu: [
-        {
-          label: 'New Folder...',
-          accelerator: 'CmdOrCtrl+Shift+N',
-          click: () => {
-            void promptCreateWorkspaceFolder().catch((error) => {
-              console.error('[workspace] failed to create folder:', error)
-              void dialog.showErrorBox(
-                'Could not create folder',
-                error instanceof Error ? error.message : String(error)
-              )
-            })
-          }
-        },
-        {
-          label: 'Open Folder...',
-          accelerator: 'CmdOrCtrl+O',
-          click: () => {
-            void dialog
-              .showOpenDialog(win, {
-                title: 'Choose a folder to work from',
-                defaultPath: registry.workspace.get().folder ?? undefined,
-                properties: ['openDirectory', 'createDirectory'],
-                buttonLabel: 'Use folder'
-              })
-              .then((result) => {
-                if (result.canceled || result.filePaths.length === 0) return
-                applyWorkspaceFolder(result.filePaths[0])
-              })
-              .catch((error) => console.error('[workspace] failed to pick folder:', error))
-          }
-        },
-        { type: 'separator' },
-        {
-          label: 'Start Codex in Terminal',
-          enabled: hasWorkspace,
-          submenu: [
-            {
-              label: 'Standard',
-              accelerator: 'CmdOrCtrl+Alt+C',
-              click: () => sendAppCommand({ type: 'terminal:run', command: 'codex' })
-            },
-            {
-              label: 'Unrestricted (--yolo)',
-              click: () => sendAppCommand({ type: 'terminal:run', command: 'codex --yolo' })
-            }
-          ]
-        },
-        {
-          label: 'Start Claude Code in Terminal',
-          enabled: hasWorkspace,
-          submenu: [
-            {
-              label: 'Standard',
-              accelerator: 'CmdOrCtrl+Alt+L',
-              click: () => sendAppCommand({ type: 'terminal:run', command: 'claude' })
-            },
-            {
-              label: 'Unrestricted (--dangerously-skip-permissions)',
-              click: () =>
-                sendAppCommand({
-                  type: 'terminal:run',
-                  command: 'claude --dangerously-skip-permissions'
-                })
-            }
-          ]
-        },
-        { type: 'separator' },
-        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' }
-      ]
-    },
-    {
-      label: 'Memory',
-      submenu: [
-        {
-          label: 'Curate Memory...',
-          enabled: hasWorkspace,
-          click: () => sendAppCommand({ type: 'memory:open', section: 'curate' })
-        },
-        {
-          label: 'Review Last Dream...',
-          enabled: hasWorkspace,
-          click: () => sendAppCommand({ type: 'memory:open', section: 'review' })
-        },
-        {
-          label: 'Dream History...',
-          enabled: hasWorkspace,
-          click: () => sendAppCommand({ type: 'memory:open', section: 'history' })
-        },
-        { type: 'separator' },
-        {
-          label: 'Auto-dream Settings...',
-          enabled: hasWorkspace,
-          click: () => sendAppCommand({ type: 'memory:open', section: 'auto' })
-        }
-      ]
-    },
-    { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        // Per-panel chat zoom, flattened into the View dropdown so + and -
-        // sit right next to "Chat Left" / "Chat Right" instead of behind a
-        // submenu. Native OS menus dismiss on every click, so the
-        // accelerators below let the user fire the same actions repeatedly
-        // without re-opening View.
-        {
-          label: 'Chat Left  \u2212',
-          accelerator: 'CommandOrControl+Shift+[',
-          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'left', action: 'out' })
-        },
-        {
-          label: 'Chat Left  +',
-          accelerator: 'CommandOrControl+Shift+]',
-          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'left', action: 'in' })
-        },
-        {
-          label: 'Chat Left  Reset',
-          accelerator: 'CommandOrControl+Shift+\\',
-          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'left', action: 'reset' })
-        },
-        { type: 'separator' },
-        {
-          label: 'Chat Right  \u2212',
-          accelerator: 'CommandOrControl+Alt+[',
-          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'right', action: 'out' })
-        },
-        {
-          label: 'Chat Right  +',
-          accelerator: 'CommandOrControl+Alt+]',
-          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'right', action: 'in' })
-        },
-        {
-          label: 'Chat Right  Reset',
-          accelerator: 'CommandOrControl+Alt+\\',
-          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'right', action: 'reset' })
-        },
-        { type: 'separator' },
-        // Embedded browser zoom — one factor applied across every tab.
-        // Like the chat zooms above, this scales page CONTENT inside the
-        // existing WebContentsView rect; the workspace layout slot stays
-        // exactly the same size.
-        {
-          label: 'Browser  \u2212',
-          accelerator: 'CommandOrControl+Shift+Alt+[',
-          click: () => sendAppCommand({ type: 'browser:zoom', action: 'out' })
-        },
-        {
-          label: 'Browser  +',
-          accelerator: 'CommandOrControl+Shift+Alt+]',
-          click: () => sendAppCommand({ type: 'browser:zoom', action: 'in' })
-        },
-        {
-          label: 'Browser  Reset',
-          accelerator: 'CommandOrControl+Shift+Alt+\\',
-          click: () => sendAppCommand({ type: 'browser:zoom', action: 'reset' })
-        },
-        { type: 'separator' },
-        { role: 'togglefullscreen' }
-      ]
-    },
-    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] }
-  ]
+function openWorkspaceFolderDialog(): void {
+  void dialog
+    .showOpenDialog(win, {
+      title: 'Choose a folder to work from',
+      defaultPath: registry.workspace.get().folder ?? undefined,
+      properties: ['openDirectory', 'createDirectory'],
+      buttonLabel: 'Use folder'
+    })
+    .then((result) => {
+      if (result.canceled || result.filePaths.length === 0) return
+      applyWorkspaceFolder(result.filePaths[0])
+    })
+    .catch((error) => console.error('[workspace] failed to pick folder:', error))
+}
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+function getMenuBridgeDeps(): AppMenuBridgeDeps {
+  return {
+    getHasWorkspace: () => !!registry.workspace.get().folder,
+    sendAppCommand,
+    promptCreateWorkspaceFolder: () =>
+      promptCreateWorkspaceFolder().catch((error) => {
+        console.error('[workspace] failed to create folder:', error)
+        void dialog.showErrorBox(
+          'Could not create folder',
+          error instanceof Error ? error.message : String(error)
+        )
+      }),
+    openWorkspaceFolder: openWorkspaceFolderDialog,
+    toggleWindowFullScreen,
+    getShellWebContents: () => uiView.webContents,
+    getWindow: () => win
+  }
+}
+
+function registerApplicationMenu(): void {
+  if (!registry || !win || !uiView) return
+  appMenu = setApplicationMenu(getMenuBridgeDeps())
 }
 
 app.whenReady().then(async () => {

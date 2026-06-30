@@ -247,7 +247,7 @@ export class CodexClient {
     return text
   }
 
-  /** Run one non-streaming Codex turn → assistant text (browse_task/pipeline planning). */
+  /** Run one non-streaming Codex turn → assistant text (used for nested LLM tool calls). */
   async complete(modelId: string, system: string, user: string): Promise<string> {
     const server = await this.ensureServer()
     const p = this.threadStore.posture(false)

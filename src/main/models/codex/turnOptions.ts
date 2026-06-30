@@ -33,7 +33,7 @@ export function turnReasoningOverrides(entry?: CodexModelEntry): Pick<TurnStartP
   return { ...(effort ? { effort } : {}), ...(summary ? { summary } : {}) }
 }
 
-export function isOptimizationRejection(err: unknown): boolean {
+function isOptimizationRejection(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err)
   return /\b(?:serviceTier|service_tier|fast_mode|effort|summary|reasoning|unsupported|invalid|unknown field|required experimentalApi)\b/i.test(
     message
@@ -59,7 +59,7 @@ export async function requestWithOptimizationFallback(
   }
 }
 
-export function stripOptimizationOverrides<T extends ThreadStartParams | ThreadResumeParams | TurnStartParams>(
+function stripOptimizationOverrides<T extends ThreadStartParams | ThreadResumeParams | TurnStartParams>(
   params: T
 ): T {
   const next: any = { ...params }

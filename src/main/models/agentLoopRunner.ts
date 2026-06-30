@@ -1,5 +1,5 @@
 import type { ChatRequest } from '../../../shared/types'
-import type { LlmComplete } from '../pipeline/Planner'
+import type { LlmComplete } from './llm'
 import type { TurnSupervisor } from './turnSupervisor'
 
 /**

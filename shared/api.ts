@@ -72,11 +72,25 @@ export interface GladdisApi {
   layout: {
     setBounds: (bounds: ViewBounds) => void
     setBrowserVisible: (visible: boolean) => void
+    /** Fires after fullscreen / maximize transitions settle in main. */
+    onRefresh: (cb: () => void) => () => void
+  }
+  shell: {
+    /** First React paint complete — main process may reveal the window. */
+    ready: () => void
+    /** OS platform for renderer-safe shared UI decisions. */
+    platform: () => Promise<import('./appMenu').AppMenuPlatform>
   }
   app: {
     capture: () => Promise<string>
     /** Native menu and main-process commands routed into the renderer UI. */
     onCommand: (cb: (command: AppCommand) => void) => () => void
+    /** Renderer menu clicks — main forwards to onCommand listeners. */
+    dispatch: (command: AppCommand) => void
+  }
+  menu: {
+    /** Native edit/view/window role on the focused WebContents or shell window. */
+    invokeRole: (role: import('./appMenu').MenuRole) => void
   }
   cdp: {
     send: (cmd: CdpCommand) => Promise<unknown>
@@ -153,6 +167,8 @@ export interface GladdisApi {
     pickFolder: () => Promise<Workspace>
     /** Create a folder, then use it as the working folder. */
     createFolder: (folder: string) => Promise<Workspace>
+    /** Native save dialog to create and open a new workspace folder. */
+    promptNewFolder: () => Promise<Workspace>
     /** Live updates when the working folder changes outside this renderer path. */
     onUpdated: (cb: (workspace: Workspace) => void) => () => void
   }
@@ -266,6 +282,15 @@ export interface GladdisApi {
     history: {
       list: (workspaceRoot: string) => Promise<DreamHistoryFile>
     }
+  }
+  win: {
+    minimize: () => void
+    toggleMaximize: () => void
+    close: () => void
+    isMaximized: () => Promise<boolean>
+    onMaximizedChanged: (cb: (maximized: boolean) => void) => () => void
+    isFullScreen: () => Promise<boolean>
+    onFullScreenChanged: (cb: (fullScreen: boolean) => void) => () => void
   }
   terminal: {
     /** Spawn a new PTY session and return its id (one shell per id). */

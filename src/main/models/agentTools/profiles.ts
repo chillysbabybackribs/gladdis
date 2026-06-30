@@ -10,7 +10,6 @@ import { FS_TOOLS } from './fs'
 import { MEMORY_TOOLS } from './memory'
 import { REPO_TOOLS } from './repo'
 import { SEARCH_TOOLS } from './search'
-import { TASK_TOOLS } from './task'
 
 const TOOL_NAME_NORMALIZE_CACHE = new Map<string, string>()
 const TOOL_GROUP_NAME_NORMALIZE_CACHE = new Map<string, string>()
@@ -23,7 +22,6 @@ const PROFILE_TOOL_SIGNATURES = new WeakMap<ToolDef[], string>()
 export const AGENT_TOOLS: ToolDef[] = [
   ...REPO_TOOLS,       // repo overview + bounded workspace search
   ...SEARCH_TOOLS,     // search, fetch_page, deep_search
-  ...TASK_TOOLS,       // browse_task for multi-step browser work
   ...PERCEIVE_TOOLS,   // read_page
   ...CAPTURE_TOOLS,    // screenshot, screenshot_app
   ...DRIVE_TOOLS,      // navigate, click, type, press, execute_in_browser, cdp
@@ -40,7 +38,6 @@ export interface AgentToolProfile {
 
 const BROWSER_PROFILE_TOOLS: ToolDef[] = [
   ...SEARCH_TOOLS,
-  ...TASK_TOOLS,
   ...PERCEIVE_TOOLS,
   ...CAPTURE_TOOLS,
   ...DRIVE_TOOLS,
@@ -75,7 +72,7 @@ const RESEARCH_PROFILE_TOOLS: ToolDef[] = [
 const TOOL_GROUPS: Record<string, ToolDef[]> = {
   filesystem: [...REPO_TOOLS, ...FS_TOOLS],
   browser: [...PERCEIVE_TOOLS, ...CAPTURE_TOOLS, ...DRIVE_TOOLS],
-  research: [...SEARCH_TOOLS, ...TASK_TOOLS]
+  research: [...SEARCH_TOOLS]
 }
 const KNOWN_TOOL_GROUPS = new Set(Object.keys(TOOL_GROUPS))
 
@@ -99,7 +96,6 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   memorylist: 'memory_list',
   memoryforget: 'memory_forget',
   memorycreatetask: 'memory_create_task',
-  browsetask: 'browse_task',
   readpage: 'read_page',
   reada11y: 'read_a11y',
   execinbrowser: 'execute_in_browser',

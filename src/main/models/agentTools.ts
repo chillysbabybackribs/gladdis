@@ -12,8 +12,6 @@
  *   SEARCH   → `search`, `deep_search`, `fetch_page`.
  *   REPO     → `repo_overview`, `repo_grep_task`, `search_repo`, `read_spans`,
  *              `research_dossier`, `verify_change` (CapabilityBroker-backed).
- *   TASK     → `browse_task` — multi-step pipeline (Planner → Runner →
- *              finalResponse). One LLM tool call drives a whole flow.
  *   FS       → read_file / write_file / edit_file / list_dir / search_files /
  *              run_validation / publish_changes / run_command / clipboard /
  *              audit_codebase.
@@ -21,8 +19,7 @@
  *
  * Token budget: the old free-form loop could inject 30–100 K tokens per turn
  * through extract_page + screenshot + get_browser_html. This surface caps
- * single-page perception at ~2 600 tokens and routes multi-step tasks through
- * the deterministic pipeline.
+ * single-page perception at ~2 600 tokens through PageDigest.
  */
 
 export type {

@@ -5,6 +5,7 @@ import {
   type CdpCommand,
   type CdpEventPayload,
   type ChatPanelSide,
+  type ChatInterjectionRequest,
   type ChatRequest,
   type ChatStreamEvent,
   type Conversation,
@@ -68,7 +69,10 @@ const api: GladdisApi = {
   },
   chat: {
     send: (req: ChatRequest) => ipcRenderer.send(IPC.CHAT_SEND, req),
+    interject: (req: ChatInterjectionRequest) => ipcRenderer.send(IPC.CHAT_INTERJECT, req),
     abort: (requestId: string) => ipcRenderer.send(IPC.CHAT_ABORT, requestId),
+    pause: (requestId: string) => ipcRenderer.send(IPC.CHAT_PAUSE, requestId),
+    resume: (requestId: string) => ipcRenderer.send(IPC.CHAT_RESUME, requestId),
     onStream: (cb: (e: ChatStreamEvent) => void) => {
       const listener = (_e: unknown, payload: ChatStreamEvent) => cb(payload)
       ipcRenderer.on(IPC.CHAT_STREAM, listener)

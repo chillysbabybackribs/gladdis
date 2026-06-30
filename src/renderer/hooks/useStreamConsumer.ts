@@ -202,6 +202,12 @@ interface StreamConsumerArgs {
   setMessages: Dispatch<SetStateAction<Message[]>>
   setStreaming: Dispatch<SetStateAction<boolean>>
   /**
+   * Cleared on done/error so the composer's pause/resume button doesn't get
+   * stuck in the "paused" state after the turn ends naturally. Optional so
+   * callers that don't expose pause (e.g. tests) can skip it.
+   */
+  setPaused?: Dispatch<SetStateAction<boolean>>
+  /**
    * Called once per committed frame after the assistant message has been
    * updated. The caller decides whether to pin the scroller, render a "new
    * content" toast, etc. Kept as a callback so this hook stays oblivious to
@@ -234,6 +240,7 @@ export function useStreamConsumer({
   ttsRef,
   setMessages,
   setStreaming,
+  setPaused,
   onCommit
 }: StreamConsumerArgs): void {
   const pendingDelta = useRef('')
@@ -294,6 +301,7 @@ export function useStreamConsumer({
         activeReq.current = null
         activeAssistantMessageId.current = null
         setStreaming(false)
+        setPaused?.(false)
       }
     })
     return () => {

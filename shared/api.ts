@@ -9,6 +9,7 @@ import type {
 import type { AppCommand } from './appCommand'
 import type {
   ChatPanelSide,
+  ChatInterjectionRequest,
   ChatRequest,
   ChatStreamEvent,
   CodexStatus,
@@ -80,7 +81,27 @@ export interface GladdisApi {
   }
   chat: {
     send: (req: ChatRequest) => void
+    /**
+     * Add user context to an in-flight agentic task. It is consumed at the
+     * next provider iteration boundary, optionally after requesting pause.
+     */
+    interject: (req: ChatInterjectionRequest) => void
     abort: (requestId: string) => void
+    /**
+     * Pause an in-flight agentic task at the next iteration boundary. The
+     * model stream currently being consumed finishes normally; the loop then
+     * holds before starting the next iteration. Safe no-op if the request is
+     * unknown or has already completed. Pause is not supported for Codex
+     * (the local app-server owns its own loop) — the renderer hides the
+     * button for that provider.
+     */
+    pause: (requestId: string) => void
+    /**
+     * Resume a previously-paused task. The agent loop continues from the
+     * exact iteration it was holding at, with all messages/tool history
+     * preserved. Safe no-op if the request is unknown or wasn't paused.
+     */
+    resume: (requestId: string) => void
     onStream: (cb: (e: ChatStreamEvent) => void) => () => void
   }
   keys: {

@@ -258,6 +258,8 @@ export type LoopStateEventName =
   | 'iteration_started'
   | 'iteration_completed'
   | 'checkpoint_created'
+  | 'context_queued'
+  | 'context_applied'
   | 'task_paused'
   | 'task_blocked'
   | 'task_completed'
@@ -452,6 +454,13 @@ export interface ChatRequest {
   }
   /** Optional saved custom agent selected in the composer for this turn. */
   agent?: ChatAgentSelection
+}
+
+export interface ChatInterjectionRequest {
+  requestId: string
+  text: string
+  /** Also request a boundary pause after queueing the context. */
+  pause?: boolean
 }
 
 /** OpenAI TTS voices (audible replies feature). */

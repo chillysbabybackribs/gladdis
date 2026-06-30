@@ -273,6 +273,33 @@
   background: var(--border-strong) !important;
 }
 
+/* Pause / resume sits side-by-side with the stop button while a turn is
+   running. Same chip footprint as send/stop so the toolbar rhythm doesn't
+   jump, but a quieter ghost fill so stop remains the visually dominant
+   "kill switch". When the user has paused, we flip to an accent fill so the
+   resume affordance is unmistakable — there's no working text to fall back
+   on while the loop is held. */
+.composer-pause {
+  background: var(--bg-active) !important;
+  color: var(--text-primary) !important;
+}
+.composer-pause:hover:not(:disabled) {
+  background: var(--border-strong) !important;
+}
+.composer-pause:disabled {
+  background: var(--bg-elevated) !important;
+  color: var(--text-muted) !important;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.composer-pause.is-paused {
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+.composer-pause.is-paused:hover:not(:disabled) {
+  background: #6694ff !important;
+}
+
 /* Markdown rendering of assistant output */
 .md {
   font-size: var(--chat-message-size);

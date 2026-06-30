@@ -6,7 +6,7 @@ import {
   shouldAttachActivePageContext,
   shouldContinueActivePageContext
 } from '../../../shared/types'
-import { Composer, type ComposerSubmit } from './Composer'
+import { Composer, type ComposerInterjectionMode, type ComposerSubmit } from './Composer'
 import { TokenCounter } from './TokenCounter'
 import { ChatSettingsModal } from './ChatSettingsModal'
 import { useTts, useTtsSettings } from '../hooks/useTts'
@@ -88,6 +88,7 @@ export function ChatPanel({
   const { keyStatus, setKeyStatus, codexStatus, models, workspace, pickWorkspace } =
     useEnvironmentStatus()
   const [streaming, setStreaming] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [audioOn, setAudioOn] = useState(() => {
     try {
       return localStorage.getItem(audioKey(panelId)) === '1'
@@ -218,6 +219,7 @@ export function ChatPanel({
     ttsRef,
     setMessages,
     setStreaming,
+    setPaused,
     onCommit: autoScroll.scheduleScroll
   })
 
@@ -355,6 +357,24 @@ export function ChatPanel({
     })
   }
 
+  const onInterject = ({ text, mode }: ComposerSubmit & { mode: ComposerInterjectionMode }) => {
+    const requestId = activeReq.current
+    if (!requestId || pauseUnsupportedReason) return
+    const clean = text.trim()
+    if (!clean) return
+
+    window.gladdis.chat.interject({ requestId, text: clean, pause: mode === 'pause' })
+    setMessages((m) => [
+      ...m,
+      {
+        role: 'user',
+        text: mode === 'pause' ? `[Pause + apply]\n\n${clean}` : `[Queued for next step]\n\n${clean}`
+      }
+    ])
+    autoScroll.scrollToBottom()
+    if (mode === 'pause') setPaused(true)
+  }
+
   const stop = () => {
     if (activeReq.current) {
       window.gladdis.chat.abort(activeReq.current)
@@ -362,7 +382,26 @@ export function ChatPanel({
       activeAssistantMessageId.current = null
       tts.stop()
       setStreaming(false)
+      setPaused(false)
     }
+  }
+
+  /**
+   * Hold the in-flight agent loop at the next iteration boundary. The
+   * model stream currently being consumed finishes normally; the loop then
+   * blocks before the next iteration. Tracks the paused flag locally so the
+   * composer can flip the button without waiting for an echo from main.
+   */
+  const pause = () => {
+    if (!activeReq.current || paused) return
+    window.gladdis.chat.pause(activeReq.current)
+    setPaused(true)
+  }
+
+  const resume = () => {
+    if (!activeReq.current || !paused) return
+    window.gladdis.chat.resume(activeReq.current)
+    setPaused(false)
   }
 
   const newChat = () => {
@@ -374,6 +413,7 @@ export function ChatPanel({
     tts.stop()
     void flushPersist()
     setStreaming(false)
+    setPaused(false)
     setMessages([])
     continuesFromId.current = null
     convCreatedAt.current = Date.now()
@@ -395,6 +435,7 @@ export function ChatPanel({
     tts.stop()
     void flushPersist()
     setStreaming(false)
+    setPaused(false)
     const conv = await window.gladdis.chats.get(id)
     if (conv) {
       setConvId(conv.id)
@@ -421,6 +462,7 @@ export function ChatPanel({
     tts.stop()
     void flushPersist()
     setStreaming(false)
+    setPaused(false)
     setMessages([])
     continuesFromId.current = id
     convCreatedAt.current = Date.now()
@@ -429,6 +471,20 @@ export function ChatPanel({
     setHistoryRev((r) => r + 1)
     setShowSettings(false)
   }
+
+  // Pause is implemented inside our provider-agnostic agent loop, which
+  // doesn't run for Codex (its local app-server owns its own loop and
+  // doesn't expose iteration boundaries we can hold at). The button is
+  // ALWAYS visible while a turn is in flight so the affordance is
+  // discoverable; on Codex turns we surface that the model owns its loop
+  // by showing the disabled state and an explanatory tooltip rather than
+  // making the button disappear (which the user reads as a bug).
+  const activeModel =
+    models.find((m) => m.id === modelId) ?? MODELS.find((m) => m.id === modelId)
+  const pauseSupported = (activeModel?.provider ?? 'anthropic') !== 'codex'
+  const pauseUnsupportedReason = pauseSupported
+    ? undefined
+    : 'Codex turns are driven by the local Codex CLI, which owns the loop end-to-end. Pause holds our agent loop between iterations — Codex has no equivalent boundary. Stop still works.'
 
   // Zoom scales the conversation typography only. The composer is application
   // chrome, not content: its height, font sizes, and hint typography are held
@@ -508,7 +564,12 @@ export function ChatPanel({
           activeId={activeId}
           busy={streaming}
           onSubmit={onSubmit}
+          onInterject={pauseUnsupportedReason ? undefined : onInterject}
           onStop={stop}
+          onPause={pause}
+          onResume={resume}
+          paused={paused}
+          pauseDisabledReason={pauseUnsupportedReason}
           audioOn={audioOn}
           onToggleAudio={toggleAudio}
           voice={voice}

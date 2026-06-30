@@ -33,6 +33,7 @@ import {
   IPC,
   type AppCommand,
   type CdpCommand,
+  type ChatInterjectionRequest,
   type ChatPanelSide,
   type ChatRequest,
   type Conversation,
@@ -331,7 +332,10 @@ function registerIpc(): void {
     if (folder) autoDream.nudge(folder)
     void chat.send(req)
   })
+  ipcMain.on(IPC.CHAT_INTERJECT, (_e, req: ChatInterjectionRequest) => chat.interject(req))
   ipcMain.on(IPC.CHAT_ABORT, (_e, requestId: string) => chat.abort(requestId))
+  ipcMain.on(IPC.CHAT_PAUSE, (_e, requestId: string) => chat.pauseRequest(requestId))
+  ipcMain.on(IPC.CHAT_RESUME, (_e, requestId: string) => chat.resumeRequest(requestId))
   ipcMain.handle(IPC.KEYS_STATUS, () => keys.status())
   ipcMain.handle(IPC.KEYS_SET, (_e, provider: Provider, key: string) => keys.set(provider, key))
 

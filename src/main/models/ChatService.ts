@@ -4,6 +4,7 @@ import type { KeyStore } from './KeyStore'
 import {
   MODELS,
   isBareContinuation,
+  type ChatInterjectionRequest,
   type ChatRequest,
   type ChatStreamEvent,
   type CodexStatus,
@@ -90,8 +91,74 @@ const DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS = 4_096
 // always retains control; there is no artificial ceiling on how much work the
 // model can do in one request.
 
+/**
+ * Per-request gate that lets the agent loop hold mid-task at an iteration
+ * boundary. While `paused` is true, `wait()` blocks until either `resume()`
+ * is called or the supplied `signal` aborts (whichever comes first). This is
+ * intentionally not an `AbortController`: pausing must NOT cancel the current
+ * model stream — only the next iteration.
+ *
+ * The gate is allocated lazily on the first pause() so unpaused requests pay
+ * nothing. ChatService keeps one per requestId and drops it when the request
+ * finishes or aborts.
+ */
+export class PauseGate {
+  private paused = false
+  private waiters: Array<() => void> = []
+
+  isPaused(): boolean {
+    return this.paused
+  }
+
+  pause(): boolean {
+    if (this.paused) return false
+    this.paused = true
+    return true
+  }
+
+  resume(): boolean {
+    if (!this.paused) return false
+    this.paused = false
+    const waiters = this.waiters
+    this.waiters = []
+    for (const wake of waiters) wake()
+    return true
+  }
+
+  /** Wake any waiters (used on abort / request teardown). */
+  release(): void {
+    this.paused = false
+    const waiters = this.waiters
+    this.waiters = []
+    for (const wake of waiters) wake()
+  }
+
+  /**
+   * Block while paused, returning when resumed or aborted. Returning does
+   * NOT imply "still running" — the caller must re-check `signal.aborted`
+   * before doing more work.
+   */
+  wait(signal: AbortSignal): Promise<void> {
+    if (!this.paused || signal.aborted) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let done = false
+      const settle = () => {
+        if (done) return
+        done = true
+        signal.removeEventListener('abort', onAbort)
+        resolve()
+      }
+      const onAbort = () => settle()
+      signal.addEventListener('abort', onAbort, { once: true })
+      this.waiters.push(settle)
+    })
+  }
+}
+
 export class ChatService {
   private aborts = new Map<string, AbortController>()
+  private pauseGates = new Map<string, PauseGate>()
+  private queuedInterjections = new Map<string, string[]>()
   private assistantMessageIds = new Map<string, string>()
   /** Codex starting cwd. Access is always unrestricted full OS-user access. */
   private codexWorkspace: CodexWorkspace = { folder: null }
@@ -189,6 +256,8 @@ export class ChatService {
         | 'iteration_started'
         | 'iteration_completed'
         | 'checkpoint_created'
+        | 'context_queued'
+        | 'context_applied'
         | 'task_paused'
         | 'task_blocked'
         | 'task_completed'
@@ -257,6 +326,112 @@ export class ChatService {
   abort(requestId: string): void {
     this.aborts.get(requestId)?.abort()
     this.aborts.delete(requestId)
+    // Stop trumps pause: wake any waiter so the loop sees the abort flag and
+    // exits its iteration check, instead of sitting forever in the gate.
+    this.pauseGates.get(requestId)?.release()
+    this.pauseGates.delete(requestId)
+    this.queuedInterjections.delete(requestId)
+  }
+
+  interject(req: ChatInterjectionRequest): boolean {
+    const text = req.text.trim()
+    const controller = this.aborts.get(req.requestId)
+    if (!text || !controller || controller.signal.aborted) return false
+
+    const queued = this.queuedInterjections.get(req.requestId) ?? []
+    queued.push(text)
+    this.queuedInterjections.set(req.requestId, queued)
+    this.emit({
+      requestId: req.requestId,
+      type: 'loop_state',
+      taskId: taskIdForRequest({ requestId: req.requestId, conversationId: null }),
+      event: 'context_queued',
+      phase: 'decide',
+      iteration: 0,
+      summary: req.pause
+        ? 'Context queued and pause requested for the next task boundary.'
+        : 'Context queued for the next task step.'
+    })
+    if (req.pause) this.pauseRequest(req.requestId)
+    return true
+  }
+
+  /**
+   * Pause an in-flight agentic request at the next iteration boundary. Returns
+   * true if the request exists and was newly paused; false otherwise (unknown
+   * request, already paused, or already finished). The agent loop continues
+   * to finish whatever model stream is in flight, then holds before the next
+   * iteration. Emits a task_paused loop_state event so the activity panel
+   * reflects the hold.
+   */
+  pauseRequest(requestId: string): boolean {
+    const controller = this.aborts.get(requestId)
+    if (!controller || controller.signal.aborted) return false
+    let gate = this.pauseGates.get(requestId)
+    if (!gate) {
+      gate = new PauseGate()
+      this.pauseGates.set(requestId, gate)
+    }
+    if (!gate.pause()) return false
+    this.emit({
+      requestId,
+      type: 'loop_state',
+      taskId: taskIdForRequest({ requestId, conversationId: null }),
+      event: 'task_paused',
+      phase: 'decide',
+      iteration: 0,
+      summary: 'Task paused — the agent is holding before its next step. Click resume to continue.'
+    })
+    return true
+  }
+
+  /**
+   * Resume a previously-paused request. Returns true if a paused request was
+   * actually unblocked; false otherwise. The loop wakes on its next gate
+   * check and continues from the same iteration, with full message + tool
+   * history preserved.
+   */
+  resumeRequest(requestId: string): boolean {
+    const gate = this.pauseGates.get(requestId)
+    if (!gate) return false
+    if (!gate.resume()) return false
+    this.emit({
+      requestId,
+      type: 'loop_state',
+      taskId: taskIdForRequest({ requestId, conversationId: null }),
+      event: 'phase_changed',
+      phase: 'act',
+      iteration: 0,
+      summary: 'Task resumed — the agent is picking up where it left off.'
+    })
+    return true
+  }
+
+  /** Per-request gate accessor used by the dispatch helpers. */
+  getPauseGate(requestId: string): PauseGate | null {
+    return this.pauseGates.get(requestId) ?? null
+  }
+
+  private consumeQueuedInterjection(requestId: string): string | null {
+    const queued = this.queuedInterjections.get(requestId)
+    if (!queued?.length) return null
+    this.queuedInterjections.delete(requestId)
+    const text = queued.join('\n\n')
+    this.emit({
+      requestId,
+      type: 'loop_state',
+      taskId: taskIdForRequest({ requestId, conversationId: null }),
+      event: 'context_applied',
+      phase: 'decide',
+      iteration: 0,
+      summary: 'Queued context applied to the next model step.'
+    })
+    return [
+      '[User context added while this task was running]',
+      'Treat this as the latest user guidance. If it corrects the current direction, adjust before taking the next step.',
+      '',
+      text
+    ].join('\n')
   }
 
   /**
@@ -430,6 +605,11 @@ export class ChatService {
     }
     const controller = new AbortController()
     this.aborts.set(req.requestId, controller)
+    // The gate is created lazily by pauseRequest(), but the wait callback
+    // resolves immediately when there's no gate, so a never-paused turn
+    // pays nothing.
+    const waitWhilePaused = (signal: AbortSignal): Promise<void> =>
+      this.pauseGates.get(req.requestId)?.wait(signal) ?? Promise.resolve()
     try {
       const policy = resolveTurnContextPolicy(req)
       stripStaleActivePageContext(req, policy)
@@ -470,7 +650,9 @@ export class ChatService {
           emitLoopState: (r: Pick<ChatRequest, 'requestId' | 'conversationId'>, e: any) =>
             this.emitLoopState(r, e),
           logSystemPrompt: (p: string, m: string, s: string) => this.logSystemPrompt(p, m, s),
-          buildToolContext: (r: ChatRequest, llm?: LlmComplete) => this.toolContext(r, llm)
+          buildToolContext: (r: ChatRequest, llm?: LlmComplete) => this.toolContext(r, llm),
+          waitWhilePaused,
+          getQueuedContext: () => this.consumeQueuedInterjection(req.requestId)
         }
         if (agentic) {
           await dispatchAgenticTurn({
@@ -507,6 +689,11 @@ export class ChatService {
     } finally {
       this.aborts.delete(req.requestId)
       this.assistantMessageIds.delete(req.requestId)
+      // Release any lingering gate so a paused request that hits done/error
+      // doesn't leak waiters into the next turn.
+      this.pauseGates.get(req.requestId)?.release()
+      this.pauseGates.delete(req.requestId)
+      this.queuedInterjections.delete(req.requestId)
     }
   }
 

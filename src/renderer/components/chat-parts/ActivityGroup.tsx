@@ -13,6 +13,8 @@ const LOOP_EVENT_LABEL: Record<LoopStatePart['event'], string> = {
   iteration_started: 'Iteration started',
   iteration_completed: 'Iteration completed',
   checkpoint_created: 'Checkpoint created',
+  context_queued: 'Context queued',
+  context_applied: 'Context applied',
   task_paused: 'Task paused',
   task_blocked: 'Task blocked',
   task_completed: 'Task completed',

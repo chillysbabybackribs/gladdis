@@ -12,13 +12,35 @@ export interface ComposerSubmit {
   text: string
 }
 
+export type ComposerInterjectionMode = 'queue' | 'pause'
+
 interface Props {
   /** Active tab id, so slash commands act on the right page. */
   activeId: string | null
   busy?: boolean
   onSubmit: (s: ComposerSubmit) => void
+  onInterject?: (s: ComposerSubmit & { mode: ComposerInterjectionMode }) => void
   /** Abort the in-flight stream (shown as a stop button while busy). */
   onStop?: () => void
+  /**
+   * Pause the in-flight agent loop at the next iteration boundary. When
+   * provided, a pause/resume button renders beside the stop button while
+   * busy. Always render the button when callbacks are supplied — for
+   * providers (e.g. Codex) where pause has no analogue, pass
+   * `pauseDisabledReason` instead of withholding the callback, so the
+   * affordance stays visible.
+   */
+  onPause?: () => void
+  /** Resume from a paused turn. Same provider caveat as `onPause`. */
+  onResume?: () => void
+  /** Whether the current turn is currently held in the pause gate. */
+  paused?: boolean
+  /**
+   * If non-empty, the pause/resume button is rendered disabled with this
+   * text as its tooltip. Used to keep the button discoverable on Codex
+   * turns (where pause isn't supported) without faking a working control.
+   */
+  pauseDisabledReason?: string
   /** Whether replies are read aloud (TTS). */
   audioOn?: boolean
   /** Toggle audible replies on/off. */
@@ -102,7 +124,12 @@ export function Composer({
   activeId,
   busy,
   onSubmit,
+  onInterject,
   onStop,
+  onPause,
+  onResume,
+  paused,
+  pauseDisabledReason,
   audioOn,
   onToggleAudio,
   voice,
@@ -186,7 +213,14 @@ export function Composer({
 
   const submit = () => {
     const text = draft.trim()
-    if (!text || busy) return
+    if (!text) return
+    if (busy) {
+      if (onInterject) {
+        onInterject({ text, mode: 'queue' })
+        reset()
+      }
+      return
+    }
 
     // A completed slash command with an argument, e.g. "/navigate example.com".
     if (text.startsWith('/')) {
@@ -239,6 +273,7 @@ export function Composer({
   }
 
   const canSend = draft.trim().length > 0 && !busy
+  const canInterject = busy && draft.trim().length > 0 && !!onInterject
 
   return (
     <div className="composer">
@@ -263,6 +298,35 @@ export function Composer({
 
       <div className="composer-box">
         {turnControls && <div className="composer-context">{turnControls}</div>}
+        {canInterject && (
+          <div className="composer-run-actions" role="toolbar" aria-label="Send note to running task">
+            <span className="composer-run-label">send this note to</span>
+            <button
+              type="button"
+              className="composer-run-action"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onInterject?.({ text: draft.trim(), mode: 'queue' })
+                reset()
+              }}
+            >
+              next step
+            </button>
+            <button
+              type="button"
+              className="composer-run-action strong"
+              disabled={paused || !!pauseDisabledReason}
+              title={pauseDisabledReason || (paused ? 'Already paused' : 'Pause at the next boundary and apply this note')}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onInterject?.({ text: draft.trim(), mode: 'pause' })
+                reset()
+              }}
+            >
+              pause + apply
+            </button>
+          </div>
+        )}
         <textarea
           ref={taRef}
           autoFocus
@@ -402,7 +466,38 @@ export function Composer({
                 )}
               </div>
             )}
-            {busy && <span className="composer-hint">working…</span>}
+            {busy && <span className="composer-hint">{paused ? 'paused' : 'working…'}</span>}
+            {busy && (onPause || onResume) && (
+              <button
+                type="button"
+                className={`composer-send composer-pause ${paused ? 'is-paused' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={paused ? onResume : onPause}
+                disabled={!!pauseDisabledReason || (paused ? !onResume : !onPause)}
+                title={
+                  pauseDisabledReason
+                    ? `Pause unavailable: ${pauseDisabledReason}`
+                    : paused
+                      ? 'Resume task'
+                      : 'Pause task'
+                }
+                aria-label={paused ? 'Resume task' : 'Pause task'}
+                aria-pressed={paused}
+              >
+                {paused ? (
+                  // Resume = play triangle.
+                  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M4.5 3.5L12.5 8l-8 4.5v-9z" fill="currentColor" />
+                  </svg>
+                ) : (
+                  // Pause = two bars.
+                  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                    <rect x="4" y="3" width="3" height="10" rx="0.8" fill="currentColor" />
+                    <rect x="9" y="3" width="3" height="10" rx="0.8" fill="currentColor" />
+                  </svg>
+                )}
+              </button>
+            )}
             {busy && onStop ? (
               <button
                 type="button"

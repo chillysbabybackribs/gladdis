@@ -27,6 +27,15 @@ export interface DispatchDeps {
   logSystemPrompt: (provider: string, mode: string, system: string) => void
   /** Per-turn tool context, built with the browser-pipeline LLM bound in. */
   buildToolContext: (req: ChatRequest, browserLlm?: LlmComplete) => ToolContext
+  /**
+   * Block the caller while the user has the turn paused. Resolves immediately
+   * when not paused or once resume() is called. Aborts also wake it; callers
+   * must re-check `signal.aborted` after the await. Defaults to a no-op when
+   * pause isn't wired (kept optional so unit tests don't have to pass it).
+   */
+  waitWhilePaused?: (signal: AbortSignal) => Promise<void>
+  /** Consume user context queued while the current task was running. */
+  getQueuedContext?: () => string | null
 }
 
 /**
@@ -95,7 +104,9 @@ export async function dispatchAgenticTurn(args: {
     toolDefs: profile.tools,
     agentSystem,
     workspaceBlock,
-    keepResults: VERBATIM_TOOL_RESULTS
+    keepResults: VERBATIM_TOOL_RESULTS,
+    waitWhilePaused: deps.waitWhilePaused,
+    getQueuedContext: deps.getQueuedContext
   }
 
   await runProviderAgenticTurn({

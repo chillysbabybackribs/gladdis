@@ -191,6 +191,54 @@
   gap: 6px;
 }
 
+.composer-run-actions {
+  flex: 0 0 30px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  padding: 5px 8px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.018);
+}
+.composer-run-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.composer-run-action {
+  flex: 0 0 auto;
+  height: 21px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.composer-run-action:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+.composer-run-action.strong {
+  color: #fff;
+  background: rgba(61, 111, 214, 0.72);
+  border-color: rgba(119, 158, 255, 0.24);
+}
+.composer-run-action.strong:hover:not(:disabled) {
+  background: rgba(83, 130, 226, 0.82);
+}
+.composer-run-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Input */
 .composer-input {
   display: block;
@@ -291,14 +339,15 @@
   display: grid;
   place-items: center;
   border-radius: 8px;
-  color: #fff;
-  background: var(--accent);
+  color: #111;
+  background: #fff;
   transition: background 0.12s ease, opacity 0.12s ease, transform 0.08s ease;
 }
 .composer-send:hover:not(:disabled) {
-  background: #6694ff;
+  background: #ececec;
 }
 .composer-send:active:not(:disabled) {
+  background: #d8d8d8;
   transform: translateY(1px);
 }
 .composer-send:disabled {

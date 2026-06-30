@@ -480,6 +480,10 @@ export async function runOpenAiToolLoop(args: {
     iterationStarted: (iteration: number) => void
     transition: (iteration: number, transition: SupervisorTransition) => void
   }
+  /** Holds the loop at the iteration boundary while the user has paused the turn. */
+  waitWhilePaused?: (signal: AbortSignal) => Promise<void>
+  /** Returns one queued user note to apply before the next model step. */
+  getQueuedContext?: () => string | null
 }): Promise<void> {
   const buildTools = () =>
     resolveTurnTools(args.toolDefs, args.ctx.grantedTools).map((t) => ({
@@ -501,6 +505,12 @@ export async function runOpenAiToolLoop(args: {
   const validation = createToolValidationState()
 
   for (let turn = 0; !args.signal.aborted; turn++) {
+    // Pause is honored at the iteration boundary so the model state stays
+    // coherent — pausing mid-stream would drop tokens and look like a stop.
+    if (args.waitWhilePaused) await args.waitWhilePaused(args.signal)
+    if (args.signal.aborted) return
+    const queuedContext = args.getQueuedContext?.()
+    if (queuedContext) messages.push({ role: 'user', content: queuedContext })
     args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
     tools = buildTools()

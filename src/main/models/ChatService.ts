@@ -96,6 +96,7 @@ const VERBATIM_TOOL_RESULTS = 4
 const MAX_OUTPUT_TOKENS = 32_000
 const ANTHROPIC_MAX_TOKENS = MAX_OUTPUT_TOKENS
 const DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS = 4_096
+const CURSOR_POST_ACTION_MAX_ATTEMPTS = 2
 const EMBEDDED_BROWSER_LLM_MODEL_ORDER = [
   'gemini-3.5-flash',
   'gemini-2.5-flash',
@@ -294,14 +295,17 @@ export class ChatService {
 
   private async runCursorPostActionVerification(
     req: Pick<ChatRequest, 'requestId' | 'conversationId'>,
-    goal: string
-  ): Promise<void> {
+    goal: string,
+    attempt: number
+  ): Promise<{ ok: boolean; summary: string | null }> {
     const validation = this.cursorValidationStates.get(req.requestId)
-    if (!validation || !needsValidationBeforeFinal(validation, [{ name: 'verify_change' }])) return
+    if (!validation || !needsValidationBeforeFinal(validation, [{ name: 'verify_change' }])) {
+      return { ok: true, summary: null }
+    }
     const workspaceRoot = this.tools.getWorkspaceRoot?.()
-    if (!workspaceRoot) return
+    if (!workspaceRoot) return { ok: true, summary: null }
 
-    const callId = 'cursor_post_validation'
+    const callId = attempt === 0 ? 'cursor_post_validation' : `cursor_post_validation_repair_${attempt}`
     this.emit({
       requestId: req.requestId,
       type: 'tool_call',
@@ -328,9 +332,53 @@ export class ChatService {
       ok: result.ok,
       preview: result.summary
     })
-    if (!result.ok) {
-      throw new Error(`Automatic post-action verification failed: ${result.summary}`)
+    return { ok: result.ok, summary: result.summary }
+  }
+
+  private buildCursorRepairPrompt(goal: string, validationSummary: string): string {
+    return (
+      `${goal}\n\n` +
+      'Gladdis post-action verification failed after your last pass. Continue from the current workspace state, ' +
+      'repair the issue, run the narrowest relevant local validation command, and only finish once it passes.\n\n' +
+      `Verification failure:\n${validationSummary}`
+    )
+  }
+
+  private async runCursorWithRepairLoop(args: {
+    req: ChatRequest
+    signal: AbortSignal
+    system: string
+    actionableText: string
+    mode: 'ask' | 'agent'
+    enableBrowserTools: boolean
+  }): Promise<{ text: string; usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } }> {
+    let currentPrompt = args.actionableText
+    let lastResult: { text: string; usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } } | null = null
+
+    for (let attempt = 0; attempt < CURSOR_POST_ACTION_MAX_ATTEMPTS; attempt += 1) {
+      lastResult = await this.cursor().send(
+        args.req,
+        args.signal,
+        args.system,
+        currentPrompt,
+        args.mode,
+        {
+          enableBrowserTools: args.enableBrowserTools,
+          getQueuedContext: () => this.consumeQueuedInterjection(args.req.requestId)
+        }
+      )
+      const verification = await this.runCursorPostActionVerification(args.req, args.actionableText, attempt)
+      if (verification.ok) return lastResult
+      if (attempt + 1 >= CURSOR_POST_ACTION_MAX_ATTEMPTS) {
+        throw new Error(`Automatic post-action verification failed after Cursor repair attempt: ${verification.summary}`)
+      }
+      currentPrompt = this.buildCursorRepairPrompt(args.actionableText, verification.summary ?? 'Validation failed.')
     }
+
+    if (!lastResult) {
+      throw new Error('Cursor Agent did not produce a result.')
+    }
+    return lastResult
   }
 
   private emitLoopState(
@@ -968,18 +1016,14 @@ export class ChatService {
           // separate policy gate and only comes on when the turn actually needs
           // page/web tools.
           this.logSystemPrompt('cursor', cursorMode, cursorSystem)
-          const result = await this.cursor().send(
+          const result = await this.runCursorWithRepairLoop({
             req,
-            controller.signal,
-            cursorSystem,
+            signal: controller.signal,
+            system: cursorSystem,
             actionableText,
-            cursorMode,
-            {
-              enableBrowserTools: enableCursorMcp,
-              getQueuedContext: () => this.consumeQueuedInterjection(req.requestId)
-            }
-          )
-          await this.runCursorPostActionVerification(req, actionableText)
+            mode: cursorMode,
+            enableBrowserTools: enableCursorMcp
+          })
           supervisor.complete('Cursor Agent task completed.')
           call.finish({
             output: result.text,

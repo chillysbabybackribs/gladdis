@@ -131,4 +131,5 @@ export const CURSOR_BROWSER_INSTRUCTIONS =
   'app unless you need startup/cold-boot/fresh-process validation, and say why first.\n' +
   'Use Cursor native local repo, file, shell, and validation abilities for code work. After editing files, run the narrowest ' +
   'relevant local verification command before claiming success; if validation fails, fix it or say clearly why it cannot pass. ' +
-  'Use the Gladdis MCP tools for browser work.'
+  'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context, continue from the ' +
+  'same workspace state, and do another validation pass before finishing. Use the Gladdis MCP tools for browser work.'

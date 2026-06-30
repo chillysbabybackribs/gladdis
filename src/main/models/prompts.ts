@@ -270,7 +270,8 @@ export function buildCursorSystem(options: { enableBrowserTools: boolean }): str
     result =
       core +
       '\n\nUse Cursor native local repo, file, shell, and validation abilities for code work. ' +
-      'After editing files, run the narrowest relevant local verification command before claiming success.'
+      'After editing files, run the narrowest relevant local verification command before claiming success. ' +
+      'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context and keep going until you pass validation or can clearly explain the blocker.'
   } else {
     result =
       core +

@@ -1164,6 +1164,177 @@ describe('ChatService provider hardening', () => {
     expect(verifyChange).not.toHaveBeenCalled()
   })
 
+  it('feeds failed Cursor post-action verification back into one repair pass', async () => {
+    const { service } = makeService('/tmp/selected-project')
+    const verifyChange = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        summary: 'typecheck: src/main/index.ts:42 error TS2322',
+        cacheStatus: 'miss',
+        structuredPayload: {
+          workspaceRoot: '/tmp/selected-project',
+          language: 'node',
+          checks: [{ check: 'typecheck', ok: false, output: 'TS2322' }]
+        }
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        summary: 'typecheck: pass',
+        cacheStatus: 'miss',
+        structuredPayload: {
+          workspaceRoot: '/tmp/selected-project',
+          language: 'node',
+          checks: [{ check: 'typecheck', ok: true, output: 'ok' }]
+        }
+      })
+    ;(service as any).capabilityBroker.verifyChange = verifyChange
+    const cursorSend = vi.fn(async (_req, _signal, _system, userText) => {
+      if (cursorSend.mock.calls.length === 1) {
+        ;(service as any).emit({
+          requestId: 'req-cursor-repair',
+          type: 'tool_call',
+          tool: 'edit_file',
+          args: { path: 'src/main/index.ts' },
+          callId: 'cursor-edit-1'
+        })
+        ;(service as any).emit({
+          requestId: 'req-cursor-repair',
+          type: 'tool_result',
+          callId: 'cursor-edit-1',
+          ok: true,
+          preview: 'Updated src/main/index.ts'
+        })
+        return { text: 'first pass' }
+      }
+      expect(userText).toContain('Gladdis post-action verification failed after your last pass')
+      expect(userText).toContain('typecheck: src/main/index.ts:42 error TS2322')
+      ;(service as any).emit({
+        requestId: 'req-cursor-repair',
+        type: 'tool_call',
+        tool: 'edit_file',
+        args: { path: 'src/main/index.ts' },
+        callId: 'cursor-edit-2'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-repair',
+        type: 'tool_result',
+        callId: 'cursor-edit-2',
+        ok: true,
+        preview: 'Fixed src/main/index.ts'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-repair',
+        type: 'tool_call',
+        tool: 'run_validation',
+        args: { check: 'typecheck' },
+        callId: 'cursor-validate-2'
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-repair',
+        type: 'tool_result',
+        callId: 'cursor-validate-2',
+        ok: true,
+        preview: 'typecheck: pass'
+      })
+      return { text: 'second pass' }
+    })
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-repair',
+      modelId: 'composer-2.5',
+      conversationId: 'conv-cursor-repair',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'fix the typing issue in src/main/index.ts' }]
+    } as any)
+
+    expect(cursorSend).toHaveBeenCalledTimes(2)
+    expect(verifyChange).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces a hard failure when Cursor repair still does not pass verification', async () => {
+    const { service, emit } = makeService('/tmp/selected-project')
+    const verifyChange = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        summary: 'typecheck: first failure',
+        cacheStatus: 'miss',
+        structuredPayload: {
+          workspaceRoot: '/tmp/selected-project',
+          language: 'node',
+          checks: [{ check: 'typecheck', ok: false, output: 'first failure' }]
+        }
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        summary: 'typecheck: second failure',
+        cacheStatus: 'miss',
+        structuredPayload: {
+          workspaceRoot: '/tmp/selected-project',
+          language: 'node',
+          checks: [{ check: 'typecheck', ok: false, output: 'second failure' }]
+        }
+      })
+    ;(service as any).capabilityBroker.verifyChange = verifyChange
+    const cursorSend = vi.fn(async (_req, _signal, _system, userText) => {
+      if (cursorSend.mock.calls.length > 1) {
+        expect(userText).toContain('typecheck: first failure')
+      }
+      ;(service as any).emit({
+        requestId: 'req-cursor-hard-fail',
+        type: 'tool_call',
+        tool: 'edit_file',
+        args: { path: 'src/main/index.ts' },
+        callId: `cursor-edit-${cursorSend.mock.calls.length}`
+      })
+      ;(service as any).emit({
+        requestId: 'req-cursor-hard-fail',
+        type: 'tool_result',
+        callId: `cursor-edit-${cursorSend.mock.calls.length}`,
+        ok: true,
+        preview: 'Updated src/main/index.ts'
+      })
+      return { text: 'pass' }
+    })
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-hard-fail',
+      modelId: 'composer-2.5',
+      conversationId: 'conv-cursor-hard-fail',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'fix the typing issue in src/main/index.ts' }]
+    } as any)
+
+    expect(cursorSend).toHaveBeenCalledTimes(2)
+    expect(verifyChange).toHaveBeenCalledTimes(2)
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'req-cursor-hard-fail',
+        type: 'tool_result',
+        callId: 'cursor_post_validation_repair_1',
+        ok: false
+      })
+    )
+    expect(emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'req-cursor-hard-fail',
+        type: 'error',
+        message: 'Automatic post-action verification failed after Cursor repair attempt: typecheck: second failure'
+      })
+    )
+  })
+
   it('runs browse_task/search on the user\'s picked model — no silent gemini substitution', () => {
     const { service } = makeService()
     const completed: string[] = []

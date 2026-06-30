@@ -13,20 +13,37 @@ describe('ClaudeCodeBridgeServer', () => {
   })
 
   it('exposes Claude browser tools over direct HTTP MCP', async () => {
-    const run = vi.fn(async () => ({
-      ok: true,
-      text: 'tool ok',
-      imageBase64: null,
-      structuredContent: {
-        workspaceRoot: '/tmp/workspace',
-        packageManager: 'npm',
-        packageName: 'demo',
-        scripts: ['build', 'test'],
-        keyFiles: ['package.json'],
-        topDirectories: ['src'],
-        entryPoints: ['src/main.ts']
+    const run = vi.fn(async (name: string) => {
+      if (name === 'memory_read') {
+        return {
+          ok: true,
+          text: 'Workspace memory:\n- theme: {"accent":"orange"}',
+          imageBase64: null,
+          structuredContent: {
+            scope: 'workspace',
+            updatedAt: '2026-06-30T00:00:00.000Z',
+            values: {
+              theme: { accent: 'orange' }
+            }
+          }
+        }
       }
-    }))
+
+      return {
+        ok: true,
+        text: 'tool ok',
+        imageBase64: null,
+        structuredContent: {
+          workspaceRoot: '/tmp/workspace',
+          packageManager: 'npm',
+          packageName: 'demo',
+          scripts: ['build', 'test'],
+          keyFiles: ['package.json'],
+          topDirectories: ['src'],
+          entryPoints: ['src/main.ts']
+        }
+      }
+    })
     const bridge = new ClaudeCodeBridgeServer(
       {
         run,
@@ -83,6 +100,17 @@ describe('ClaudeCodeBridgeServer', () => {
         })
       })
     )
+    expect(tools.tools.find((tool) => tool.name === 'memory_read')).toEqual(
+      expect.objectContaining({
+        outputSchema: expect.objectContaining({
+          type: 'object',
+          properties: expect.objectContaining({
+            scope: expect.objectContaining({ type: 'string' }),
+            values: expect.anything()
+          })
+        })
+      })
+    )
     expect(tools.tools.find((tool) => tool.name === 'repo_overview')).toEqual(
       expect.objectContaining({
         outputSchema: expect.objectContaining({
@@ -119,6 +147,32 @@ describe('ClaudeCodeBridgeServer', () => {
       keyFiles: ['package.json'],
       topDirectories: ['src'],
       entryPoints: ['src/main.ts']
+    })
+
+    const memoryResult = await client.callTool({
+      name: 'memory_read',
+      arguments: { scope: 'workspace', keys: ['theme'] }
+    })
+
+    expect(run).toHaveBeenCalledWith(
+      'memory_read',
+      { scope: 'workspace', keys: ['theme'] },
+      expect.objectContaining({
+        tabId: 'tab-1',
+        conversationId: 'conv-1',
+        requestId: 'req-1',
+        workspaceRoot: '/tmp/workspace'
+      })
+    )
+    expect(memoryResult.content).toEqual([
+      { type: 'text', text: 'Workspace memory:\n- theme: {"accent":"orange"}' }
+    ])
+    expect(memoryResult.structuredContent).toEqual({
+      scope: 'workspace',
+      updatedAt: '2026-06-30T00:00:00.000Z',
+      values: {
+        theme: { accent: 'orange' }
+      }
     })
 
     await transport.close()

@@ -6,12 +6,14 @@ const root = process.cwd()
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
 function runGit(args, options = {}) {
-  return execFileSync('git', args, {
+  const output = execFileSync('git', args, {
     cwd: root,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
     ...options
-  }).trim()
+  })
+
+  return typeof output === 'string' ? output.trim() : ''
 }
 
 function hasArg(name) {

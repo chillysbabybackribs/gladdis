@@ -15,7 +15,7 @@ function fmt(n: number): string {
 }
 
 /**
- * Per-conversation token meter for the composer footer. It sums every model
+ * Per-conversation token meter for the chat footer rail. It sums every model
  * call made in the current chat — across model switches — preferring actual
  * counts and falling back to the char/4 estimate while a call is still
  * streaming. Scoping by conversationId makes it persistent: the audit ledger
@@ -41,7 +41,7 @@ export function TokenCounter({ records, conversationId }: Props) {
 
   return (
     <span
-      className="composer-tokens"
+      className="footer-chat-tokens"
       title="Tokens used in this chat (in · out · cached)"
     >
       {fmt(totals.input)} in · {fmt(totals.output)} out

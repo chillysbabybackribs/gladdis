@@ -310,18 +310,6 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
-/* Session token meter — same muted, zoom-constant chrome as the hint. Sits at
-   the start of the right group (between the + and the volume toggle) and
-   ellipsizes rather than crowding the send button on narrow panels. */
-.composer-tokens {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
 .composer-send {
   width: 32px;
   height: 32px;

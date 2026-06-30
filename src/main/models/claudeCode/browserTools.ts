@@ -24,6 +24,7 @@ export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
   'browse_task',
   'read_page',
   'grep_page',
+  'watch_network',
   'grep_click',
   'grep_type',
   'screenshot',
@@ -47,6 +48,7 @@ export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
 export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
   'For browser work beyond search use the Gladdis MCP tools too: search_open, navigate, browse_task, read_page, grep_page, ' +
+  'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
   'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, memory_create_task, repo_overview, ' +
   'repo_grep_task, search_repo, read_spans, research_dossier, and verify_change.\n' +

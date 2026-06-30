@@ -11,13 +11,20 @@ const MAX_REPLAN_STEPS = 8
 const MAX_REPLAN_OUTPUT_TOKENS = 1_200
 
 /**
- * Standalone test harness for the deterministic browser pipeline.
+ * Entry point for the deterministic "plan-once, execute-blind, verify-with-CDP"
+ * browser pipeline.
  *
- * This is intentionally NOT wired into ChatService or the chat UI yet. It exists
- * so we can run ONE real task on ONE real site and measure the headline numbers
- * — LLM calls, deterministic checks, step count, success — against the old
- * pre-CDP pipeline. Falsifiable, isolated, and fully reversible: delete
- * src/main/pipeline/ and nothing else changes.
+ * STATUS (see root CLAUDE.md): this pipeline is NOT the main browser-automation
+ * path — that is the agentic perceive/drive tool loop. This `orchestrate` is
+ * reached by exactly ONE live caller, `models/tools/taskTools.ts`. So it is
+ * neither central nor dead, and its future (revive / keep / retire) is undecided
+ * — do not relabel or delete it on your own initiative. (Note: an earlier
+ * version of this comment claimed deleting src/main/pipeline/ "changes nothing
+ * else"; that is no longer true now that taskTools calls in here.)
+ *
+ * It exists so we can run ONE real task on ONE real site and measure the
+ * headline numbers — LLM calls, deterministic checks, step count, success —
+ * against the old pre-CDP pipeline.
  *
  * Wiring (done by the host once, e.g. in index.ts behind a dev flag):
  *   const deps  = { cdpSend: tabs.cdpSend.bind(tabs),

@@ -2,7 +2,7 @@
   "version": 2,
   "workspace": {
     "root": "/home/dp/Desktop/myworkspace/Gladdis",
-    "updatedAt": "2026-06-29T22:32:23.483Z"
+    "updatedAt": "2026-06-30T00:54:12.478Z"
   },
   "entries": [
     {
@@ -18,7 +18,7 @@
       "freshness": {
         "createdAt": "2026-06-29T18:16:46.283Z",
         "lastReinforcedAt": "2026-06-29T18:16:46.283Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "migrated-from-v1",
@@ -46,7 +46,7 @@
       "freshness": {
         "createdAt": "2026-06-29T18:16:46.283Z",
         "lastReinforcedAt": "2026-06-29T18:16:46.283Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "migrated-from-v1",
@@ -74,7 +74,7 @@
       "freshness": {
         "createdAt": "2026-06-29T18:16:46.283Z",
         "lastReinforcedAt": "2026-06-29T18:16:46.283Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "migrated-from-v1",
@@ -98,7 +98,7 @@
       "freshness": {
         "createdAt": "2026-06-29T19:04:06.922Z",
         "lastReinforcedAt": "2026-06-29T19:04:06.922Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "dreaming",
@@ -149,7 +149,7 @@
       "freshness": {
         "createdAt": "2026-06-29T19:04:06.922Z",
         "lastReinforcedAt": "2026-06-29T19:35:50.599Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "browser-policy",
@@ -192,7 +192,7 @@
       "freshness": {
         "createdAt": "2026-06-29T19:04:06.922Z",
         "lastReinforcedAt": "2026-06-29T19:24:09.980Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "dreaming",
@@ -229,7 +229,7 @@
       "freshness": {
         "createdAt": "2026-06-29T19:04:06.922Z",
         "lastReinforcedAt": "2026-06-29T19:24:09.980Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "dreaming",
@@ -331,7 +331,7 @@
       "freshness": {
         "createdAt": "2026-06-29T19:24:09.980Z",
         "lastReinforcedAt": "2026-06-29T19:35:50.599Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "token-optimization",
@@ -363,7 +363,7 @@
       "freshness": {
         "createdAt": "2026-06-29T19:24:09.980Z",
         "lastReinforcedAt": "2026-06-29T19:24:09.980Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "token-efficiency",
@@ -394,7 +394,7 @@
       "freshness": {
         "createdAt": "2026-06-29T19:24:09.980Z",
         "lastReinforcedAt": "2026-06-29T19:24:09.980Z",
-        "lastReferencedAt": "2026-06-29T19:35:50.599Z"
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "audit-tool",
@@ -424,7 +424,8 @@
       "confidence": 0.85,
       "freshness": {
         "createdAt": "2026-06-29T19:35:50.599Z",
-        "lastReinforcedAt": "2026-06-29T19:35:50.599Z"
+        "lastReinforcedAt": "2026-06-29T19:35:50.599Z",
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "ui",
@@ -454,7 +455,8 @@
       "confidence": 0.9,
       "freshness": {
         "createdAt": "2026-06-29T19:35:50.599Z",
-        "lastReinforcedAt": "2026-06-29T19:35:50.599Z"
+        "lastReinforcedAt": "2026-06-29T19:35:50.599Z",
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "ux",
@@ -484,7 +486,8 @@
       "confidence": 0.75,
       "freshness": {
         "createdAt": "2026-06-29T19:35:50.599Z",
-        "lastReinforcedAt": "2026-06-29T19:35:50.599Z"
+        "lastReinforcedAt": "2026-06-29T19:35:50.599Z",
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": [
         "browser-tools",
@@ -626,7 +629,8 @@
       "confidence": 0.7,
       "freshness": {
         "createdAt": "2026-06-29T22:32:23.482Z",
-        "lastReinforcedAt": "2026-06-29T22:32:23.482Z"
+        "lastReinforcedAt": "2026-06-29T22:32:23.482Z",
+        "lastReferencedAt": "2026-06-30T00:54:12.477Z"
       },
       "tags": []
     }

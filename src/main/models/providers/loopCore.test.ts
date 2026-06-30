@@ -128,4 +128,41 @@ describe('executeProviderToolCall', () => {
     expect(state.pendingSinceEdit).toBe(false)
     expect(state.lastValidationFailure).toBe(null)
   })
+
+  it('returns a failed outcome when tool execution throws', async () => {
+    const state = createToolValidationState()
+    const emitToolCall = vi.fn()
+    const emitToolResult = vi.fn()
+    const rememberFullResult = vi.fn()
+    const runTool = vi.fn(async () => {
+      throw new Error('simulated failure')
+    })
+
+    const result = await executeProviderToolCall({
+      requestId: 'req-5',
+      name: 'edit_file',
+      toolArgs: { path: 'src/a.ts' },
+      callId: 'call-3',
+      runTool,
+      emitToolCall,
+      emitToolResult,
+      rememberFullResult,
+      validationState: state
+    })
+
+    expect(runTool).toHaveBeenCalledWith('edit_file', { path: 'src/a.ts' })
+    expect(emitToolResult).toHaveBeenCalledWith({
+      requestId: 'req-5',
+      type: 'tool_result',
+      callId: 'call-3',
+      ok: false,
+      preview: '[tool error] simulated failure'
+    })
+    expect(state.lastValidationFailure).toBeNull()
+    expect(result).toEqual({
+      name: 'edit_file',
+      callId: 'call-3',
+      outcome: { ok: false, text: '[tool error] simulated failure' }
+    })
+  })
 })

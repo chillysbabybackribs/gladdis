@@ -16,11 +16,6 @@ const READ_PAGE_CACHE_SCHEMA = {
   required: ['status', 'capturedAt', 'hits', 'misses', 'expired', 'evictions', 'size', 'limit', 'ttlMs']
 } as const
 
-/**
- * PERCEIVE — `read_page`. The LLM calls this to read the current page.
- * Internally runs the deterministic PageExtractor and formats through
- * PageDigest. The LLM receives a clean structured digest, never raw HTML.
- */
 export const PERCEIVE_TOOLS: ToolDef[] = [
   {
     name: 'read_page',
@@ -137,13 +132,151 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
       },
       required: ['query', 'type', 'caseSensitive', 'contextLines', 'matches']
     }
+  },
+  {
+    name: 'watch_network',
+    description:
+      'Read the structured data a page is built from — the JSON behind the render, ' +
+      'not the rendered HTML. PASSIVELY observes the network traffic the current ' +
+      'page emits ON ITS OWN for a short window and returns the captured endpoints ' +
+      'plus their response bodies (size-capped). Use this when the answer is data the ' +
+      'page loads from an API (search results, listings, prices, tables, feeds) — ' +
+      'one captured API response often beats many scroll-and-grep cycles, and gives ' +
+      'complete un-paginated data. Passive: it only sees traffic the page fires by ' +
+      'itself, so if the page is idle, trigger the load first (navigate/scroll/click) ' +
+      'then watch. Focus with url_filter/url_filters/url_regex plus optional resource_types, ' +
+      'status_codes or status_min/status_max, and mime_includes to keep relevant calls and ' +
+      'skip noise. Returns request/response metadata, bounded timing, and a few capped bodies. Not ' +
+      'for static pages with no API.',
+    parameters: {
+      type: 'object',
+      properties: {
+        url_filter: {
+          type: 'string',
+          description: 'Case-insensitive substring to keep only matching request URLs (e.g. "/api/", "graphql", "search").'
+        },
+        url_filters: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of case-insensitive substrings; a request is kept if any entry matches its URL.'
+        },
+        url_regex: {
+          type: 'string',
+          description: 'Optional case-insensitive regex pattern applied to request URLs.'
+        },
+        resource_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional resource types to keep, e.g. ["xhr", "fetch", "document"].'
+        },
+        status_codes: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional exact HTTP statuses to keep, e.g. [200, 204, 304].'
+        },
+        status_min: {
+          type: 'number',
+          description: 'Optional minimum HTTP status to keep, between 100 and 599.'
+        },
+        status_max: {
+          type: 'number',
+          description: 'Optional maximum HTTP status to keep, between 100 and 599.'
+        },
+        mime_includes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional case-insensitive substrings that must match the response mime type, e.g. ["json", "javascript"].'
+        },
+        window_ms: {
+          type: 'number',
+          description: 'How long to observe, in ms. Default 4000, max 15000.'
+        },
+        max_bodies: {
+          type: 'number',
+          description: 'Max number of response bodies to return. Default 3, max 10.'
+        },
+        max_body_chars: {
+          type: 'number',
+          description: 'Per-body character cap. Default 4000, max 20000.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        urlFilter: { type: 'string' },
+        urlFilters: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        urlRegex: { type: 'string' },
+        resourceTypes: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        statusCodes: {
+          type: 'array',
+          items: { type: 'number' }
+        },
+        statusMin: { type: 'number' },
+        statusMax: { type: 'number' },
+        mimeIncludes: {
+          type: 'array',
+          items: { type: 'string' }
+        },
+        windowMs: { type: 'number' },
+        totalSeen: { type: 'number' },
+        captured: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              requestId: { type: 'string' },
+              url: { type: 'string' },
+              method: { type: 'string' },
+              status: { type: 'number' },
+              mimeType: { type: 'string' },
+              type: { type: 'string' },
+              requestHeaders: {
+                type: 'object',
+                additionalProperties: { type: 'string' }
+              },
+              responseHeaders: {
+                type: 'object',
+                additionalProperties: { type: 'string' }
+              },
+              startedAt: { type: 'number' },
+              responseReceivedAt: { type: 'number' },
+              finishedAt: { type: 'number' },
+              durationMs: { type: 'number' },
+              encodedDataLength: { type: 'number' },
+              success: { type: 'boolean' },
+              errorText: { type: 'string' }
+            },
+            required: ['requestId', 'url', 'method', 'status', 'mimeType', 'type', 'success']
+          }
+        },
+        bodies: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              requestId: { type: 'string' },
+              url: { type: 'string' },
+              status: { type: 'number' },
+              mimeType: { type: 'string' },
+              body: { type: 'string' },
+              truncated: { type: 'boolean' }
+            },
+            required: ['requestId', 'url', 'status', 'mimeType', 'body', 'truncated']
+          }
+        }
+      },
+      required: ['windowMs', 'totalSeen', 'captured', 'bodies']
+    }
   }
 ]
 
-/**
- * CAPTURE — visual screenshot tools. Prefer `read_page` for understanding;
- * use these when a visual is genuinely needed.
- */
 export const CAPTURE_TOOLS: ToolDef[] = [
   {
     name: 'screenshot',

@@ -32,7 +32,7 @@ import {
   runSearchFiles,
   runWriteFile
 } from './tools/fsTools'
-import { type ReadPageCacheEntry, runGrepPage, runReadPage, runScreenshot, runScreenshotApp } from './tools/perceiveTools'
+import { type ReadPageCacheEntry, runGrepPage, runReadPage, runScreenshot, runScreenshotApp, runWatchNetwork } from './tools/perceiveTools'
 import {
   runReadSpans,
   runRepoGrepTask,
@@ -292,6 +292,8 @@ export class BrowserTools {
           return runReadPage(this.perceiveDeps(), args, ctx.tabId)
         case 'grep_page':
           return runGrepPage(this.perceiveDeps(), args, ctx.tabId)
+        case 'watch_network':
+          return runWatchNetwork(this.perceiveDeps(), args, ctx.tabId)
         case 'screenshot':
           return runScreenshot(this.perceiveDeps(), args, ctx.tabId)
         case 'screenshot_app':

@@ -15,6 +15,7 @@ const LEFT_FRAC_KEY = 'gladdis:drawer:left:frac'
 const RIGHT_FRAC_KEY = 'gladdis:drawer:right:frac'
 const LEFT_ZOOM_KEY = 'gladdis:chat:left:zoom'
 const RIGHT_ZOOM_KEY = 'gladdis:chat:right:zoom'
+const BROWSER_ZOOM_KEY = 'gladdis:browser:zoom'
 const TERMINAL_DOCK_KEY = 'gladdis:terminal:dock'
 const TERMINAL_LAST_DOCK_KEY = 'gladdis:terminal:lastDock'
 const TERMINAL_HEIGHT_KEY = 'gladdis:terminal:height'
@@ -26,6 +27,13 @@ const ZOOM_MIN = 0.85
 const ZOOM_MAX = 1.6
 const ZOOM_STEP = 0.1
 const ZOOM_DEFAULT = 1
+// Browser zoom uses a wider range than the chat zoom — web pages legitimately
+// need to go smaller (data-dense dashboards) and larger (text-heavy reading)
+// than chat ever should. Same 10% step so the menu feels identical.
+const BROWSER_ZOOM_MIN = 0.5
+const BROWSER_ZOOM_MAX = 2.5
+const BROWSER_ZOOM_STEP = 0.1
+const BROWSER_ZOOM_DEFAULT = 1
 
 type TerminalDockState = 'closed' | TerminalDockPos
 
@@ -65,6 +73,10 @@ function clampZoom(v: number): number {
   if (!Number.isFinite(v)) return ZOOM_DEFAULT
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(v * 100) / 100))
 }
+function clampBrowserZoom(v: number): number {
+  if (!Number.isFinite(v)) return BROWSER_ZOOM_DEFAULT
+  return Math.min(BROWSER_ZOOM_MAX, Math.max(BROWSER_ZOOM_MIN, Math.round(v * 100) / 100))
+}
 function loadFrac(key: string, fallback: number): number {
   const v = parseFloat(safeGetItem(key) ?? '')
   return Number.isFinite(v) ? v : fallback
@@ -72,54 +84,9 @@ function loadFrac(key: string, fallback: number): number {
 function loadZoom(key: string): number {
   return clampZoom(parseFloat(safeGetItem(key) ?? String(ZOOM_DEFAULT)))
 }
-
-function ChatZoomControl({
-  side,
-  zoom,
-  onChange
-}: {
-  side: 'left' | 'right'
-  zoom: number
-  onChange: (zoom: number) => void
-}) {
-  const percent = Math.round(zoom * 100)
-  const label = `${side === 'left' ? 'Left' : 'Right'} chat zoom: ${percent}%`
-  const canDecrease = zoom > ZOOM_MIN
-  const canIncrease = zoom < ZOOM_MAX
-  const commit = (next: number) => onChange(clampZoom(next))
-
-  return (
-    <div className="footer-zoom" role="group" aria-label={label}>
-      <button
-        type="button"
-        className="footer-zoom-step"
-        title="Zoom out"
-        aria-label={`Zoom out ${side} chat`}
-        disabled={!canDecrease}
-        onClick={() => commit(zoom - ZOOM_STEP)}
-      >
-        -
-      </button>
-      <button
-        type="button"
-        className="footer-zoom-value"
-        title="Reset zoom"
-        aria-label={`Reset ${side} chat zoom`}
-        onClick={() => commit(ZOOM_DEFAULT)}
-      >
-        {percent}%
-      </button>
-      <button
-        type="button"
-        className="footer-zoom-step"
-        title="Zoom in"
-        aria-label={`Zoom in ${side} chat`}
-        disabled={!canIncrease}
-        onClick={() => commit(zoom + ZOOM_STEP)}
-      >
-        +
-      </button>
-    </div>
+function loadBrowserZoom(): number {
+  return clampBrowserZoom(
+    parseFloat(safeGetItem(BROWSER_ZOOM_KEY) ?? String(BROWSER_ZOOM_DEFAULT))
   )
 }
 
@@ -156,12 +123,15 @@ export function Workspace() {
   const rowRef = useRef<HTMLDivElement>(null)
   const [leftFooterSlot, setLeftFooterSlot] = useState<HTMLDivElement | null>(null)
   const [rightFooterSlot, setRightFooterSlot] = useState<HTMLDivElement | null>(null)
+  const [leftFooterTokenSlot, setLeftFooterTokenSlot] = useState<HTMLDivElement | null>(null)
+  const [rightFooterTokenSlot, setRightFooterTokenSlot] = useState<HTMLDivElement | null>(null)
   const [leftOpen, setLeftOpen] = useState(() => loadBool(LEFT_KEY, true))
   const [rightOpen, setRightOpen] = useState(() => loadBool(RIGHT_KEY, false))
   const [leftFrac, setLeftFrac] = useState(() => loadFrac(LEFT_FRAC_KEY, DEFAULT_LEFT_FRAC))
   const [rightFrac, setRightFrac] = useState(() => loadFrac(RIGHT_FRAC_KEY, DEFAULT_RIGHT_FRAC))
   const [leftZoom, setLeftZoom] = useState(() => loadZoom(LEFT_ZOOM_KEY))
   const [rightZoom, setRightZoom] = useState(() => loadZoom(RIGHT_ZOOM_KEY))
+  const [browserZoom, setBrowserZoom] = useState(loadBrowserZoom)
   const [terminalDock, setTerminalDockState] = useState<TerminalDockState>(loadTerminalDock)
   const [isAgentBuilderOpen, setIsAgentBuilderOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<SavedAgent | null>(null)
@@ -222,15 +192,37 @@ export function Workspace() {
     setRightFrac(f)
     safeSetItem(RIGHT_FRAC_KEY, String(f))
   }
-  const onLeftZoom = (zoom: number) => {
-    const next = clampZoom(zoom)
-    setLeftZoom(next)
-    safeSetItem(LEFT_ZOOM_KEY, String(next))
+  // Chat zoom is driven by the native View > Chat Left / Chat Right menus.
+  // Functional updaters keep this independent of the AppCommand effect's deps
+  // so the handler always sees the freshest zoom for the side being adjusted.
+  const applyChatZoom = (panel: 'left' | 'right', action: 'in' | 'out' | 'reset') => {
+    const setter = panel === 'left' ? setLeftZoom : setRightZoom
+    const key = panel === 'left' ? LEFT_ZOOM_KEY : RIGHT_ZOOM_KEY
+    setter((current) => {
+      const next =
+        action === 'reset'
+          ? ZOOM_DEFAULT
+          : clampZoom(current + (action === 'in' ? ZOOM_STEP : -ZOOM_STEP))
+      safeSetItem(key, String(next))
+      return next
+    })
   }
-  const onRightZoom = (zoom: number) => {
-    const next = clampZoom(zoom)
-    setRightZoom(next)
-    safeSetItem(RIGHT_ZOOM_KEY, String(next))
+  // Browser zoom — single value shared across every tab. Mirrors the chat
+  // zoom shape, with one extra hop: we ping main via the preload bridge so
+  // the WebContentsView's zoomFactor is updated for both the active tab and
+  // any future tab. Functional updater for the same dep-stability reason.
+  const applyBrowserZoom = (action: 'in' | 'out' | 'reset') => {
+    setBrowserZoom((current) => {
+      const next =
+        action === 'reset'
+          ? BROWSER_ZOOM_DEFAULT
+          : clampBrowserZoom(
+              current + (action === 'in' ? BROWSER_ZOOM_STEP : -BROWSER_ZOOM_STEP)
+            )
+      safeSetItem(BROWSER_ZOOM_KEY, String(next))
+      window.gladdis.browser.setZoom(next)
+      return next
+    })
   }
 
   const toggleTerminal = () => {
@@ -271,10 +263,29 @@ export function Workspace() {
           const agent = list.find((candidate) => candidate.id === command.agentId)
           if (agent) editAgent(agent)
         })
+        return
+      }
+      if (command.type === 'chat:zoom') {
+        applyChatZoom(command.panel, command.action)
+        return
+      }
+      if (command.type === 'browser:zoom') {
+        applyBrowserZoom(command.action)
+        return
       }
     })
     return off
   }, [lastDock, terminalDock, terminalHandle])
+
+  // Push the persisted browser zoom to main once on mount so the first tab
+  // (created at startup) and any new tabs use it. Main re-applies on
+  // did-finish-load too, so cross-origin nav can't quietly snap to 100%.
+  useEffect(() => {
+    window.gladdis.browser.setZoom(browserZoom)
+    // Intentionally empty deps — this is a one-shot sync, subsequent updates
+    // already round-trip through applyBrowserZoom -> browser.setZoom().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     window.gladdis.layout.setBrowserVisible(!isAgentBuilderOpen)
@@ -332,6 +343,7 @@ export function Workspace() {
                     panelId="left"
                     zoom={leftZoom}
                     footerSlot={null}
+                    footerTokenSlot={null}
                     onCreateAgent={() => {
                       setEditingAgent(null)
                       setIsAgentBuilderOpen(true)
@@ -351,6 +363,7 @@ export function Workspace() {
                 panelId="left"
                 zoom={leftZoom}
                 footerSlot={leftOpen ? leftFooterSlot : null}
+                footerTokenSlot={leftOpen ? leftFooterTokenSlot : null}
                 onCreateAgent={() => {
                   setEditingAgent(null)
                   setIsAgentBuilderOpen(true)
@@ -398,6 +411,7 @@ export function Workspace() {
                     panelId="right"
                     zoom={rightZoom}
                     footerSlot={null}
+                    footerTokenSlot={null}
                     onCreateAgent={() => {
                       setEditingAgent(null)
                       setIsAgentBuilderOpen(true)
@@ -417,6 +431,7 @@ export function Workspace() {
                 panelId="right"
                 zoom={rightZoom}
                 footerSlot={rightOpen ? rightFooterSlot : null}
+                footerTokenSlot={rightOpen ? rightFooterTokenSlot : null}
                 onCreateAgent={() => {
                   setEditingAgent(null)
                   setIsAgentBuilderOpen(true)
@@ -444,8 +459,8 @@ export function Workspace() {
           </button>
           {leftOpen && !leftDockActive && (
             <>
+              <div className="footer-token-slot" ref={setLeftFooterTokenSlot} />
               <div className="footer-action-slot" ref={setLeftFooterSlot} />
-              <ChatZoomControl side="left" zoom={leftZoom} onChange={onLeftZoom} />
             </>
           )}
         </div>
@@ -459,7 +474,7 @@ export function Workspace() {
           {rightOpen && !rightDockActive && (
             <>
               <div className="footer-action-slot right" ref={setRightFooterSlot} />
-              <ChatZoomControl side="right" zoom={rightZoom} onChange={onRightZoom} />
+              <div className="footer-token-slot" ref={setRightFooterTokenSlot} />
             </>
           )}
           <button

@@ -4,6 +4,13 @@ import type { Action, Condition, Plan, PlanStep, Target } from './types'
 /**
  * The Planner — the ONE expensive call in the whole pipeline.
  *
+ * STATUS (see root CLAUDE.md): "the whole pipeline" here means THIS deterministic
+ * pipeline, which is NOT the app's main browser-automation path (that is the
+ * agentic perceive/drive tool loop) and is reached by only one live caller,
+ * taskTools.orchestrate. Its future is undecided. Note also: a dozen core files
+ * import `LlmComplete` from this file — that is a TYPE import only; importing it
+ * does NOT mean they use the pipeline.
+ *
  * It mirrors the old (pre-CDP) pipeline's thesis: feed a model the richest
  * possible landing-page snapshot + the task + the site, and have it emit the
  * full step plan up front as an educated guess. The difference now is the

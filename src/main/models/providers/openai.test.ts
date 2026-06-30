@@ -7,7 +7,27 @@ import {
   titleOpenAi,
   toOpenAiMessages
 } from './openai'
-import type { ChatRequest } from '../../../../shared/types'
+import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
+import type { ToolDef } from '../browserTools'
+
+/** Build a fake ReadableStream that yields the given SSE text in one chunk. */
+function sseBody(text: string): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text)
+  let sent = false
+  return {
+    getReader() {
+      return {
+        async read() {
+          if (sent) return { value: undefined, done: true }
+          sent = true
+          return { value: bytes, done: false }
+        },
+        cancel: async () => {},
+        releaseLock: () => {}
+      }
+    }
+  } as never
+}
 
 function fakeAudit() {
   const finish = vi.fn()
@@ -248,5 +268,73 @@ describe('toOpenAiMessages with history compaction', () => {
     // preamble is added before compaction so it always lands in the kept tail.
     expect(result[4].content).toContain('Current date:')
     expect(typeof result[4].content === 'string' && result[4].content.endsWith('msg 14')).toBe(true)
+  })
+})
+
+describe('runOpenAiToolLoop', () => {
+  it('emits a matching tool_result event even when tool execution throws', async () => {
+    const frames = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_watch","type":"function","function":{"name":"watch_network","arguments":"{}"}}]}}]}\n' +
+        'data: [DONE]\n',
+      'data: {"choices":[{"delta":{"content":"Done."}}]}\n' +
+        'data: [DONE]\n'
+    ]
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      body: sseBody(frames.shift() ?? 'data: [DONE]\n')
+    })))
+
+    const { audit } = fakeAudit()
+    const events: ChatStreamEvent[] = []
+    const run = vi.fn(async () => {
+      throw new Error('simulated tool crash')
+    })
+
+    const req: ChatRequest = {
+      requestId: 'openai-tool-error-1',
+      modelId: 'openai-gpt-5.5',
+      messages: [{ role: 'user', content: 'watch api' }]
+    }
+
+    const toolDefs: ToolDef[] = [
+      {
+        name: 'watch_network',
+        description: 'network capture',
+        parameters: { type: 'object', properties: {} }
+      }
+    ]
+
+    await runOpenAiToolLoop({
+      apiKey: 'openai-test',
+      audit,
+      emit: (evt) => events.push(evt),
+      req,
+      modelId: 'openai-gpt-5.5',
+      signal: new AbortController().signal,
+      tools: { run } as never,
+      ctx: { tabId: 'tab-1', fullResults: new Map() },
+      toolDefs,
+      agentSystem: 'sys',
+      workspaceBlock: null,
+      maxTokens: 100,
+      keepResults: 5
+    })
+
+    const toolCallEvents = events.filter((evt) => evt.type === 'tool_call')
+    const toolResultEvents = events.filter((evt) => evt.type === 'tool_result')
+
+    expect(toolCallEvents).toHaveLength(1)
+    expect(toolResultEvents).toHaveLength(1)
+    expect(toolResultEvents[0].callId).toBe(toolCallEvents[0].callId)
+    expect(toolResultEvents[0].ok).toBe(false)
+    expect(toolResultEvents[0].preview).toContain('simulated tool crash')
+
+    const secondCallInit = vi.mocked(fetch).mock.calls[1]?.[1] as RequestInit | undefined
+    if (!secondCallInit) throw new Error('Expected model to run a follow-up turn')
+    const secondBody = JSON.parse(String(secondCallInit.body))
+    const toolMessages = (secondBody.messages ?? []).filter((msg: any) => msg.role === 'tool')
+    expect(toolMessages).toHaveLength(1)
+    expect(toolMessages[0].tool_call_id).toBe('call_watch')
   })
 })

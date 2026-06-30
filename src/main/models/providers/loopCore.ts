@@ -86,7 +86,17 @@ export async function executeProviderToolCall(args: {
     args: args.toolArgs,
     callId: args.callId
   })
-  const outcome = await args.runTool(args.name, args.toolArgs)
+  let outcome: ToolOutcome
+  try {
+    outcome = await args.runTool(args.name, args.toolArgs)
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    outcome = {
+      ok: false,
+      text: `[tool error] ${detail}`
+    }
+  }
+
   args.rememberFullResult?.(args.callId, outcome.text)
   if (args.validationState && args.noteValidationOutcome !== false) {
     noteToolOutcome(args.validationState, args.name, outcome)

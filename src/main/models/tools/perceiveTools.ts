@@ -503,3 +503,240 @@ export async function runGrepPage(
     return { ok: false, text: `grep_page error: ${err.message}` }
   }
 }
+
+export async function runWatchNetwork(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string
+): Promise<ToolOutcome> {
+  try {
+    const watchArgs = normalizeWatchNetworkArgs(args)
+
+    const result = await deps.tabs.watchNetwork(tabId, {
+      urlFilter: watchArgs.urlFilter,
+      urlFilters: watchArgs.urlFilters,
+      urlRegex: watchArgs.urlRegex,
+      resourceTypes: watchArgs.resourceTypes,
+      statusCodes: watchArgs.statusCodes,
+      statusMin: watchArgs.statusMin,
+      statusMax: watchArgs.statusMax,
+      mimeIncludes: watchArgs.mimeIncludes,
+      windowMs: watchArgs.windowMs,
+      maxBodies: watchArgs.maxBodies,
+      maxBodyChars: watchArgs.maxBodyChars
+    })
+
+    if (result.totalSeen === 0) {
+      return {
+        ok: true,
+        text:
+          `No network requests captured in ${watchArgs.windowMs}ms` +
+          (watchArgs.filterLabel ? ` matching ${watchArgs.filterLabel}` : '') +
+          `. The page may be idle (passive capture only sees traffic the page fires itself) — ` +
+          `trigger the data load first (scroll, click, navigate) then watch again.`,
+        structuredContent: {
+          urlFilter: watchArgs.urlFilter,
+          urlFilters: watchArgs.urlFilters,
+          urlRegex: watchArgs.urlRegex,
+          resourceTypes: watchArgs.resourceTypes,
+          statusCodes: watchArgs.statusCodes,
+          statusMin: watchArgs.statusMin,
+          statusMax: watchArgs.statusMax,
+          mimeIncludes: watchArgs.mimeIncludes,
+          windowMs: watchArgs.windowMs,
+          maxBodies: watchArgs.maxBodies,
+          maxBodyChars: watchArgs.maxBodyChars,
+          totalSeen: 0,
+          captured: [],
+          bodies: []
+        }
+      }
+    }
+
+    let output =
+      `Captured ${result.totalSeen} request(s)` +
+      (watchArgs.filterLabel ? ` matching ${watchArgs.filterLabel}` : '') +
+      ` in ${watchArgs.windowMs}ms. Showing ${result.bodies.length} response bod${result.bodies.length === 1 ? 'y' : 'ies'}:\n\n`
+
+    output += 'Endpoints seen:\n'
+    for (const c of result.captured.slice(0, 25)) {
+      const timing = typeof c.durationMs === 'number' ? ` ${Math.round(c.durationMs)}ms` : ''
+      const size = typeof c.encodedDataLength === 'number' ? ` ${c.encodedDataLength}B` : ''
+      const outcome = c.success ? 'ok' : (c.errorText ? `failed:${c.errorText}` : 'pending')
+      output += `  [${c.status}] ${c.method} ${c.type} ${c.mimeType}${timing}${size} ${outcome}  ${c.url}\n`
+    }
+    if (result.captured.length > 25) output += `  …and ${result.captured.length - 25} more\n`
+    output += '\n'
+
+    for (const b of result.bodies) {
+      output += `--- ${b.url} (${b.status}, ${b.mimeType})${b.truncated ? ' [truncated]' : ''} ---\n`
+      output += '```json\n' + b.body + '\n```\n\n'
+    }
+
+    return {
+      ok: true,
+      text: output.trim(),
+      structuredContent: {
+        urlFilter: watchArgs.urlFilter,
+        urlFilters: watchArgs.urlFilters,
+        urlRegex: watchArgs.urlRegex,
+        resourceTypes: watchArgs.resourceTypes,
+        statusCodes: watchArgs.statusCodes,
+        statusMin: watchArgs.statusMin,
+        statusMax: watchArgs.statusMax,
+        mimeIncludes: watchArgs.mimeIncludes,
+        windowMs: watchArgs.windowMs,
+        maxBodies: watchArgs.maxBodies,
+        maxBodyChars: watchArgs.maxBodyChars,
+        totalSeen: result.totalSeen,
+        captured: result.captured,
+        bodies: result.bodies
+      }
+    }
+  } catch (err: any) {
+    return { ok: false, text: `watch_network error: ${err?.message ?? err}` }
+  }
+}
+
+type WatchNetworkArgSource = Record<string, any>
+
+export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
+  urlFilter?: string
+  urlFilters?: string[]
+  urlRegex?: string
+  resourceTypes?: string[]
+  statusCodes?: number[]
+  statusMin?: number
+  statusMax?: number
+  mimeIncludes?: string[]
+  filterLabel?: string
+  windowMs: number
+  maxBodies: number
+  maxBodyChars: number
+} {
+  const normalizeText = (value: unknown, maxLen = 200): string | undefined =>
+    typeof value === 'string' && value.trim() ? value.trim().slice(0, maxLen) : undefined
+
+  const normalizeStringArray = (value: unknown, maxLen = 200): string[] | undefined => {
+    if (!Array.isArray(value)) return undefined
+    const items = value
+      .map((item) => (typeof item === 'string' ? item.trim().slice(0, maxLen) : ''))
+      .filter(Boolean)
+      .slice(0, 10)
+    return items.length > 0 ? items : undefined
+  }
+
+  const normalizeNumberArray = (value: unknown): number[] | undefined => {
+    if (!Array.isArray(value)) return undefined
+    const items = value
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item))
+      .map((item) => Math.trunc(item))
+      .filter((item) => item >= 100 && item <= 599)
+      .slice(0, 20)
+    return items.length > 0 ? items : undefined
+  }
+
+  const parseNumericArg = (value: unknown, key: string): number | undefined => {
+    if (value === undefined) return undefined
+    const num = Number(value)
+    if (!Number.isFinite(num)) {
+      throw new Error(`watch_network arg "${key}" must be a finite number`)
+    }
+    return Math.round(num)
+  }
+
+  const assertRange = (value: number, key: string, min: number, max: number): number => {
+    if (value < min || value > max) {
+      throw new Error(`watch_network arg "${key}" must be between ${min} and ${max}`)
+    }
+    return value
+  }
+
+  const pickNumericArg = (
+    snake: string,
+    camel: string,
+    fallback: number,
+    min: number,
+    max: number
+  ): number => {
+    const snakeValue = parseNumericArg(args[snake], snake)
+    const camelValue = parseNumericArg(args[camel], camel)
+    if (snakeValue !== undefined && camelValue !== undefined && snakeValue !== camelValue) {
+      throw new Error(`watch_network args conflict: "${snake}" and "${camel}" differ`)
+    }
+
+    const resolved = snakeValue ?? camelValue ?? fallback
+    if (snakeValue === undefined && camelValue === undefined) return resolved
+    return assertRange(resolved, snakeValue !== undefined ? snake : camel, min, max)
+  }
+
+  const pickTextArg = (snake: string, camel: string, maxLen = 200): string | undefined => {
+    const snakeRaw = args[snake]
+    const camelRaw = args[camel]
+    const snakeValue = normalizeText(snakeRaw, maxLen)
+    const camelValue = normalizeText(camelRaw, maxLen)
+    if (snakeRaw !== undefined && camelRaw !== undefined && snakeValue !== camelValue) {
+      throw new Error(`watch_network args conflict: "${snake}" and "${camel}" differ`)
+    }
+    return snakeValue ?? camelValue
+  }
+
+  const pickArrayArg = (snake: string, camel: string, kind: 'string' | 'number' = 'string'): string[] | number[] | undefined => {
+    const snakeRaw = args[snake]
+    const camelRaw = args[camel]
+    if (snakeRaw !== undefined && !Array.isArray(snakeRaw)) {
+      throw new Error(`watch_network arg "${snake}" must be an array of ${kind === 'string' ? 'strings' : 'numbers'}`)
+    }
+    if (camelRaw !== undefined && !Array.isArray(camelRaw)) {
+      throw new Error(`watch_network arg "${camel}" must be an array of ${kind === 'string' ? 'strings' : 'numbers'}`)
+    }
+
+    const snakeValue = kind === 'string' ? normalizeStringArray(snakeRaw) : normalizeNumberArray(snakeRaw)
+    const camelValue = kind === 'string' ? normalizeStringArray(camelRaw) : normalizeNumberArray(camelRaw)
+    if (snakeRaw !== undefined && camelRaw !== undefined && JSON.stringify(snakeValue) !== JSON.stringify(camelValue)) {
+      throw new Error(`watch_network args conflict: "${snake}" and "${camel}" differ`)
+    }
+    return snakeValue ?? camelValue
+  }
+
+  const urlRegex = pickTextArg('url_regex', 'urlRegex')
+  const urlFilters = pickArrayArg('url_filters', 'urlFilters', 'string') as string[] | undefined
+  const urlFilter = pickTextArg('url_filter', 'urlFilter')
+  const resourceTypes = pickArrayArg('resource_types', 'resourceTypes', 'string') as string[] | undefined
+  const statusCodes = pickArrayArg('status_codes', 'statusCodes', 'number') as number[] | undefined
+  const statusMin = parseNumericArg(args.status_min ?? args.statusMin, args.status_min !== undefined ? 'status_min' : 'statusMin')
+  const statusMax = parseNumericArg(args.status_max ?? args.statusMax, args.status_max !== undefined ? 'status_max' : 'statusMax')
+  const mimeIncludes = pickArrayArg('mime_includes', 'mimeIncludes', 'string') as string[] | undefined
+
+  if (statusMin !== undefined) assertRange(statusMin, args.status_min !== undefined ? 'status_min' : 'statusMin', 100, 599)
+  if (statusMax !== undefined) assertRange(statusMax, args.status_max !== undefined ? 'status_max' : 'statusMax', 100, 599)
+  if (statusMin !== undefined && statusMax !== undefined && statusMin > statusMax) {
+    throw new Error('watch_network args conflict: "status_min" cannot be greater than "status_max"')
+  }
+
+  const filterParts: string[] = []
+  if (urlRegex) filterParts.push(`url~/${urlRegex}/i`)
+  else if (urlFilters && urlFilters.length > 0) filterParts.push(urlFilters.map((part) => `"${part}"`).join(', '))
+  else if (urlFilter) filterParts.push(`"${urlFilter}"`)
+  if (resourceTypes && resourceTypes.length > 0) filterParts.push(`types:${resourceTypes.join(',')}`)
+  if (statusCodes && statusCodes.length > 0) filterParts.push(`statuses:${statusCodes.join(',')}`)
+  if (statusMin !== undefined) filterParts.push(`status>=${statusMin}`)
+  if (statusMax !== undefined) filterParts.push(`status<=${statusMax}`)
+  if (mimeIncludes && mimeIncludes.length > 0) filterParts.push(`mime:${mimeIncludes.join(',')}`)
+
+  return {
+    urlFilter,
+    urlFilters,
+    urlRegex,
+    resourceTypes,
+    statusCodes,
+    statusMin,
+    statusMax,
+    mimeIncludes,
+    filterLabel: filterParts.length > 0 ? filterParts.join('; ') : undefined,
+    windowMs: pickNumericArg('window_ms', 'windowMs', 4_000, 500, 15_000),
+    maxBodies: pickNumericArg('max_bodies', 'maxBodies', 3, 1, 10),
+    maxBodyChars: pickNumericArg('max_body_chars', 'maxBodyChars', 4_000, 500, 20_000)
+  }
+}

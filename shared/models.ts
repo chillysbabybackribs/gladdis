@@ -41,6 +41,7 @@ export const MODELS: ModelOption[] = [
   // Cursor-native names (effort/thinking baked in) from `agent models`, not our
   // API-provider IDs. A curated 10 to start; the CLI exposes ~60 for this account.
   { id: 'composer-2.5', label: 'Cursor · Composer 2.5', provider: 'cursor', availability: 'verified' },
+  { id: 'composer-2.5-fast', label: 'Cursor · Composer 2.5 Fast', provider: 'cursor', availability: 'verified' },
   { id: 'claude-opus-4-8-high', label: 'Cursor · Opus 4.8', provider: 'cursor', availability: 'verified' },
   { id: 'claude-opus-4-8-thinking-high', label: 'Cursor · Opus 4.8 Thinking', provider: 'cursor', availability: 'verified' },
   { id: 'claude-4.6-sonnet-medium', label: 'Cursor · Sonnet 4.6', provider: 'cursor', availability: 'verified' },
@@ -50,6 +51,13 @@ export const MODELS: ModelOption[] = [
   { id: 'gemini-3.1-pro', label: 'Cursor · Gemini 3.1 Pro', provider: 'cursor', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Cursor · Gemini 3.5 Flash', provider: 'cursor', availability: 'verified' },
   { id: 'grok-4.3', label: 'Cursor · Grok 4.3', provider: 'cursor', availability: 'verified' },
+  // Batch 2: new model lines / vendors not otherwise covered (GLM, Kimi, Opus 4.6,
+  // Gemini 3 Flash, GPT-5.2). IDs verified present in this account's `agent models`.
+  { id: 'claude-4.6-opus-high', label: 'Cursor · Opus 4.6', provider: 'cursor', availability: 'verified' },
+  { id: 'gpt-5.2-high', label: 'Cursor · GPT-5.2 High', provider: 'cursor', availability: 'verified' },
+  { id: 'gemini-3-flash', label: 'Cursor · Gemini 3 Flash', provider: 'cursor', availability: 'verified' },
+  { id: 'glm-5.2-high', label: 'Cursor · GLM 5.2', provider: 'cursor', availability: 'verified' },
+  { id: 'kimi-k2.5', label: 'Cursor · Kimi K2.5', provider: 'cursor', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview-customtools', label: 'Gemini 3.1 Pro Preview Custom Tools', provider: 'google', availability: 'verified' },

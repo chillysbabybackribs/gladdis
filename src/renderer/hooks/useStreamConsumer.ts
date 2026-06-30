@@ -205,6 +205,9 @@ export function applyStreamEventToMessages(
     return out
   }
   if (event.type === 'tool_call') {
+    // Guard against duplicate tool_call events for the same callId (Cursor emits
+    // these at tool boundaries). Only add if we haven't seen this callId yet.
+    if (parts.some((p) => p.kind === 'tool' && p.tool.callId === event.callId)) return out
     const tool: ToolActivity = {
       callId: event.callId,
       tool: event.tool,

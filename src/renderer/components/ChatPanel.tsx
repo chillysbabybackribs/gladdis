@@ -359,20 +359,26 @@ export function ChatPanel({
 
   const onInterject = ({ text, mode }: ComposerSubmit & { mode: ComposerInterjectionMode }) => {
     const requestId = activeReq.current
-    if (!requestId || pauseUnsupportedReason) return
+    if (!requestId) return
     const clean = text.trim()
     if (!clean) return
 
-    window.gladdis.chat.interject({ requestId, text: clean, pause: mode === 'pause' })
-    setMessages((m) => [
-      ...m,
-      {
-        role: 'user',
-        text: mode === 'pause' ? `[Pause + apply]\n\n${clean}` : `[Queued for next step]\n\n${clean}`
-      }
-    ])
+    window.gladdis.chat.interject({
+      requestId,
+      text: clean,
+      pause: mode === 'pause',
+      autoResume: mode === 'pause'
+    })
+    setMessages((m) => {
+      const userMsg: Message = { id: newMessageId(), role: 'user', text: clean }
+      const assistantId = activeAssistantMessageId.current
+      const assistantIndex = assistantId
+        ? m.findIndex((message) => message.role === 'assistant' && message.id === assistantId)
+        : -1
+      if (assistantIndex === -1) return [...m, userMsg]
+      return [...m.slice(0, assistantIndex), userMsg, ...m.slice(assistantIndex)]
+    })
     autoScroll.scrollToBottom()
-    if (mode === 'pause') setPaused(true)
   }
 
   const stop = () => {
@@ -472,20 +478,6 @@ export function ChatPanel({
     setShowSettings(false)
   }
 
-  // Pause is implemented inside our provider-agnostic agent loop, which
-  // doesn't run for Codex (its local app-server owns its own loop and
-  // doesn't expose iteration boundaries we can hold at). The button is
-  // ALWAYS visible while a turn is in flight so the affordance is
-  // discoverable; on Codex turns we surface that the model owns its loop
-  // by showing the disabled state and an explanatory tooltip rather than
-  // making the button disappear (which the user reads as a bug).
-  const activeModel =
-    models.find((m) => m.id === modelId) ?? MODELS.find((m) => m.id === modelId)
-  const pauseSupported = (activeModel?.provider ?? 'anthropic') !== 'codex'
-  const pauseUnsupportedReason = pauseSupported
-    ? undefined
-    : 'Codex turns are driven by the local Codex CLI, which owns the loop end-to-end. Pause holds our agent loop between iterations — Codex has no equivalent boundary. Stop still works.'
-
   // Zoom scales the conversation typography only. The composer is application
   // chrome, not content: its height, font sizes, and hint typography are held
   // constant so the input box looks identical on both panels regardless of
@@ -564,12 +556,11 @@ export function ChatPanel({
           activeId={activeId}
           busy={streaming}
           onSubmit={onSubmit}
-          onInterject={pauseUnsupportedReason ? undefined : onInterject}
+          onInterject={onInterject}
           onStop={stop}
           onPause={pause}
           onResume={resume}
           paused={paused}
-          pauseDisabledReason={pauseUnsupportedReason}
           audioOn={audioOn}
           onToggleAudio={toggleAudio}
           voice={voice}

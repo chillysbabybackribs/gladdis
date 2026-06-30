@@ -461,6 +461,8 @@ export interface ChatInterjectionRequest {
   text: string
   /** Also request a boundary pause after queueing the context. */
   pause?: boolean
+  /** Resume automatically after the queued context has been attached. */
+  autoResume?: boolean
 }
 
 /** OpenAI TTS voices (audible replies feature). */

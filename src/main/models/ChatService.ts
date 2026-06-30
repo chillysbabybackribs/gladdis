@@ -338,9 +338,14 @@ export class ChatService {
     const controller = this.aborts.get(req.requestId)
     if (!text || !controller || controller.signal.aborted) return false
 
-    const queued = this.queuedInterjections.get(req.requestId) ?? []
-    queued.push(text)
-    this.queuedInterjections.set(req.requestId, queued)
+    const handledByCodex =
+      this.codexClient?.interjectRequest(req.requestId, text, { autoResume: req.autoResume }) ?? false
+
+    if (!handledByCodex) {
+      const queued = this.queuedInterjections.get(req.requestId) ?? []
+      queued.push(text)
+      this.queuedInterjections.set(req.requestId, queued)
+    }
     this.emit({
       requestId: req.requestId,
       type: 'loop_state',
@@ -348,11 +353,14 @@ export class ChatService {
       event: 'context_queued',
       phase: 'decide',
       iteration: 0,
-      summary: req.pause
-        ? 'Context queued and pause requested for the next task boundary.'
+      summary: req.autoResume
+        ? 'Context added to the running task; it will continue automatically.'
         : 'Context queued for the next task step.'
     })
-    if (req.pause) this.pauseRequest(req.requestId)
+    if (!handledByCodex && req.pause) {
+      this.pauseRequest(req.requestId)
+      if (req.autoResume) this.resumeRequest(req.requestId)
+    }
     return true
   }
 

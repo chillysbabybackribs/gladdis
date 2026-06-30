@@ -23,24 +23,17 @@ interface Props {
   /** Abort the in-flight stream (shown as a stop button while busy). */
   onStop?: () => void
   /**
-   * Pause the in-flight agent loop at the next iteration boundary. When
-   * provided, a pause/resume button renders beside the stop button while
-   * busy. Always render the button when callbacks are supplied — for
-   * providers (e.g. Codex) where pause has no analogue, pass
-   * `pauseDisabledReason` instead of withholding the callback, so the
-   * affordance stays visible.
+   * Pause the in-flight task at its next safe boundary. For Anthropic /
+   * OpenAI / Google / Grok this is the next agent-loop iteration; for
+   * Codex it's a turn/interrupt + continuation re-prompt on the same
+   * thread. Either way the assistant bubble stays open and resuming picks
+   * the same work back up — see `onResume`.
    */
   onPause?: () => void
-  /** Resume from a paused turn. Same provider caveat as `onPause`. */
+  /** Resume from a paused turn (see `onPause`). */
   onResume?: () => void
   /** Whether the current turn is currently held in the pause gate. */
   paused?: boolean
-  /**
-   * If non-empty, the pause/resume button is rendered disabled with this
-   * text as its tooltip. Used to keep the button discoverable on Codex
-   * turns (where pause isn't supported) without faking a working control.
-   */
-  pauseDisabledReason?: string
   /** Whether replies are read aloud (TTS). */
   audioOn?: boolean
   /** Toggle audible replies on/off. */
@@ -129,7 +122,6 @@ export function Composer({
   onPause,
   onResume,
   paused,
-  pauseDisabledReason,
   audioOn,
   onToggleAudio,
   voice,
@@ -350,9 +342,8 @@ export function Composer({
               </button>
               <button
                 type="button"
-                className="composer-run-action strong"
-                disabled={paused || !!pauseDisabledReason}
-                title={pauseDisabledReason || (paused ? 'Already paused' : 'Pause at the next boundary and apply this note')}
+                className="composer-run-action"
+                title="Apply this note to the running task and continue"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   onInterject?.({ text: draft.trim(), mode: 'pause' })
@@ -473,14 +464,8 @@ export function Composer({
                 className={`composer-send composer-pause ${paused ? 'is-paused' : ''}`}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={paused ? onResume : onPause}
-                disabled={!!pauseDisabledReason || (paused ? !onResume : !onPause)}
-                title={
-                  pauseDisabledReason
-                    ? `Pause unavailable: ${pauseDisabledReason}`
-                    : paused
-                      ? 'Resume task'
-                      : 'Pause task'
-                }
+                disabled={paused ? !onResume : !onPause}
+                title={paused ? 'Resume task' : 'Pause task'}
                 aria-label={paused ? 'Resume task' : 'Pause task'}
                 aria-pressed={paused}
               >

@@ -27,6 +27,25 @@ export interface ActiveTurn {
   turnId: string | null
   done: () => void
   aborted: boolean
+  /**
+   * True when the user paused this turn via the composer's pause button.
+   * Distinct from `aborted`: paused turns finish their app-server side
+   * (via turn/interrupt) but the gladdis-side send() then waits on
+   * `resumeResolver` instead of returning, so the conversation stays open
+   * and the renderer keeps the assistant bubble live.
+   */
+  paused: boolean
+  /** Context notes sent by the user while this Codex turn was running. */
+  queuedUserContext: string[]
+  /** One-click pause+apply should interrupt, attach context, then continue. */
+  autoResumeAfterPause: boolean
+  /**
+   * Resolver wired up by CodexClient.send while it sits in the paused state.
+   * Invoked by `resumeRequest` to wake the send() loop, which then kicks
+   * off a fresh `turn/start` with a continuation prompt on the same thread.
+   * Null whenever the turn is not waiting on a resume.
+   */
+  resumeResolver: (() => void) | null
   text: string
   silent: boolean
   error: Error | null
@@ -107,8 +126,17 @@ export function routeNotification(msg: ServerNotification, ctx: NotificationCont
       // detail the payload carries and always log the raw params for recovery.
       const detail = codexErrorDetail(p)
       console.error('[codex] error notification:', JSON.stringify(p))
+      // Suppress error surfacing when the user intentionally aborted or paused
+      // the turn — the app-server's "turn was interrupted" notification is a
+      // benign side effect of our own turn/interrupt, not a real failure the
+      // user needs to see. We also clear turn.error on pause so the send()
+      // loop doesn't treat the next iteration as starting in an error state.
+      if (turn.aborted || turn.paused) {
+        turn.done()
+        break
+      }
       turn.error = new Error(detail)
-      if (!turn.aborted && !turn.silent) {
+      if (!turn.silent) {
         ctx.emit({
           requestId: turn.requestId,
           type: 'error',

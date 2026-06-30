@@ -83,7 +83,8 @@ export interface GladdisApi {
     send: (req: ChatRequest) => void
     /**
      * Add user context to an in-flight agentic task. It is consumed at the
-     * next provider iteration boundary, optionally after requesting pause.
+     * next provider iteration boundary, optionally after interrupting the
+     * current work and automatically continuing with that context.
      */
     interject: (req: ChatInterjectionRequest) => void
     abort: (requestId: string) => void

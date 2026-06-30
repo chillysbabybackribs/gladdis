@@ -12,7 +12,9 @@ export const DRIVE_TOOLS: ToolDef[] = [
     name: 'navigate',
     description:
       'Navigate the active browser tab to a URL and ack on load settle. ' +
-      'Call read_page afterwards if you need the page content.',
+      'The result reports the page text size — use it to size your next grep_page: ' +
+      'a heavy page needs distinctive multi-word queries (expect many hits), a light ' +
+      'page lets you grep broadly. Call read_page afterwards if you need the page content.',
     parameters: {
       type: 'object',
       properties: {
@@ -33,7 +35,8 @@ export const DRIVE_TOOLS: ToolDef[] = [
       properties: {
         url: { type: 'string' },
         wait: { type: 'boolean' },
-        timeoutMs: { type: 'number' }
+        timeoutMs: { type: 'number' },
+        pageTextChars: { type: ['number', 'null'] }
       },
       required: ['url', 'wait', 'timeoutMs']
     }

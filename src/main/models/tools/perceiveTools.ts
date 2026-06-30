@@ -175,7 +175,7 @@ export async function executeGrepInTab(
   type: 'auto' | 'text' | 'regex' | 'selector' = 'auto',
   caseSensitive: boolean = false,
   contextLines: number = 2
-): Promise<{ success: boolean; result?: any[]; error?: string }> {
+): Promise<{ success: boolean; result?: any[]; totalMatches?: number; error?: string }> {
   const jsPayload = `
     const query = ${JSON.stringify(query)};
     const type = ${JSON.stringify(type)};
@@ -254,6 +254,23 @@ export async function executeGrepInTab(
       return bestEl;
     }
 
+    // Same 300-char budget the selector branch uses for outerHTML/innerText, so
+    // text matches can't ship full paragraphs. Centers the window on the actual
+    // hit (not the paragraph start) so a broad term returns a usable snippet per
+    // place it appears instead of the whole block — the map stays, the bulk goes.
+    const SNIPPET_CHARS = 300;
+    function snippetAround(str, re) {
+      if (!str || str.length <= SNIPPET_CHARS) return str;
+      re.lastIndex = 0;
+      const m = re.exec(str);
+      const hit = m ? m.index : 0;
+      const half = Math.floor(SNIPPET_CHARS / 2);
+      let start = Math.max(0, hit - half);
+      let end = Math.min(str.length, start + SNIPPET_CHARS);
+      start = Math.max(0, end - SNIPPET_CHARS);
+      return (start > 0 ? '…' : '') + str.slice(start, end) + (end < str.length ? '…' : '');
+    }
+
     function findTextMatches(pattern, isRegex, caseSensitive, contextLines) {
       const results = [];
       const text = document.body ? (document.body.innerText || "") : "";
@@ -293,9 +310,9 @@ export async function executeGrepInTab(
 
         results.push({
           type: 'text_match',
-          matchedLine: line.trim(),
+          matchedLine: snippetAround(line.trim(), regex),
           lineIndex: index + 1,
-          context,
+          context: snippetAround(context, regex),
           selector,
           coordinates: coords,
           visible: isVisible,
@@ -349,27 +366,45 @@ export async function executeGrepInTab(
     let textResults = [];
     let selectorResults = [];
 
+    // A multi-word string is almost always prose to grep for, not a descendant
+    // selector — so spaces no longer route to selector search. Selector shape is
+    // signalled by structural tokens (#id, .class, [attr], >, xpath).
     const isXPath = query.startsWith('/') || query.startsWith('(') || query.startsWith('./');
-    const looksLikeSelector = isXPath || query.startsWith('.') || query.startsWith('#') || query.includes('[') || query.includes('>') || query.includes(' ');
+    const looksLikeSelector = isXPath || query.startsWith('.') || query.startsWith('#') || query.includes('[') || query.includes('>');
 
     if (type === 'selector' || (type === 'auto' && looksLikeSelector)) {
       selectorResults = findSelectorMatches(query);
     }
 
-    if (type === 'text' || type === 'regex' || (type === 'auto' && selectorResults.length === 0)) {
+    // Fall back to text search when no real selector match was found — an error
+    // object (invalid selector) must NOT suppress the fallback, or a phrase the
+    // router guessed wrong would dead-end on "Invalid selector".
+    const realSelectorMatches = selectorResults.filter(r => r.type !== 'error').length;
+    if (type === 'text' || type === 'regex' || (type === 'auto' && realSelectorMatches === 0)) {
       const isRegex = (type === 'regex');
       textResults = findTextMatches(query, isRegex, caseSensitive, contextLines);
     }
 
-    const allResults = [...selectorResults, ...textResults].slice(0, 50);
-    return allResults;
+    // If text search produced matches, a selector-parse error is just router
+    // noise — drop it so the lean text result isn't polluted by a false failure.
+    const cleanedSelectorResults = textResults.length > 0
+      ? selectorResults.filter(r => r.type !== 'error')
+      : selectorResults;
+    const combined = [...cleanedSelectorResults, ...textResults];
+    // Return the pre-slice total so the caller can honestly report truncation
+    // instead of a flat 50 that hides "there were far more".
+    return { matches: combined.slice(0, 50), totalMatches: combined.length };
   `;
 
   const runResult = await tabs.executeJavaScript(tabId, jsPayload)
   if (!runResult.success) {
     return { success: false, error: runResult.error }
   }
-  return { success: true, result: runResult.result as any[] }
+  const payload = runResult.result as { matches?: any[]; totalMatches?: number } | any[]
+  // Tolerate both the new {matches,totalMatches} shape and a bare array.
+  const matches = Array.isArray(payload) ? payload : (payload?.matches ?? [])
+  const totalMatches = Array.isArray(payload) ? payload.length : (payload?.totalMatches ?? matches.length)
+  return { success: true, result: matches, totalMatches }
 }
 
 export async function runGrepPage(
@@ -393,6 +428,7 @@ export async function runGrepPage(
     }
 
     const matches = runResult.result as any[]
+    const totalMatches = runResult.totalMatches ?? (Array.isArray(matches) ? matches.length : 0)
     if (!Array.isArray(matches) || matches.length === 0) {
       return {
         ok: true,
@@ -402,12 +438,35 @@ export async function runGrepPage(
           type,
           caseSensitive,
           contextLines,
-          matches: []
+          matches: [],
+          totalMatches: 0,
+          truncated: false
         }
       }
     }
 
-    let output = `Hybrid Grep/CDP search completed on page. Found ${matches.length} match(es):\n\n`
+    const truncated = totalMatches > matches.length
+    const textMatchCount = matches.filter((m) => m && m.type === 'text_match').length
+    // A single common word is the wrong text query — it floods with noise and the
+    // answer to the user's actual need is in a phrase, not a keyword. Steer toward
+    // sentences/distinctive phrases when a bare word floods. (A distinctive single
+    // word like a rare proper noun stays fine — it won't flood, so it won't trip this.)
+    const isSingleWord = /^\s*\S+\s*$/.test(query)
+    const floodedOnSingleWord =
+      isSingleWord && textMatchCount > 0 && (truncated || textMatchCount >= 8)
+
+    let banner = ''
+    if (floodedOnSingleWord) {
+      banner =
+        `⚠ Broad query: the single word "${query.trim()}" matched ${totalMatches}${truncated ? '+ (truncated to ' + matches.length + ')' : ''} places — ` +
+        `this is too broad to answer a question. Re-grep with a full sentence or a distinctive phrase from what the user is actually looking for, ` +
+        `and run a few variations.\n\n`
+    } else if (truncated) {
+      banner =
+        `⚠ ${totalMatches} matches found, showing first ${matches.length} — results are a SAMPLE, not all of them. Narrow the query for full coverage.\n\n`
+    }
+
+    let output = banner + `Hybrid Grep/CDP search completed on page. Found ${matches.length} match(es)${truncated ? ' of ' + totalMatches : ''}:\n\n`
     matches.forEach((m, idx) => {
       output += `--- Match #${idx + 1} (${m.type}) ---\n`
       if (m.type === 'error') {
@@ -447,7 +506,9 @@ export async function runGrepPage(
         type,
         caseSensitive,
         contextLines,
-        matches: matches.filter((match) => match && typeof match === 'object')
+        matches: matches.filter((match) => match && typeof match === 'object'),
+        totalMatches,
+        truncated
       }
     }
   } catch (err: any) {

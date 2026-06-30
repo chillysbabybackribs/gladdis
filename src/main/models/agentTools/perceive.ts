@@ -53,7 +53,22 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
   {
     name: 'grep_page',
     description:
-      'Search live page text, CSS selectors, or XPath with context and coordinates for fast discovery.',
+      'Find a specific element or text section on the live page — fast and precise, ' +
+      'and far cheaper than read_page or a screenshot. This is the primary tool for ' +
+      '"find/locate X on this page" and for answering "what does the page say about X", ' +
+      'especially on long, text-heavy pages. ' +
+      'For TEXT, search a full sentence or a distinctive phrase taken from what the user ' +
+      'actually wants to know (type "text"/"regex") — NOT a single common word. A bare ' +
+      'keyword like "Germany" or "price" floods with dozens of noise hits and answers ' +
+      'nothing; a phrase like "Germany surrendered on 8 May 1945" lands the exact passage. ' +
+      'Run a few phrasing variations that pertain to the need. Each match returns the ' +
+      'surrounding section, so the answer comes back without reading the rest. (A distinctive ' +
+      'single word — a rare proper noun, error code, or identifier — is fine; it is common ' +
+      'words that are the problem.) ' +
+      'Use a specific CSS selector or XPath only when you are targeting a known element to act on. ' +
+      'AVOID broad tag selectors like "a", "div", "img", "script" — every match returns full ' +
+      'outerHTML + selector + coordinates, so a broad selector dumps the page and defeats the ' +
+      'token savings; narrow the query instead.',
     parameters: {
       type: 'object',
       properties: {
@@ -84,6 +99,8 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
         type: { type: 'string' },
         caseSensitive: { type: 'boolean' },
         contextLines: { type: 'number' },
+        totalMatches: { type: 'number' },
+        truncated: { type: 'boolean' },
         matches: {
           type: 'array',
           items: {

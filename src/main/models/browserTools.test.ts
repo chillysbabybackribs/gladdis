@@ -812,6 +812,68 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('Save 50% on annual billing.')
   })
 
+  it('steers off a single broad word when a text grep floods and truncates', async () => {
+    // Emulate the in-page payload: 50 returned text matches out of 137 total.
+    const flood = Array.from({ length: 50 }, (_, i) => ({
+      type: 'text_match',
+      matchedLine: `…Germany context ${i}…`,
+      lineIndex: i + 1,
+      context: `…Germany context ${i}…`,
+      selector: `p:nth-of-type(${i + 1})`,
+      coordinates: { x: 1, y: i },
+      visible: true,
+      tagName: 'p'
+    }))
+    const executeJavaScript = vi.fn(async () => ({
+      success: true,
+      result: { matches: flood, totalMatches: 137 }
+    }))
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    const result = await tools.run('grep_page', { query: 'Germany', type: 'text' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    // The banner names the bad query shape and tells the model what to do instead.
+    expect(result.text).toContain('Broad query')
+    expect(result.text).toContain('full sentence or a distinctive phrase')
+    expect(result.text).toContain('137')
+    // Machine-readable signal is present too.
+    expect(result.structuredContent).toMatchObject({ totalMatches: 137, truncated: true })
+  })
+
+  it('does not steer when a phrase query returns a clean handful of matches', async () => {
+    const executeJavaScript = vi.fn(async () => ({
+      success: true,
+      result: {
+        matches: [
+          {
+            type: 'text_match',
+            matchedLine: 'Germany surrendered on 8 May 1945.',
+            lineIndex: 12,
+            context: '…Germany surrendered on 8 May 1945.…',
+            selector: 'p:nth-of-type(5)',
+            coordinates: { x: 1, y: 1 },
+            visible: true,
+            tagName: 'p'
+          }
+        ],
+        totalMatches: 1
+      }
+    }))
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'grep_page',
+      { query: 'Germany surrendered on 8 May 1945', type: 'text' },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).not.toContain('Broad query')
+    expect(result.text).not.toContain('SAMPLE')
+    expect(result.structuredContent).toMatchObject({ totalMatches: 1, truncated: false })
+  })
+
   it('routes grep_click through the capability broker and triggers click events on coordinates of the best match', async () => {
     const executeJavaScript = vi.fn(async () => ({
       success: true,

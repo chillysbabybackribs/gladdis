@@ -67,15 +67,44 @@ export async function runNavigate(
     await deps.tabs.waitForNavigationSettled(ctx.tabId, timeoutMs)
   }
 
+  // Free calibration signal for the model's next read: how text-heavy this page
+  // is, measured at settle. Lets it size grep_page queries up-front (large →
+  // distinctive phrases, expect many hits; small → broaden safely) instead of
+  // guessing blind. Best-effort only — a read failure must not fail navigation.
+  let pageTextChars: number | null = null
+  if (shouldWait) {
+    try {
+      const res = await deps.tabs.executeJavaScript(
+        ctx.tabId,
+        'return (document.body && document.body.innerText) ? document.body.innerText.length : 0'
+      )
+      if (res.success && typeof res.result === 'number') pageTextChars = res.result
+    } catch {
+      pageTextChars = null
+    }
+  }
+
+  const sizeHint =
+    pageTextChars === null
+      ? ''
+      : ` Page text: ~${pageTextChars.toLocaleString()} chars` +
+        (pageTextChars > 50_000
+          ? ' (heavy — use distinctive multi-word grep_page queries; expect many hits).'
+          : pageTextChars < 4_000
+            ? ' (light — broad grep_page terms are safe).'
+            : '.')
+
   return {
     ok: true,
-    text: shouldWait
-      ? `Navigated to ${rawUrl} (waited up to ${timeoutMs}ms).`
-      : `Navigating to ${rawUrl}.`,
+    text:
+      (shouldWait
+        ? `Navigated to ${rawUrl} (waited up to ${timeoutMs}ms).`
+        : `Navigating to ${rawUrl}.`) + sizeHint,
     structuredContent: {
       url: rawUrl,
       wait: shouldWait,
-      timeoutMs
+      timeoutMs,
+      pageTextChars
     }
   }
 }

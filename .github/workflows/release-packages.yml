@@ -31,6 +31,8 @@ jobs:
         run: npm run release:doctor
 
       - name: Build installer artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: npm run dist:linux
 
       - name: Upload artifacts

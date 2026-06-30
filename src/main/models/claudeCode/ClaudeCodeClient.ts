@@ -18,6 +18,18 @@ export interface PersistedClaudeCodeSessions {
   set: (conversationId: string, sessionId: string | null) => void
 }
 
+interface ClaudeCodeBridgeRegistration {
+  dispose: () => void
+  env: Record<string, string>
+  mcpConfig: string
+}
+
+type CreateClaudeCodeBridgeSession = (args: {
+  conversationId: string | null
+  modelId: string
+  requestId: string | null
+}) => Promise<ClaudeCodeBridgeRegistration>
+
 export function probeClaudeCodeBinary(): Promise<{ installed: boolean; version: string | null }> {
   const now = Date.now()
   if (cachedProbe && now - lastProbeTime < PROBE_CACHE_TTL_MS) return Promise.resolve(cachedProbe)
@@ -46,7 +58,8 @@ export class ClaudeCodeClient {
   constructor(
     private readonly emit: (e: ChatStreamEvent) => void,
     private readonly getWorkspaceRoot: () => string | null,
-    private readonly sessions: PersistedClaudeCodeSessions
+    private readonly sessions: PersistedClaudeCodeSessions,
+    private readonly createBridgeSession?: CreateClaudeCodeBridgeSession
   ) {}
 
   async status(): Promise<ClaudeCodeStatus> {
@@ -89,7 +102,8 @@ export class ClaudeCodeClient {
     modelId: string,
     system: string,
     user: string,
-    conversationId?: string | null
+    conversationId?: string | null,
+    options: { enableBrowserTools?: boolean } = {}
   ): Promise<{ text: string; usage?: ClaudeUsage }> {
     return this.runTurn({
       modelId,
@@ -97,7 +111,8 @@ export class ClaudeCodeClient {
       user,
       conversationId: conversationId ?? null,
       requestId: null,
-      signal: null
+      signal: null,
+      enableBrowserTools: options.enableBrowserTools === true
     })
   }
 
@@ -113,7 +128,8 @@ export class ClaudeCodeClient {
       user,
       conversationId: req.conversationId ?? null,
       requestId: req.requestId,
-      signal
+      signal,
+      enableBrowserTools: true
     })
     return result.text
   }
@@ -125,6 +141,7 @@ export class ClaudeCodeClient {
     conversationId: string | null
     requestId: string | null
     signal: AbortSignal | null
+    enableBrowserTools: boolean
   }): Promise<{ text: string; usage?: ClaudeUsage }> {
     const probe = await probeClaudeCodeBinary()
     if (!probe.installed) throw new Error('Claude Code CLI not found')
@@ -133,6 +150,13 @@ export class ClaudeCodeClient {
     const persistedSessionId = args.conversationId ? this.sessions.get(args.conversationId) : null
     const sessionId = persistedSessionId || randomUUID()
     const cliModel = claudeCliModel(args.modelId)
+    const bridge = args.enableBrowserTools && this.createBridgeSession
+      ? await this.createBridgeSession({
+          conversationId: args.conversationId,
+          modelId: args.modelId,
+          requestId: args.requestId
+        })
+      : null
     const cliArgs = [
       '-p',
       '--verbose',
@@ -146,6 +170,9 @@ export class ClaudeCodeClient {
       '--disallowedTools',
       CLAUDE_NATIVE_WEB_TOOLS.join(',')
     ]
+    if (bridge) {
+      cliArgs.push('--strict-mcp-config', '--mcp-config', bridge.mcpConfig)
+    }
     if (persistedSessionId) cliArgs.push('--resume', persistedSessionId)
     else cliArgs.push('--session-id', sessionId)
     cliArgs.push(args.user)
@@ -153,7 +180,7 @@ export class ClaudeCodeClient {
     return new Promise<{ text: string; usage?: ClaudeUsage }>((resolve, reject) => {
       const child = spawn(CLAUDE_BIN, cliArgs, {
         cwd: workdir,
-        env: process.env,
+        env: bridge ? { ...process.env, ...bridge.env } : process.env,
         stdio: ['ignore', 'pipe', 'pipe']
       })
 
@@ -172,6 +199,7 @@ export class ClaudeCodeClient {
         args.signal?.removeEventListener('abort', onAbort)
         stdoutRl.close()
         stderrRl.close()
+        bridge?.dispose()
         fn()
       }
 

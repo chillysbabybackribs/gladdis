@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { join } from 'node:path'
 import { GoogleGenAI } from '@google/genai'
 import type { KeyStore } from './KeyStore'
 import {
@@ -29,6 +30,7 @@ import {
 } from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
+import { ClaudeCodeBridgeServer } from './claudeCode/ClaudeCodeBridgeServer'
 import { ClaudeCodeClient } from './claudeCode/ClaudeCodeClient'
 import { CapabilityBroker } from './capabilities/CapabilityBroker'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
@@ -167,6 +169,8 @@ export class ChatService {
   private codexClient: CodexClient | null = null
   /** Lazily-created Claude Code driver (spawns the local CLI per turn). */
   private claudeCodeClient: ClaudeCodeClient | null = null
+  /** Lazily-created localhost bridge from Claude's MCP subprocess to BrowserTools. */
+  private claudeCodeBridgeServer: ClaudeCodeBridgeServer | null = null
   private dynamicModels = new Map<string, ModelOption>()
   private readonly toolStarts = new Map<string, number>()
   private readonly capabilityBroker: CapabilityBroker
@@ -330,10 +334,31 @@ export class ChatService {
         {
           get: (conversationId) => this.chats.get(conversationId)?.claudeCodeSessionId ?? null,
           set: (conversationId, sessionId) => this.chats.setClaudeCodeSessionId(conversationId, sessionId)
-        }
+        },
+        (args) =>
+          this.claudeCodeBridge().registerSession(
+            {
+              conversationId: args.conversationId,
+              modelId: args.modelId,
+              requestId: args.requestId,
+              browserLlm: (system, user, options) =>
+                this.complete(args.modelId, system, user, {
+                  ...options,
+                  conversationId: null
+                })
+            },
+            join(__dirname, 'claude-code-mcp.js')
+          )
       )
     }
     return this.claudeCodeClient
+  }
+
+  private claudeCodeBridge(): ClaudeCodeBridgeServer {
+    if (!this.claudeCodeBridgeServer) {
+      this.claudeCodeBridgeServer = new ClaudeCodeBridgeServer(this.tools, this.emit)
+    }
+    return this.claudeCodeBridgeServer
   }
 
   /**

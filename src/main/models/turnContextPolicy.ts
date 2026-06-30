@@ -57,6 +57,17 @@ export function resolveTurnContextPolicy(req: ChatRequest): TurnContextPolicy {
   }
 }
 
+/**
+ * True when Cursor Agent should get the Gladdis HTTP MCP bridge for this turn.
+ *
+ * Only turn the bridge on when the user is actually asking for browser/page/web
+ * work. This keeps plain repo/code chat aligned with the tighter OpenAI path
+ * instead of always exposing browser MCP tools.
+ */
+export function shouldEnableCursorMcpBridge(policy: TurnContextPolicy): boolean {
+  return policy.browserIntent || policy.activePageIntent || policy.hadActivePagePreamble
+}
+
 export function stripStaleActivePageContext(req: ChatRequest, policy: TurnContextPolicy): void {
   const lastMsg = req.messages[req.messages.length - 1]
   if (lastMsg?.role === 'user' && policy.hadActivePagePreamble && !policy.activePageIntent) {

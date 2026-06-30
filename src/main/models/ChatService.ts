@@ -33,20 +33,20 @@ import { CodexClient } from './codex/CodexClient'
 import { ClaudeCodeBridgeServer } from './claudeCode/ClaudeCodeBridgeServer'
 import { ClaudeCodeClient } from './claudeCode/ClaudeCodeClient'
 import { CursorClient } from './cursor/CursorClient'
-import { formatCursorConversationPrompt } from './cursor/cursorPrompt'
 import { CapabilityBroker } from './capabilities/CapabilityBroker'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 import { ResearchDossierService } from './capabilities/ResearchDossierService'
 import { ValidationService } from './capabilities/ValidationService'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
 import type { ModelCallLedger } from './ModelCallLedger'
-import { ASK_SYSTEM, CLAUDE_CODE_SYSTEM, CODEX_SYSTEM, CURSOR_SYSTEM, buildAgentSystem } from './prompts'
+import { ASK_SYSTEM, CLAUDE_CODE_SYSTEM, CODEX_SYSTEM, buildAgentSystem, buildCursorSystem } from './prompts'
 import { stripActivePagePreamble } from './routing'
 import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
 import { generateChatTitle } from './chatTitleService'
 import { runProviderAgenticTurn } from './agentLoopRunner'
 import { runCodexHandoff } from './codex/codexHandoff'
 import { dispatchAgenticTurn, dispatchStreamPlain } from './providerRouting'
+import { prependDateContextToText } from './providers/dateContext'
 import {
   buildContractTrace,
   resolveTurnContextPolicy,
@@ -787,7 +787,9 @@ export class ChatService {
       const policy = resolveTurnContextPolicy(req)
       stripStaleActivePageContext(req, policy)
       this.emitContractTrace(req, policy, model.provider)
-      const { actionableText, profile: initialProfile } = policy
+      const { profile: initialProfile } = policy
+      // Apply date context to local CLI agents (Cursor, Claude Code, Codex) like API providers get via withDateContext
+      const actionableText = prependDateContextToText(policy.actionableText)
 
       // Run the agentic loop (which carries request_tools) for any real task. Pure
       // chat with no folder open stays plain; a workspace folder being open means
@@ -864,21 +866,27 @@ export class ChatService {
           input: req.messages
         })
         try {
+          const enableCursorMcp = shouldEnableCursorMcpBridge(policy)
+          const cursorMode: 'ask' | 'agent' = agentic ? 'agent' : 'ask'
           const wsBlock = this.agentConfig.workspaceSystemBlock(initialProfile)
           const cursorSystem = [
-            CURSOR_SYSTEM,
+            buildCursorSystem({ enableBrowserTools: enableCursorMcp }),
             this.agentConfig.customAgentSystemBlock(req),
             wsBlock
           ].filter(Boolean).join('\n\n')
-          this.logSystemPrompt('cursor', agentic ? 'agent' : 'ask', cursorSystem)
-          const cursorPrompt = formatCursorConversationPrompt(req.messages, actionableText)
+          // Keep Cursor on the same top-level contract as the API providers:
+          // plain/conversation turns stay read-only ask-mode, while agentic
+          // turns opt into Cursor's local agent runtime. Browser MCP is a
+          // separate policy gate and only comes on when the turn actually needs
+          // page/web tools.
+          this.logSystemPrompt('cursor', cursorMode, cursorSystem)
           const result = await this.cursor().send(
             req,
             controller.signal,
             cursorSystem,
-            cursorPrompt,
-            agentic ? 'agent' : 'ask',
-            { enableBrowserTools: shouldEnableCursorMcpBridge(policy) }
+            actionableText,
+            cursorMode,
+            { enableBrowserTools: enableCursorMcp }
           )
           supervisor.complete('Cursor Agent task completed.')
           call.finish({
@@ -1100,4 +1108,3 @@ function normalizeMaxOutputTokens(value: number): number {
 function estimateTokens(system: string, user: string): number {
   return Math.ceil((system.length + user.length) / 4)
 }
-

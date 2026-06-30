@@ -935,6 +935,55 @@ describe('ChatService provider hardening', () => {
     expect(agentReq.messages.at(-1)?.content).toContain('[Active page:')
   })
 
+  it('keeps Cursor plain chat in ask mode without browser MCP', async () => {
+    const { service } = makeService()
+    const cursorSend = vi.fn(async () => ({ text: 'done' }))
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-chat',
+      modelId: 'composer-2.5',
+      conversationId: 'conv-cursor-chat',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'tell me a joke' }]
+    } as any)
+
+    expect(cursorSend).toHaveBeenCalledOnce()
+    const call = cursorSend.mock.calls[0] as any[]
+    expect(call[4]).toBe('ask')
+    expect(call[5]).toEqual({ enableBrowserTools: false })
+  })
+
+  it('enables Cursor browser MCP only for browser-intent turns', async () => {
+    const { service } = makeService()
+    const cursorSend = vi.fn(async () => ({ text: 'done' }))
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-browser',
+      modelId: 'composer-2.5',
+      tabId: 'tab-1',
+      conversationId: 'conv-cursor-browser',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'open https://example.com and tell me the headline' }]
+    } as any)
+
+    expect(cursorSend).toHaveBeenCalledOnce()
+    const call = cursorSend.mock.calls[0] as any[]
+    expect(call[4]).toBe('agent')
+    expect(call[5]).toEqual({ enableBrowserTools: true })
+  })
+
   it('runs browse_task/search on the user\'s picked model — no silent gemini substitution', () => {
     const { service } = makeService()
     const completed: string[] = []

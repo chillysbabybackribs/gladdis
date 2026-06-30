@@ -1,6 +1,7 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
+import { WebSocketServer, WebSocket, type RawData } from 'ws'
 import type {
   ChatRequest,
   ChatStreamEvent,
@@ -8,6 +9,8 @@ import type {
   ConversationMeta,
   ModelOption,
   PhoneBridgeDevice,
+  PhoneSocketCommand,
+  PhoneSocketEvent,
   StoredMessage
 } from '../../../shared/types'
 import { MODELS } from '../../../shared/types'
@@ -50,6 +53,8 @@ const JSON_LIMIT_BYTES = 64 * 1024
 export class RemoteChatServer {
   private server = createServer((req, res) => void this.handle(req, res))
   private clients = new Set<ServerResponse>()
+  private wsServer = new WebSocketServer({ noServer: true })
+  private wsClients = new Set<WebSocket>()
   private activeTurns = new Map<string, ActiveRemoteTurn>()
   private ready: Promise<RemoteChatServerInfo> | null = null
   private info: RemoteChatServerInfo | null = null
@@ -62,6 +67,14 @@ export class RemoteChatServer {
   ) {
     this.token = options.token?.trim() || randomUUID()
     this.unsubscribeChatStream = this.bridge.subscribeChatStream((event) => this.onChatStream(event))
+    this.server.on('upgrade', (req, socket, head) => {
+      if (requestPath(req) !== '/ws' || !this.authorized(req)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+        socket.destroy()
+        return
+      }
+      this.wsServer.handleUpgrade(req, socket, head, (ws: WebSocket) => this.openWebSocket(ws))
+    })
   }
 
   async start(): Promise<RemoteChatServerInfo> {
@@ -104,6 +117,8 @@ export class RemoteChatServer {
     this.unsubscribeChatStream()
     for (const client of this.clients) client.end()
     this.clients.clear()
+    for (const client of this.wsClients) client.close()
+    this.wsClients.clear()
     this.activeTurns.clear()
     if (!this.info) return
     await new Promise<void>((resolve, reject) => {
@@ -272,9 +287,44 @@ export class RemoteChatServer {
     res.on('close', () => this.clients.delete(res))
   }
 
+  private openWebSocket(ws: WebSocket): void {
+    this.wsClients.add(ws)
+    this.sendSocket(ws, { type: 'ready' })
+    ws.on('message', (data) => void this.onSocketMessage(ws, data))
+    ws.on('close', () => this.wsClients.delete(ws))
+  }
+
+  private async onSocketMessage(ws: WebSocket, data: RawData): Promise<void> {
+    try {
+      const raw = rawDataToText(data)
+      const message = JSON.parse(raw) as PhoneSocketCommand
+      if (message.type === 'send') {
+        const result = await this.send(message)
+        this.sendSocket(ws, { type: 'ack', ...result })
+        return
+      }
+      if (message.type === 'abort') {
+        const requestId = message.requestId?.trim()
+        if (!requestId) throw new Error('requestId is required')
+        this.bridge.abort(requestId)
+        return
+      }
+      throw new Error('Unsupported socket command')
+    } catch (error) {
+      this.sendSocket(ws, { type: 'error', message: errorMessage(error) })
+    }
+  }
+
   private broadcast(event: ChatStreamEvent): void {
     const payload = `event: chat\ndata: ${JSON.stringify(event)}\n\n`
     for (const client of this.clients) client.write(payload)
+    const wsPayload: PhoneSocketEvent = { type: 'chat', event }
+    for (const client of this.wsClients) this.sendSocket(client, wsPayload)
+  }
+
+  private sendSocket(ws: WebSocket, event: PhoneSocketEvent): void {
+    if (ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify(event))
   }
 
   private authorized(req: IncomingMessage): boolean {
@@ -379,6 +429,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function rawDataToText(data: RawData): string {
+  if (typeof data === 'string') return data
+  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8')
+  if (Buffer.isBuffer(data)) return data.toString('utf8')
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8')
+  return Buffer.from(data as Uint8Array).toString('utf8')
+}
+
 function manifest(): object {
   return {
     name: 'Gladdis Remote Chat',
@@ -446,6 +504,8 @@ function remoteAppHtml(token: string): string {
     const status = document.querySelector('#status')
     let current = null
     let conversationId = null
+    let socket = null
+    let pendingText = ''
     function add(role, text) {
       const el = document.createElement('div')
       el.className = 'msg ' + role
@@ -454,37 +514,62 @@ function remoteAppHtml(token: string): string {
       messages.scrollTop = messages.scrollHeight
       return el
     }
-    const events = new EventSource('/events?token=' + encodeURIComponent(token))
-    events.addEventListener('ready', () => { status.textContent = 'Connected' })
-    events.addEventListener('chat', (event) => {
-      const data = JSON.parse(event.data)
-      if (data.type === 'delta') {
-        if (!current) current = add('assistant', '')
-        current.textContent += data.text
-      }
-      if (data.type === 'done') current = null
-      if (data.type === 'error') {
-        add('assistant', data.message)
-        current = null
-      }
-    })
-    events.onerror = () => { status.textContent = 'Reconnecting...' }
+    function connect() {
+      status.textContent = 'Connecting...'
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      socket = new WebSocket(protocol + '//' + location.host + '/ws?token=' + encodeURIComponent(token))
+      socket.addEventListener('open', () => { status.textContent = 'Connected' })
+      socket.addEventListener('message', (event) => {
+        const data = JSON.parse(event.data)
+        if (data.type === 'ready') {
+          status.textContent = 'Connected'
+          return
+        }
+        if (data.type === 'ack') {
+          conversationId = data.conversationId
+          if (!current) current = add('assistant', '')
+          return
+        }
+        if (data.type === 'chat') {
+          const stream = data.event
+          if (stream.type === 'delta') {
+            if (!current) current = add('assistant', '')
+            current.textContent += stream.text
+          }
+          if (stream.type === 'done') current = null
+          if (stream.type === 'error') {
+            if (!current) current = add('assistant', '')
+            current.textContent = current.textContent ? current.textContent + '\\n\\n' + stream.message : stream.message
+            current = null
+          }
+          return
+        }
+        if (data.type === 'error') {
+          status.textContent = data.message
+          if (pendingText) {
+            add('assistant', data.message)
+            pendingText = ''
+            current = null
+          }
+        }
+      })
+      socket.addEventListener('close', () => {
+        status.textContent = 'Reconnecting...'
+        setTimeout(connect, 800)
+      })
+    }
+    connect()
     document.querySelector('#form').addEventListener('submit', async (event) => {
       event.preventDefault()
       const input = document.querySelector('#input')
       const text = input.value.trim()
-      if (!text) return
+      if (!text || !socket || socket.readyState !== WebSocket.OPEN) return
       input.value = ''
+      pendingText = text
       add('user', text)
-      current = add('assistant', '')
-      const res = await fetch('/api/chat/send', {
-        method: 'POST',
-        headers: { 'authorization': 'Bearer ' + token, 'content-type': 'application/json' },
-        body: JSON.stringify({ text, conversationId })
-      })
-      const body = await res.json()
-      if (!res.ok) throw new Error(body.error || 'Send failed')
-      conversationId = body.conversationId
+      current = null
+      socket.send(JSON.stringify({ type: 'send', text, conversationId }))
+      pendingText = ''
     })
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
   </script>

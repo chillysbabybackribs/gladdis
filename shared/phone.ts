@@ -1,3 +1,5 @@
+import type { ChatStreamEvent } from './chat'
+
 export interface PhoneBridgeStartOptions {
   host?: string
   port?: number
@@ -15,6 +17,37 @@ export interface PhoneBridgePairResult {
   token: string
   appUrl: string | null
 }
+
+export type PhoneSocketCommand =
+  | {
+    type: 'send'
+    text: string
+    conversationId?: string
+    modelId?: string
+  }
+  | {
+    type: 'abort'
+    requestId: string
+  }
+
+export type PhoneSocketEvent =
+  | {
+    type: 'ready'
+  }
+  | {
+    type: 'ack'
+    requestId: string
+    conversationId: string
+    assistantMessageId: string
+  }
+  | {
+    type: 'chat'
+    event: ChatStreamEvent
+  }
+  | {
+    type: 'error'
+    message: string
+  }
 
 export interface PhoneBridgeStatus {
   running: boolean

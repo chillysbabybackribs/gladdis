@@ -133,4 +133,48 @@ describe('RemoteChatServer', () => {
       messages: [{ role: 'user', content: 'from phone' }]
     }))
   })
+
+  it('acks and streams chat events over websocket', async () => {
+    const { bridge, emit } = makeBridge()
+    server = new RemoteChatServer(bridge, { token: 'test-token' })
+    const info = await server.start()
+    const ws = new WebSocket(`ws://${info.host}:${info.port}/ws?token=test-token`)
+    const seen: Array<Record<string, unknown>> = []
+
+    await new Promise<void>((resolve, reject) => {
+      ws.addEventListener('error', () => reject(new Error('websocket connection failed')))
+      ws.addEventListener('message', (event) => {
+        const message = JSON.parse(String(event.data)) as Record<string, unknown>
+        seen.push(message)
+        if (message.type === 'ready') {
+          ws.send(JSON.stringify({ type: 'send', text: 'hello from socket' }))
+          return
+        }
+        if (message.type === 'ack') {
+          emit({
+            requestId: String(message.requestId),
+            assistantMessageId: String(message.assistantMessageId),
+            type: 'delta',
+            text: 'Socket reply'
+          })
+          emit({
+            requestId: String(message.requestId),
+            assistantMessageId: String(message.assistantMessageId),
+            type: 'done'
+          })
+          return
+        }
+        if (message.type === 'chat' && (message.event as { type?: string }).type === 'done') {
+          resolve()
+        }
+      })
+    })
+
+    expect(seen.some((message) => message.type === 'ready')).toBe(true)
+    expect(seen.some((message) => message.type === 'ack')).toBe(true)
+    expect(
+      seen.some((message) => message.type === 'chat' && (message.event as { text?: string }).text === 'Socket reply')
+    ).toBe(true)
+    ws.close()
+  })
 })

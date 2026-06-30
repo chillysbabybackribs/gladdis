@@ -4,6 +4,7 @@ import {
   completeOpenAi,
   streamOpenAiPlain,
   runOpenAiToolLoop,
+  stubOldOpenAiResults,
   titleOpenAi,
   toOpenAiMessages
 } from './openai'
@@ -440,5 +441,59 @@ describe('runOpenAiToolLoop', () => {
     expect(run).toHaveBeenCalledTimes(2)
     expect(run.mock.calls[0][0]).toBe('search_repo')
     expect(run.mock.calls[1][0]).toBe('read_file')
+  })
+})
+
+describe('stubOldOpenAiResults', () => {
+  it('keeps an informative text summary in trimmed tool history', () => {
+    const msgs = [
+      {
+        role: 'tool' as const,
+        tool_call_id: 'call_search',
+        name: 'search_repo',
+        content:
+          'src/main/models/providers/openai.ts:785 export function stubOldOpenAiResults\n' +
+          'src/main/models/providers/openai.ts:723 stubOldOpenAiResults(resultMsgs, args.keepResults)\n' +
+          'src/main/models/providers/google.ts:539 export async function stubOldGoogleResults'
+      },
+      { role: 'tool' as const, tool_call_id: 'call_fresh', name: 'read_spans', content: 'fresh result' }
+    ]
+
+    stubOldOpenAiResults(msgs, 1)
+
+    expect(msgs[0].content).toContain('[trimmed]')
+    expect(msgs[0].content).toContain('search_repo result summarized')
+    expect(msgs[0].content).toContain('openai.ts:785')
+    expect(msgs[0].content).toContain('"call_search"')
+    expect(msgs[1].content).toBe('fresh result')
+  })
+
+  it('extracts useful fields from JSON tool results', () => {
+    const msgs = [
+      {
+        role: 'tool' as const,
+        tool_call_id: 'call_json',
+        name: 'watch_network',
+        content: JSON.stringify({
+          status: 200,
+          url: 'https://example.com/api/search',
+          items: [{ title: 'OpenAI provider', path: 'src/main/models/providers/openai.ts', line: 785 }]
+        })
+      }
+    ]
+
+    stubOldOpenAiResults(msgs, 0)
+
+    expect(msgs[0].content).toContain('status: 200')
+    expect(msgs[0].content).toContain('url: https://example.com/api/search')
+    expect(msgs[0].content).toContain('items.title: OpenAI provider')
+  })
+
+  it('is idempotent once a result has already been trimmed', () => {
+    const msgs = [{ role: 'tool' as const, tool_call_id: 'call_once', name: 'search_repo', content: 'alpha\nbeta' }]
+    stubOldOpenAiResults(msgs, 0)
+    const once = msgs[0].content
+    stubOldOpenAiResults(msgs, 0)
+    expect(msgs[0].content).toBe(once)
   })
 })

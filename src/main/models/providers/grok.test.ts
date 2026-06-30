@@ -385,14 +385,24 @@ describe('runGrokToolLoop', () => {
 describe('stubOldGrokResults', () => {
   it('collapses all but the last `keep` tool results, preserving recall ids', () => {
     const msgs = [
-      { role: 'tool' as const, tool_call_id: 'a', content: 'old A' },
-      { role: 'tool' as const, tool_call_id: 'b', content: 'old B' },
+      {
+        role: 'tool' as const,
+        tool_call_id: 'a',
+        content: 'src/main/models/providers/grok.ts:564 export function stubOldGrokResults'
+      },
+      {
+        role: 'tool' as const,
+        tool_call_id: 'b',
+        content: JSON.stringify({ status: 200, path: 'src/main/models/providers/grok.ts', line: 564 })
+      },
       { role: 'tool' as const, tool_call_id: 'c', content: 'fresh C' }
     ]
     stubOldGrokResults(msgs, 1)
     expect(msgs[0].content).toContain('[trimmed]')
+    expect(msgs[0].content).toContain('grok.ts:564')
     expect(msgs[0].content).toContain('"a"')
     expect(msgs[1].content).toContain('[trimmed]')
+    expect(msgs[1].content).toContain('status: 200')
     expect(msgs[2].content).toBe('fresh C')
   })
 

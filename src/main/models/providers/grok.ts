@@ -12,6 +12,7 @@ import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './l
 import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
 import { approxInputChars } from '../ModelCallLedger'
+import { summarizeTrimmedToolResult } from './toolResultSummary'
 
 // xAI exposes an OpenAI-compatible Chat Completions API. We talk to it with
 // plain fetch + SSE — no SDK — matching the repo's existing OpenAI-compatible
@@ -566,7 +567,11 @@ export function stubOldGrokResults(msgs: OpenAiMessage[], keep: number): void {
   for (let i = 0; i < cutoff; i++) {
     const m = msgs[i]
     if (typeof m.content === 'string' && m.content.startsWith(STUB_PREFIX)) continue
-    m.content = `${STUB_PREFIX} (id ${m.tool_call_id}) — earlier result trimmed to save tokens. Call recall_history with tool_call_id "${m.tool_call_id}" to read it in full.`
+    const summary = typeof m.content === 'string' ? summarizeTrimmedToolResult(m.content) : ''
+    m.content =
+      `${STUB_PREFIX} (id ${m.tool_call_id}) — earlier tool result summarized to save tokens:\n` +
+      `${summary}\n` +
+      `Call recall_history with tool_call_id "${m.tool_call_id}" to read it in full.`
   }
 }
 

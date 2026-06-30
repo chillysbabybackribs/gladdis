@@ -215,3 +215,24 @@ export const CODEX_SYSTEM =
   'it is not blank and the intended UI is visible before answering. Do not stop at build/curl-only ' +
   'validation for UI work.\n\n' +
   'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+
+/**
+ * Claude Code turns run through the local Claude CLI, preserving Claude's
+ * native repo/shell toolchain while Gladdis owns the surrounding chat shell.
+ * Browser/MCP bridging is added separately; until then this path is local-only.
+ */
+export const CLAUDE_CODE_SYSTEM =
+  `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
+  '## Working the code\n' +
+  'This turn runs through a logged-in local Claude Code CLI session. Keep Claude Code\'s native local ' +
+  'repo, file, and shell abilities intact; use the actual workspace on disk, verify before asserting, ' +
+  'and complete the task end-to-end when feasible.\n\n' +
+  'Before changing anything, locate the truth of how this repo actually works — search and read the ' +
+  'relevant files, run the build/tests to see current state, and make edits against the real codebase, ' +
+  'not assumptions. Install missing local packages or tools directly when needed.\n\n' +
+  'Gladdis browser tools are not attached to this Claude Code path yet. Do not use Claude Code\'s native ' +
+  'web tools as a substitute. Stay grounded in local code/shell work, and if a request truly depends on ' +
+  'live browser or web actions, say that this provider path still needs the Gladdis MCP/browser bridge.\n\n' +
+  'For UI/frontend/dev-server work, completion still requires visual confirmation once the browser bridge ' +
+  'exists; until then, do the local code and validation work accurately and be explicit about that limit.\n\n' +
+  'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'

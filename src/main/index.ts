@@ -320,6 +320,10 @@ function registerIpc(): void {
   ipcMain.on(IPC.LAYOUT_SET_BROWSER_VISIBLE, (_e, visible: boolean) =>
     tabs.setBrowserVisible(visible)
   )
+  // Renderer holds the canonical browser-zoom value (persisted in
+  // localStorage alongside the chat zooms); main applies it uniformly to
+  // every WebContentsView. See TabManager.setZoomFactor for the contract.
+  ipcMain.on(IPC.BROWSER_SET_ZOOM, (_e, factor: number) => tabs.setZoomFactor(factor))
   ipcMain.handle(IPC.CDP_SEND, (_e, cmd: CdpCommand) =>
     tabs.cdpSend(cmd.tabId, cmd.method, cmd.params)
   )
@@ -349,6 +353,7 @@ function registerIpc(): void {
   // single workspace folder applied through applyWorkspaceFolder.
   ipcMain.handle(IPC.CODEX_STATUS, () => chat.codexStatus())
   ipcMain.handle(IPC.CODEX_MODELS, () => chat.codexModels())
+  ipcMain.handle(IPC.CLAUDE_CODE_STATUS, () => chat.claudeCodeStatus())
 
   // Working folder: the single "work from here" choice. One picker drives both
   // routes — gladdis's own fs tools (relative-path root) AND Codex's starting cwd
@@ -601,7 +606,76 @@ function registerApplicationMenu(): void {
       ]
     },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-    { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        // Per-panel chat zoom, flattened into the View dropdown so + and -
+        // sit right next to "Chat Left" / "Chat Right" instead of behind a
+        // submenu. Native OS menus dismiss on every click, so the
+        // accelerators below let the user fire the same actions repeatedly
+        // without re-opening View.
+        {
+          label: 'Chat Left  \u2212',
+          accelerator: 'CommandOrControl+Shift+[',
+          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'left', action: 'out' })
+        },
+        {
+          label: 'Chat Left  +',
+          accelerator: 'CommandOrControl+Shift+]',
+          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'left', action: 'in' })
+        },
+        {
+          label: 'Chat Left  Reset',
+          accelerator: 'CommandOrControl+Shift+\\',
+          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'left', action: 'reset' })
+        },
+        { type: 'separator' },
+        {
+          label: 'Chat Right  \u2212',
+          accelerator: 'CommandOrControl+Alt+[',
+          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'right', action: 'out' })
+        },
+        {
+          label: 'Chat Right  +',
+          accelerator: 'CommandOrControl+Alt+]',
+          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'right', action: 'in' })
+        },
+        {
+          label: 'Chat Right  Reset',
+          accelerator: 'CommandOrControl+Alt+\\',
+          click: () => sendAppCommand({ type: 'chat:zoom', panel: 'right', action: 'reset' })
+        },
+        { type: 'separator' },
+        // Embedded browser zoom — one factor applied across every tab.
+        // Like the chat zooms above, this scales page CONTENT inside the
+        // existing WebContentsView rect; the workspace layout slot stays
+        // exactly the same size.
+        {
+          label: 'Browser  \u2212',
+          accelerator: 'CommandOrControl+Shift+Alt+[',
+          click: () => sendAppCommand({ type: 'browser:zoom', action: 'out' })
+        },
+        {
+          label: 'Browser  +',
+          accelerator: 'CommandOrControl+Shift+Alt+]',
+          click: () => sendAppCommand({ type: 'browser:zoom', action: 'in' })
+        },
+        {
+          label: 'Browser  Reset',
+          accelerator: 'CommandOrControl+Shift+Alt+\\',
+          click: () => sendAppCommand({ type: 'browser:zoom', action: 'reset' })
+        },
+        { type: 'separator' },
+        { role: 'togglefullscreen' }
+      ]
+    },
     { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] }
   ]
 

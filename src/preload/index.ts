@@ -90,6 +90,9 @@ const api: GladdisApi = {
     status: () => ipcRenderer.invoke(IPC.CODEX_STATUS),
     models: () => ipcRenderer.invoke(IPC.CODEX_MODELS)
   },
+  claudeCode: {
+    status: () => ipcRenderer.invoke(IPC.CLAUDE_CODE_STATUS)
+  },
   workspace: {
     get: () => ipcRenderer.invoke(IPC.WORKSPACE_GET),
     setFolder: (folder: string | null) => ipcRenderer.invoke(IPC.WORKSPACE_SET_FOLDER, folder),
@@ -137,7 +140,8 @@ const api: GladdisApi = {
     overlay: (tabId: string, on: boolean) => ipcRenderer.invoke(IPC.EXTRACT_OVERLAY, tabId, on)
   },
   browser: {
-    exec: (tabId: string, jsCode: string) => ipcRenderer.invoke(IPC.BROWSER_EXEC, tabId, jsCode)
+    exec: (tabId: string, jsCode: string) => ipcRenderer.invoke(IPC.BROWSER_EXEC, tabId, jsCode),
+    setZoom: (factor: number) => ipcRenderer.send(IPC.BROWSER_SET_ZOOM, factor)
   },
   dream: {
     run: (req: DreamRunRequest) => ipcRenderer.invoke(IPC.DREAM_RUN, req),

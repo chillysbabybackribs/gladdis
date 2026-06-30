@@ -232,7 +232,7 @@ export class AgentOptimizerService {
     for (const modelId of candidateModelIds) {
       const candidate = this.model(modelId)
       if (!candidate) continue
-      if (candidate.provider === 'codex') {
+      if (candidate.provider === 'codex' || candidate.provider === 'claudecode') {
         if (codexAvailable) return candidate
       } else if (keyStatus[candidate.provider]) {
         return candidate

@@ -118,6 +118,8 @@ export function providerAvailable(keyStatus: KeyStatus, provider: Provider): boo
   switch (provider) {
     case 'codex':
       return keyStatus.codex
+    case 'claudecode':
+      return false
     case 'anthropic':
       return keyStatus.anthropic
     case 'google':

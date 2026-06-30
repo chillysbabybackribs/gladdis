@@ -392,6 +392,8 @@ export interface Conversation {
   titleLocked?: boolean
   /** Provider thread used to reopen this same saved chat after app restart. */
   codexThreadId?: string | null
+  /** Claude Code session bound to this saved conversation, if any. */
+  claudeCodeSessionId?: string | null
   /** Previous conversation this fresh chat continues from, if any. */
   continuesFromId?: string | null
   /** Which dock side owns this chat; sticky once set (defaults to 'left' on load). */
@@ -612,6 +614,7 @@ export type ChatStreamEvent =
  * Which providers are usable (never the keys themselves).
  * - anthropic/google/grok: true once an API key is configured.
  * - codex: true once the codex CLI is installed AND logged in.
+ * - claudecode: reported separately via ClaudeCodeStatus (no gladdis-stored key).
  */
 export interface KeyStatus {
   anthropic: boolean
@@ -636,6 +639,9 @@ export interface CodexStatus {
   /** Human-readable reason when unusable (not installed / not logged in). */
   detail: string | null
 }
+
+/** Status of the local Claude Code CLI / session bridge. */
+export type ClaudeCodeStatus = CodexStatus
 
 /**
  * Working directory for Codex turns, chosen by the user. The folder is only

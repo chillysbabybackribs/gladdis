@@ -1,7 +1,7 @@
 // 'openai' is a key slot for the text-to-speech feature (audible replies)
 // and now also a fully supported chat model provider for modern OpenAI models.
 // 'grok' (xAI) is a real chat provider, reached over xAI's OpenAI-compatible API.
-export type Provider = 'anthropic' | 'google' | 'codex' | 'openai' | 'grok'
+export type Provider = 'anthropic' | 'google' | 'codex' | 'claudecode' | 'openai' | 'grok'
 
 /**
  * Whether the model has been seen working against its provider as of the last
@@ -33,6 +33,8 @@ export const MODELS: ModelOption[] = [
   { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', provider: 'anthropic', availability: 'speculative' },
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', provider: 'anthropic', availability: 'verified' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic', availability: 'verified' },
+  { id: 'claude-code-opus', label: 'Claude Code · Opus', provider: 'claudecode', availability: 'verified' },
+  { id: 'claude-code-sonnet', label: 'Claude Code · Sonnet', provider: 'claudecode', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview-customtools', label: 'Gemini 3.1 Pro Preview Custom Tools', provider: 'google', availability: 'verified' },

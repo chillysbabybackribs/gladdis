@@ -25,6 +25,7 @@ export const IPC = {
   KEYS_SET: 'keys:set',
   CODEX_STATUS: 'codex:status',
   CODEX_MODELS: 'codex:models',
+  CLAUDE_CODE_STATUS: 'claudeCode:status',
   WORKSPACE_GET: 'workspace:get',
   WORKSPACE_SET_FOLDER: 'workspace:setFolder',
   WORKSPACE_PICK_FOLDER: 'workspace:pickFolder',
@@ -45,6 +46,8 @@ export const IPC = {
   EXTRACT_RUN: 'extract:run',
   EXTRACT_OVERLAY: 'extract:overlay',
   BROWSER_EXEC: 'browser:exec',
+  /** Apply a single zoom factor to every open browser tab (and any future ones). */
+  BROWSER_SET_ZOOM: 'browser:setZoom',
   // Memory "Dreaming" — manual-trigger background memory curator
   DREAM_RUN: 'dream:run',
   DREAM_LOAD_LAST: 'dream:loadLast',

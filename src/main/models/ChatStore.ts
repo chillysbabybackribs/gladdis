@@ -179,6 +179,14 @@ export class ChatStore {
     this.persist()
   }
 
+  /** Bind a saved Gladdis conversation to its Claude Code session id. */
+  setClaudeCodeSessionId(id: string, sessionId: string | null): void {
+    const conv = this.convos.get(id)
+    if (!conv) return
+    conv.claudeCodeSessionId = sessionId
+    this.persist()
+  }
+
   /**
    * Upsert a conversation. Empty conversations (no messages) are never stored —
    * this keeps blank "New chat" slots out of the history list. Returns the
@@ -198,6 +206,9 @@ export class ChatStore {
       d.codexThreadId = conv.codexThreadId === undefined
         ? (prev?.codexThreadId ?? null)
         : (conv.codexThreadId ?? null)
+      d.claudeCodeSessionId = conv.claudeCodeSessionId === undefined
+        ? (prev?.claudeCodeSessionId ?? null)
+        : (conv.claudeCodeSessionId ?? null)
       d.continuesFromId = conv.continuesFromId === undefined
         ? (prev?.continuesFromId ?? null)
         : conv.continuesFromId

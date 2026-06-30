@@ -12,6 +12,7 @@ import type {
   ChatInterjectionRequest,
   ChatRequest,
   ChatStreamEvent,
+  ClaudeCodeStatus,
   CodexStatus,
   Conversation,
   ConversationMeta,
@@ -119,6 +120,10 @@ export interface GladdisApi {
     /** Live model catalog from the CLI's app-server ([] if unreachable). */
     models: () => Promise<ModelOption[]>
   }
+  claudeCode: {
+    /** Install + auth status of the local Claude Code CLI. */
+    status: () => Promise<ClaudeCodeStatus>
+  }
   workspace: {
     /** The folder gladdis currently works from. */
     get: () => Promise<Workspace>
@@ -185,6 +190,12 @@ export interface GladdisApi {
   browser: {
     /** Run JS inside a tab's page context. */
     exec: (tabId: string, jsCode: string) => Promise<ExecResult>
+    /**
+     * Set a single zoom factor that applies to every browser tab (and any
+     * future ones). The page content scales inside the existing
+     * WebContentsView rectangle — the layout slot does not change size.
+     */
+    setZoom: (factor: number) => void
   }
   dream: {
     /**

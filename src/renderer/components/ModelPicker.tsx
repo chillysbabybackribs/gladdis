@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CodexStatus, KeyStatus, ModelOption, SavedAgent } from '../../../shared/types'
+import type {
+  ClaudeCodeStatus,
+  CodexStatus,
+  KeyStatus,
+  ModelOption,
+  SavedAgent
+} from '../../../shared/types'
 
 interface Props {
   value: string
@@ -15,10 +21,13 @@ interface Props {
   keyStatus: KeyStatus
   /** Codex usability (CLI install + login); null while probing. */
   codexStatus: CodexStatus | null
+  /** Claude Code usability (CLI install + login); null while probing. */
+  claudeCodeStatus: ClaudeCodeStatus | null
 }
 
 const PROVIDERS = [
   { id: 'codex', label: 'Codex' },
+  { id: 'claudecode', label: 'Claude Code' },
   { id: 'anthropic', label: 'Anthropic' },
   { id: 'google', label: 'Gemini' },
   { id: 'openai', label: 'OpenAI' },
@@ -38,7 +47,8 @@ export function ModelPicker({
   onDeleteAgent,
   models,
   keyStatus,
-  codexStatus
+  codexStatus,
+  claudeCodeStatus
 }: Props) {
   const [open, setOpen] = useState(false)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
@@ -67,6 +77,8 @@ export function ModelPicker({
     switch (m.provider) {
       case 'codex':
         return !!codexStatus?.installed && !!codexStatus?.authenticated
+      case 'claudecode':
+        return !!claudeCodeStatus?.installed && !!claudeCodeStatus?.authenticated
       case 'anthropic':
         return keyStatus.anthropic
       case 'google':
@@ -82,10 +94,17 @@ export function ModelPicker({
 
   // Short pill shown on a disabled item, explaining why it's unavailable.
   const unavailableLabel = (m: ModelOption): string => {
-    if (m.provider !== 'codex') return 'no key'
-    if (!codexStatus) return '…'
-    if (!codexStatus.installed) return 'not installed'
-    if (!codexStatus.authenticated) return 'log in'
+    if (m.provider === 'codex') {
+      if (!codexStatus) return '…'
+      if (!codexStatus.installed) return 'not installed'
+      if (!codexStatus.authenticated) return 'log in'
+      return 'no key'
+    }
+    if (m.provider === 'claudecode') {
+      if (!claudeCodeStatus) return '…'
+      if (!claudeCodeStatus.installed) return 'not installed'
+      if (!claudeCodeStatus.authenticated) return 'log in'
+    }
     return 'no key'
   }
 

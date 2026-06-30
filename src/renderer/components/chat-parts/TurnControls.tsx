@@ -1,4 +1,11 @@
-import type { CodexStatus, KeyStatus, ModelOption, SavedAgent, Workspace } from '../../../../shared/types'
+import type {
+  ClaudeCodeStatus,
+  CodexStatus,
+  KeyStatus,
+  ModelOption,
+  SavedAgent,
+  Workspace
+} from '../../../../shared/types'
 import { ModelPicker } from '../ModelPicker'
 
 /**
@@ -21,6 +28,7 @@ export function TurnControls({
   onDeleteAgent,
   keyStatus,
   codexStatus,
+  claudeCodeStatus,
   workspace,
   onPickWorkspace
 }: {
@@ -35,6 +43,7 @@ export function TurnControls({
   onDeleteAgent: (agent: SavedAgent) => void
   keyStatus: KeyStatus
   codexStatus: CodexStatus | null
+  claudeCodeStatus: ClaudeCodeStatus | null
   workspace: Workspace
   onPickWorkspace: () => void
 }) {
@@ -55,6 +64,7 @@ export function TurnControls({
         models={models}
         keyStatus={keyStatus}
         codexStatus={codexStatus}
+        claudeCodeStatus={claudeCodeStatus}
       />
       <button
         className={`workspace-btn ${workspace.folder ? 'set' : ''}`}

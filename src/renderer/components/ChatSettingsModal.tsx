@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type {
   ChatPanelSide,
+  ClaudeCodeStatus,
   CodexStatus,
   ConversationMeta,
   ConversationSearchHit,
@@ -14,6 +15,7 @@ type Tab = 'history' | 'keys' | 'calls'
 interface Props {
   auditRecords: ModelCallRecord[]
   codexStatus: CodexStatus | null
+  claudeCodeStatus: ClaudeCodeStatus | null
   currentId: string | null
   initialTab?: Tab
   keyStatus: KeyStatus
@@ -47,6 +49,7 @@ function fmt(n: number): string {
 export function ChatSettingsModal({
   auditRecords,
   codexStatus,
+  claudeCodeStatus,
   currentId,
   initialTab = 'history',
   keyStatus,
@@ -118,6 +121,13 @@ export function ChatSettingsModal({
       : !codexStatus.authenticated
         ? 'Installed, not logged in - run codex login'
         : `Ready${codexStatus.version ? ` v${codexStatus.version}` : ''}`
+  const claudeCodeLine = !claudeCodeStatus
+    ? 'Checking...'
+    : !claudeCodeStatus.installed
+      ? 'Not installed - run npm i -g @anthropic-ai/claude-code'
+      : !claudeCodeStatus.authenticated
+        ? 'Installed, not logged in - run claude auth login'
+        : `Ready${claudeCodeStatus.version ? ` v${claudeCodeStatus.version}` : ''}`
 
   return (
     <div className="modal-overlay">
@@ -177,7 +187,7 @@ export function ChatSettingsModal({
             </div>
           )}
           {tab === 'keys' && (
-            <KeysPane status={keyStatus} codexLine={codexLine} workspace={workspace} saving={saving}
+            <KeysPane status={keyStatus} codexLine={codexLine} claudeCodeLine={claudeCodeLine} workspace={workspace} saving={saving}
               anthropic={anthropic} google={google} grok={grok} openai={openai} setAnthropic={setAnthropic}
               setGoogle={setGoogle} setGrok={setGrok} setOpenai={setOpenai} onSave={saveKeys} />
           )}
@@ -202,7 +212,7 @@ export function ChatSettingsModal({
 }
 
 function KeysPane(props: {
-  anthropic: string; codexLine: string; google: string; grok: string; openai: string; saving: boolean
+  anthropic: string; codexLine: string; claudeCodeLine: string; google: string; grok: string; openai: string; saving: boolean
   status: KeyStatus; workspace: Workspace | null; onSave: () => void
   setAnthropic: (v: string) => void; setGoogle: (v: string) => void
   setGrok: (v: string) => void; setOpenai: (v: string) => void
@@ -216,6 +226,7 @@ function KeysPane(props: {
       <div className="modal-field">
         <span className="modal-label">OpenAI Codex <span className="key-pill set">status</span></span>
         <p className="modal-note">{props.codexLine}</p>
+        <p className="modal-note">{props.claudeCodeLine}</p>
         <p className="modal-note">{props.workspace?.folder ? props.workspace.folder : 'No working folder set.'}</p>
       </div>
       <button className="btn-primary settings-save" onClick={props.onSave} disabled={props.saving}>

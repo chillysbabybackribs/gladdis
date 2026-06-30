@@ -29,13 +29,14 @@ import {
 } from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
+import { ClaudeCodeClient } from './claudeCode/ClaudeCodeClient'
 import { CapabilityBroker } from './capabilities/CapabilityBroker'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 import { ResearchDossierService } from './capabilities/ResearchDossierService'
 import { ValidationService } from './capabilities/ValidationService'
 import type { LlmComplete, LlmCompleteOptions } from '../pipeline/Planner'
 import type { ModelCallLedger } from './ModelCallLedger'
-import { ASK_SYSTEM, CODEX_SYSTEM, buildAgentSystem } from './prompts'
+import { ASK_SYSTEM, CLAUDE_CODE_SYSTEM, CODEX_SYSTEM, buildAgentSystem } from './prompts'
 import { stripActivePagePreamble } from './routing'
 import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
 import { generateChatTitle } from './chatTitleService'
@@ -164,6 +165,8 @@ export class ChatService {
   private codexWorkspace: CodexWorkspace = { folder: null }
   /** Lazily-created Codex driver (spawns the app-server on first use). */
   private codexClient: CodexClient | null = null
+  /** Lazily-created Claude Code driver (spawns the local CLI per turn). */
+  private claudeCodeClient: ClaudeCodeClient | null = null
   private dynamicModels = new Map<string, ModelOption>()
   private readonly toolStarts = new Map<string, number>()
   private readonly capabilityBroker: CapabilityBroker
@@ -296,6 +299,11 @@ export class ChatService {
     return this.codex().status()
   }
 
+  /** Install + auth status of the local Claude Code CLI (for the UI). */
+  claudeCodeStatus(): Promise<CodexStatus> {
+    return this.claudeCode().status()
+  }
+
   /**
    * Live Codex model catalog from the app-server's `model/list`, so the picker
    * always matches the installed CLI. Returns [] if Codex isn't reachable; the
@@ -311,6 +319,21 @@ export class ChatService {
   /** Current Codex starting cwd choice. */
   getCodexWorkspace(): CodexWorkspace {
     return this.codexWorkspace
+  }
+
+  /** Lazily build the Claude Code client. */
+  private claudeCode(): ClaudeCodeClient {
+    if (!this.claudeCodeClient) {
+      this.claudeCodeClient = new ClaudeCodeClient(
+        this.emit,
+        () => this.tools.getWorkspaceRoot(),
+        {
+          get: (conversationId) => this.chats.get(conversationId)?.claudeCodeSessionId ?? null,
+          set: (conversationId, sessionId) => this.chats.setClaudeCodeSessionId(conversationId, sessionId)
+        }
+      )
+    }
+    return this.claudeCodeClient
   }
 
   /**
@@ -380,7 +403,16 @@ export class ChatService {
       gate = new PauseGate()
       this.pauseGates.set(requestId, gate)
     }
-    if (!gate.pause()) return false
+    const gatePaused = gate.pause()
+    // Codex turns don't run inside our agent loop; their app-server owns the
+    // loop. The gate above is still useful (it correctly reflects "paused"
+    // for any non-Codex follow-on work in the same request), but the real
+    // pause for a Codex turn is a turn/interrupt + continuation re-prompt
+    // handled inside CodexClient. We always tell Codex too, in case the
+    // active request is currently a Codex turn — non-Codex requests are
+    // silently no-ops there.
+    const codexPaused = this.codexClient?.pauseRequest(requestId) ?? false
+    if (!gatePaused && !codexPaused) return false
     this.emit({
       requestId,
       type: 'loop_state',
@@ -388,7 +420,9 @@ export class ChatService {
       event: 'task_paused',
       phase: 'decide',
       iteration: 0,
-      summary: 'Task paused — the agent is holding before its next step. Click resume to continue.'
+      summary: codexPaused
+        ? 'Task paused — Codex interrupted the in-flight turn. Click resume to continue from the same step.'
+        : 'Task paused — the agent is holding before its next step. Click resume to continue.'
     })
     return true
   }
@@ -401,8 +435,12 @@ export class ChatService {
    */
   resumeRequest(requestId: string): boolean {
     const gate = this.pauseGates.get(requestId)
-    if (!gate) return false
-    if (!gate.resume()) return false
+    const gateResumed = gate?.resume() ?? false
+    // Same logic as pauseRequest: Codex turns resume via a fresh turn/start
+    // with a continuation prompt, not via the gate. Tell both sides so
+    // whichever one was actually paused unblocks.
+    const codexResumed = this.codexClient?.resumeRequest(requestId) ?? false
+    if (!gateResumed && !codexResumed) return false
     this.emit({
       requestId,
       type: 'loop_state',
@@ -410,7 +448,9 @@ export class ChatService {
       event: 'phase_changed',
       phase: 'act',
       iteration: 0,
-      summary: 'Task resumed — the agent is picking up where it left off.'
+      summary: codexResumed
+        ? 'Task resumed — Codex is picking up the same step it was on when paused.'
+        : 'Task resumed — the agent is picking up where it left off.'
     })
     return true
   }
@@ -586,6 +626,28 @@ export class ChatService {
         const text = await this.codex().complete(model.id, system, user)
         call.finish({ output: text })
         return text
+      } else if (model.provider === 'claudecode') {
+        const call = this.audit.begin({
+          provider: model.provider,
+          modelId,
+          stage: options.stage ?? 'complete',
+          input: { system, user }
+        })
+        const result = await this.claudeCode().complete(
+          model.id,
+          system,
+          user,
+          options.conversationId
+        )
+        call.finish({
+          output: result.text,
+          usage: {
+            inputTokens: result.usage?.inputTokens,
+            outputTokens: result.usage?.outputTokens,
+            cachedInputTokens: result.usage?.cachedInputTokens
+          }
+        })
+        return result.text
       } else {
         throw new Error(`complete() not supported for provider ${model.provider}`)
       }
@@ -647,6 +709,42 @@ export class ChatService {
           (r, e) => this.emitLoopState(r, e),
           (p, m, s) => this.logSystemPrompt(p, m, s)
         )
+      } else if (model.provider === 'claudecode') {
+        const resume = isBareContinuation(actionableText)
+        const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
+        supervisor.start(
+          resume ? 'Resuming Claude Code task.' : 'Starting Claude Code task.',
+          'Handing the task to the local Claude Code session.'
+        )
+        const call = this.audit.begin({
+          requestId: req.requestId,
+          conversationId: req.conversationId,
+          provider: 'claudecode',
+          modelId: model.id,
+          stage: 'chat:claudecode',
+          input: req.messages
+        })
+        try {
+          const wsBlock = this.agentConfig.workspaceSystemBlock(initialProfile)
+          const repoBlock = await this.agentConfig.codexRepoOverviewBlock(req, actionableText)
+          const claudeSystem = [
+            CLAUDE_CODE_SYSTEM,
+            this.agentConfig.customAgentSystemBlock(req),
+            wsBlock,
+            repoBlock
+          ]
+            .filter(Boolean)
+            .join('\n\n')
+          this.logSystemPrompt('claudecode', 'claudecode', claudeSystem)
+          const output = await this.claudeCode().send(req, controller.signal, claudeSystem, actionableText)
+          supervisor.complete('Claude Code task completed.')
+          call.finish({ output })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          supervisor.blocked(message, controller.signal.aborted)
+          call.finish({ status: 'error', error: err })
+          throw err
+        }
       } else {
         const browserLlm = this.browserPipelineLlm(model, req.conversationId).llm
         const client = this.getModelClient(model.provider)

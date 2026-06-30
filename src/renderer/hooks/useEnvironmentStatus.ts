@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type {
+  ClaudeCodeStatus,
   CodexStatus,
   KeyStatus,
   ModelOption,
@@ -20,6 +21,7 @@ export interface EnvironmentStatus {
   keyStatus: KeyStatus
   setKeyStatus: (next: KeyStatus) => void
   codexStatus: CodexStatus | null
+  claudeCodeStatus: ClaudeCodeStatus | null
   models: ModelOption[]
   workspace: Workspace
   setWorkspace: (next: Workspace) => void
@@ -35,6 +37,7 @@ export function useEnvironmentStatus(): EnvironmentStatus {
     grok: false
   })
   const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null)
+  const [claudeCodeStatus, setClaudeCodeStatus] = useState<ClaudeCodeStatus | null>(null)
   const [models, setModels] = useState<ModelOption[]>(MODELS)
   const [workspace, setWorkspace] = useState<Workspace>({ folder: null })
 
@@ -43,11 +46,13 @@ export function useEnvironmentStatus(): EnvironmentStatus {
       window.gladdis.keys.status(),
       window.gladdis.workspace.get(),
       window.gladdis.codex.status().catch(() => null), // Handle potential error for codex.status
+      window.gladdis.claudeCode.status().catch(() => null),
       window.gladdis.codex.models().catch(() => []) // Handle potential error for codex.models
-    ]).then(([keyStatus, workspace, codexStatus, codexModels]) => {
+    ]).then(([keyStatus, workspace, codexStatus, claudeCodeStatus, codexModels]) => {
       setKeyStatus(keyStatus)
       setWorkspace(workspace)
       setCodexStatus(codexStatus)
+      setClaudeCodeStatus(claudeCodeStatus)
       if (codexModels.length) {
         const nonCodex = MODELS.filter((m) => m.provider !== 'codex')
         setModels([...nonCodex, ...codexModels])
@@ -63,5 +68,14 @@ export function useEnvironmentStatus(): EnvironmentStatus {
     setWorkspace(ws)
   }
 
-  return { keyStatus, setKeyStatus, codexStatus, models, workspace, setWorkspace, pickWorkspace }
+  return {
+    keyStatus,
+    setKeyStatus,
+    codexStatus,
+    claudeCodeStatus,
+    models,
+    workspace,
+    setWorkspace,
+    pickWorkspace
+  }
 }

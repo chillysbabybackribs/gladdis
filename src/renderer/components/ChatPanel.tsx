@@ -46,12 +46,14 @@ export function ChatPanel({
   panelId = 'left',
   zoom = 1,
   footerSlot = null,
+  footerTokenSlot = null,
   onCreateAgent = () => {},
   onEditAgent = () => {}
 }: {
   panelId?: PanelId
   zoom?: number
   footerSlot?: HTMLElement | null
+  footerTokenSlot?: HTMLElement | null
   onCreateAgent?: () => void
   onEditAgent?: (agent: SavedAgent) => void
 } = {}) {
@@ -85,7 +87,7 @@ export function ChatPanel({
     }
   })
   const auditRecords = useAuditRecords()
-  const { keyStatus, setKeyStatus, codexStatus, models, workspace, pickWorkspace } =
+  const { keyStatus, setKeyStatus, codexStatus, claudeCodeStatus, models, workspace, pickWorkspace } =
     useEnvironmentStatus()
   const [streaming, setStreaming] = useState(false)
   const [paused, setPaused] = useState(false)
@@ -290,6 +292,8 @@ export function ChatPanel({
     const usable =
       model.provider === 'codex'
         ? !!codexStatus?.installed && !!codexStatus?.authenticated
+        : model.provider === 'claudecode'
+          ? !!claudeCodeStatus?.installed && !!claudeCodeStatus?.authenticated
         : model.provider === 'anthropic'
           ? keyStatus.anthropic
           : model.provider === 'grok'
@@ -410,6 +414,9 @@ export function ChatPanel({
     setPaused(false)
   }
 
+  const activeModel = models.find((m) => m.id === modelId) ?? MODELS.find((m) => m.id === modelId) ?? null
+  const pauseSupported = activeModel?.provider !== 'codex' && activeModel?.provider !== 'claudecode'
+
   const newChat = () => {
     if (activeReq.current) {
       window.gladdis.chat.abort(activeReq.current)
@@ -510,6 +517,7 @@ export function ChatPanel({
       onDeleteAgent={deleteAgent}
       keyStatus={keyStatus}
       codexStatus={codexStatus}
+      claudeCodeStatus={claudeCodeStatus}
       workspace={workspace}
       onPickWorkspace={pickWorkspace}
     />
@@ -524,6 +532,7 @@ export function ChatPanel({
       }}
     />
   )
+  const footerTokens = <TokenCounter records={auditRecords} conversationId={convId} />
 
   return (
     <>
@@ -558,8 +567,8 @@ export function ChatPanel({
           onSubmit={onSubmit}
           onInterject={onInterject}
           onStop={stop}
-          onPause={pause}
-          onResume={resume}
+          onPause={pauseSupported ? pause : undefined}
+          onResume={pauseSupported ? resume : undefined}
           paused={paused}
           audioOn={audioOn}
           onToggleAudio={toggleAudio}
@@ -568,7 +577,6 @@ export function ChatPanel({
           speed={speed}
           onSpeedChange={persistSpeed}
           turnControls={turnControls}
-          tokenCounter={<TokenCounter records={auditRecords} conversationId={convId} />}
           onNewChat={newChat}
           newDisabled={messages.length === 0 && !streaming}
         />
@@ -577,6 +585,7 @@ export function ChatPanel({
           <ChatSettingsModal
             auditRecords={auditRecords}
             codexStatus={codexStatus}
+            claudeCodeStatus={claudeCodeStatus}
             currentId={convId}
             initialTab={settingsTab}
             keyStatus={keyStatus}
@@ -590,6 +599,7 @@ export function ChatPanel({
         )}
       </div>
       {footerSlot && createPortal(footerActions, footerSlot)}
+      {footerTokenSlot && createPortal(footerTokens, footerTokenSlot)}
     </>
   )
 }

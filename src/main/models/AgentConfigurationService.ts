@@ -225,7 +225,7 @@ export class AgentConfigurationService {
     provider?: Provider
   ): Promise<string> {
     const base = await buildAgentSystem(tools)
-    const providerBlock = provider === 'openai' ? OPENAI_WORKSHOP_BLOCK : null
+    const providerBlock = provider === 'openai' || provider === 'grok' ? DIRECT_API_WORKSHOP_BLOCK : null
     const custom = this.customAgentSystemBlock(req)
     return [base, providerBlock, custom].filter(Boolean).join('\n\n')
   }
@@ -240,9 +240,9 @@ export class AgentConfigurationService {
   }
 }
 
-const OPENAI_WORKSHOP_BLOCK =
-  '## OpenAI local-work contract\n' +
-  'This OpenAI turn does local repo, file, edit, validation, and shell work through Gladdis tools. ' +
+const DIRECT_API_WORKSHOP_BLOCK =
+  '## Direct API local-work contract\n' +
+  'This direct API turn does local repo, file, edit, validation, and shell work through Gladdis tools. ' +
   'Use them as your primary local environment for this turn.\n\n' +
   'For codebase inspection, stay surgical: prefer repo_overview, search_repo, repo_grep_task, and read_spans ' +
   'before raw read_file. When you do use read_file, prefer explicit start_line/end_line windows and avoid ' +

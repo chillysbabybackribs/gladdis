@@ -1008,8 +1008,8 @@ export class ChatService {
         const resume = isBareContinuation(actionableText)
         const supervisor = createTurnSupervisor((event) => this.emitLoopState(req, event))
         supervisor.start(
-          resume ? 'Resuming Cursor Agent task.' : 'Starting Cursor Agent task.',
-          'Handing the task to the local Cursor Agent session.'
+          resume ? `Resuming ${model.label} task.` : `Starting ${model.label} task.`,
+          `Handing the task to the local ${model.label} session.`
         )
         const call = this.audit.begin({
           requestId: req.requestId,
@@ -1043,7 +1043,7 @@ export class ChatService {
             mode: cursorMode,
             enableBrowserTools: enableCursorMcp
           })
-          supervisor.complete('Cursor Agent task completed.')
+          supervisor.complete(`${model.label} task completed.`)
           call.finish({
             output: result.text,
             usage: {

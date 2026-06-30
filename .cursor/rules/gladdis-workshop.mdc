@@ -1,0 +1,15 @@
+---
+description: Gladdis architecture and agent workflow guidance
+alwaysApply: true
+---
+
+# Gladdis Workshop Context
+
+- Treat Gladdis as an Electron workshop, not a chatbot: React conversation UI on the left, native `WebContentsView` Chromium tabs plus CDP on the right, with local filesystem and shell access.
+- Trust live code over stale overviews or confident docstrings. If docs disagree with implementation, verify behavior in `src/main/`, `src/renderer/`, and `shared/` before changing code.
+- The live browser automation path is agent-in-the-loop: API providers use `models/agentLoopRunner.ts`, Codex uses dynamic `gladdis.*` tools, and Claude Code uses the local bridge. All routes ultimately drive `BrowserTools.run(...)`.
+- Prefer `grep_page` and `read_a11y` for perception. Use `read_page` for orientation. Use screenshots only as a fallback for genuinely visual or unlabeled content.
+- Use `grep_click` and `grep_type` when an action can be discovered and performed from grep or a `read_a11y` `@aN` ref (`click_xy` also accepts `ref`).
+- Do not assume `src/main/pipeline/` is either central or dead. It is older deterministic automation, still reachable through `models/tools/taskTools.ts`; check the call path before changing or deleting it.
+- For IPC changes, keep the main process, preload bridge, renderer callers, and shared API/type contracts in sync.
+- Local Cursor MCP config can contain bearer tokens. Do not expose or commit `.cursor/mcp.json`.

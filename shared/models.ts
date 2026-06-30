@@ -50,7 +50,7 @@ export const MODELS: ModelOption[] = [
   { id: 'gpt-5.4-high', label: 'Cursor · GPT-5.4 High', provider: 'cursor', availability: 'verified' },
   { id: 'gemini-3.1-pro', label: 'Cursor · Gemini 3.1 Pro', provider: 'cursor', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Cursor · Gemini 3.5 Flash', provider: 'cursor', availability: 'verified' },
-  { id: 'grok-4.3', label: 'Cursor · Grok 4.3', provider: 'cursor', availability: 'verified' },
+  { id: 'cursor-grok-4.3', label: 'Cursor Agent · Grok 4.3', provider: 'cursor', availability: 'verified' },
   // Batch 2: new model lines / vendors not otherwise covered (GLM, Kimi, Opus 4.6,
   // Gemini 3 Flash, GPT-5.2). IDs verified present in this account's `agent models`.
   { id: 'claude-4.6-opus-high', label: 'Cursor · Opus 4.6', provider: 'cursor', availability: 'verified' },

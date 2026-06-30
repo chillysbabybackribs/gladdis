@@ -1,4 +1,4 @@
-import type { ChatRequest, ModelOption } from '../../../shared/types'
+import type { ChatMessage, ChatRequest, ModelOption } from '../../../shared/types'
 import { runProviderAgenticTurn } from './agentLoopRunner'
 import { streamAnthropicPlain, runAnthropicToolLoop } from './providers/anthropic'
 import { streamGooglePlain, runGoogleToolLoop } from './providers/google'
@@ -12,6 +12,14 @@ import type { ChatStreamEvent } from '../../../shared/types'
 import type { LlmComplete } from '../pipeline/Planner'
 
 export const VERBATIM_TOOL_RESULTS = 4
+
+function latestUserText(messages: ChatMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i]
+    if (msg?.role === 'user') return msg.content ?? ''
+  }
+  return ''
+}
 
 /**
  * Wiring the dispatchers need from ChatService. These mirror the per-`this`
@@ -111,6 +119,8 @@ export async function dispatchAgenticTurn(args: {
 
   await runProviderAgenticTurn({
     provider,
+    modelLabel: model.label,
+    resume: /^\s*(continue|resume|pick up where we left off|pick up where we were)\b/i.test(latestUserText(req.messages)),
     agentSystem,
     workspaceBlock,
     signal,

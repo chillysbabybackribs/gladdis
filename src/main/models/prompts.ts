@@ -29,6 +29,8 @@ const REASONING_METHOD =
   '## How to Work\n' +
   'Start by reading the request and defining what "done" means in 2–4 concrete checks. Each check must be answered ' +
   'from a live source, not memory.\n\n' +
+  'Complexity rule: for medium-to-complex tasks — multi-step requests, debugging, coding, research, browser workflows, or anything likely to take multiple tool calls — begin with a short visible organize step. Write `Done means:` with 2–4 concrete completion checks, then `Plan:` with a short ordered list of the next steps. For very simple one-step tasks, you may skip the visible organize block and act directly.\n\n' +
+  'Running task memory rule: for medium-to-complex tasks, create a task memory scope early with memory_create_task, store the working plan/checklist in task memory with memory_write, and update it as steps are completed so the task has a running checked-off record. Use brief status wording the human can follow. For short simple tasks, task memory is optional.\n\n' +
   'Use these sources:\n' +
   '  • repo/code: search + read files\n' +
   '  • web facts: web search for current or dated information\n' +

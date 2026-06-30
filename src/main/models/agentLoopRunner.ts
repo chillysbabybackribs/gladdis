@@ -39,6 +39,8 @@ export interface AgentTurnContext {
  */
 export async function runProviderAgenticTurn(args: {
   provider: string
+  modelLabel?: string
+  resume?: boolean
   agentSystem: string
   workspaceBlock: string | null
   signal: AbortSignal
@@ -46,8 +48,15 @@ export async function runProviderAgenticTurn(args: {
   logSystemPrompt: (provider: string, mode: string, system: string) => void
   loop: (bindings: AgentSupervisorBindings) => Promise<void>
 }): Promise<void> {
-  const { provider, agentSystem, workspaceBlock, signal, supervisor, logSystemPrompt, loop } = args
-  supervisor.start()
+  const { provider, modelLabel, resume, agentSystem, workspaceBlock, signal, supervisor, logSystemPrompt, loop } = args
+  const displayName = modelLabel ?? provider
+  const intro = provider === 'grok'
+    ? {
+        title: resume ? `Resuming ${displayName} API task.` : `Starting ${displayName} API task.`,
+        detail: `Handing the task to the direct ${displayName} API tool loop.`
+      }
+    : undefined
+  supervisor.start(intro?.title, intro?.detail)
   logSystemPrompt(
     provider,
     'agentic',

@@ -37,6 +37,25 @@ function makeFakeCursorChild(resultText: string): import('node:child_process').C
   return child
 }
 
+function makeCursorChildWithJsonLines(
+  lines: Record<string, unknown>[],
+  delayMs = 0
+): import('node:child_process').ChildProcess {
+  const child = new EventEmitter() as import('node:child_process').ChildProcess & EventEmitter
+  const stdout = new PassThrough()
+  const stderr = new PassThrough()
+  ;(child as any).stdout = stdout
+  ;(child as any).stderr = stderr
+  child.kill = vi.fn() as any
+  setTimeout(() => {
+    for (const line of lines) stdout.write(JSON.stringify(line) + '\n')
+    stdout.end()
+    stderr.end()
+    child.emit('close', 0, null)
+  }, delayMs)
+  return child
+}
+
 describe('CursorClient assistant stream parsing', () => {
   it('keeps only true streaming deltas and classifies duplicate flushes', () => {
     expect(
@@ -455,6 +474,123 @@ describe('CursorClient spawn mode', () => {
       enableBrowserTools: true
     })
     expect(lastSpawnArgs()).toContain('--approve-mcps')
+  })
+
+  it('resumes with queued user context instead of replaying the original prompt', async () => {
+    spawnMock.mockReset()
+    const queued = ['Use ripgrep instead of grep.']
+    let client!: CursorClient
+    let spawnCount = 0
+    let sessionId: string | null = null
+    spawnMock.mockImplementation(() => {
+      spawnCount += 1
+      if (spawnCount === 1) {
+        const child = makeCursorChildWithJsonLines([
+          { type: 'result', session_id: 'sess-1', result: 'first pass', subtype: 'success' }
+        ], 10)
+        setTimeout(() => {
+          client.pauseRequest('req-1')
+        }, 0)
+        return child
+      }
+      return makeCursorChildWithJsonLines([
+        { type: 'result', session_id: 'sess-1', result: 'resumed pass', subtype: 'success' }
+      ])
+    })
+
+    client = new CursorClient(
+      vi.fn(),
+      () => '/tmp/workspace',
+      {
+        get: vi.fn(() => sessionId),
+        set: vi.fn((_conversationId: string, nextSessionId: string | null) => {
+          sessionId = nextSessionId
+        })
+      }
+    )
+
+    const req = {
+      modelId: 'gpt-5.5-medium',
+      messages: [{ role: 'user' as const, content: 'search the repo with grep' }],
+      conversationId: 'conv-1',
+      requestId: 'req-1'
+    } as any
+
+    const sendPromise = client.send(
+      req,
+      new AbortController().signal,
+      'sys',
+      'search the repo with grep',
+      'agent',
+      {
+        getQueuedContext: () => queued.shift() ?? null
+      }
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(client.resumeRequest('req-1')).toBe(true)
+    const result = await sendPromise
+
+    expect(result.text).toBe('resumed pass')
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    const resumedArgs = spawnMock.mock.calls[1]?.[1] as string[]
+    expect(resumedArgs).toContain('--resume')
+    expect(resumedArgs).toContain('sess-1')
+    expect(resumedArgs.at(-1)).toContain('Use ripgrep instead of grep.')
+    expect(resumedArgs.at(-1)).not.toContain('search the repo with grep')
+    expect(resumedArgs.at(-1)).not.toContain('[Conversation history]')
+  })
+
+  it('uses an explicit continue prompt when resuming without queued context', async () => {
+    spawnMock.mockReset()
+    let client!: CursorClient
+    let spawnCount = 0
+    let sessionId: string | null = null
+    spawnMock.mockImplementation(() => {
+      spawnCount += 1
+      if (spawnCount === 1) {
+        const child = makeCursorChildWithJsonLines([
+          { type: 'result', session_id: 'sess-2', result: 'first pass', subtype: 'success' }
+        ], 10)
+        setTimeout(() => {
+          client.pauseRequest('req-2')
+        }, 0)
+        return child
+      }
+      return makeCursorChildWithJsonLines([
+        { type: 'result', session_id: 'sess-2', result: 'continued pass', subtype: 'success' }
+      ])
+    })
+
+    client = new CursorClient(
+      vi.fn(),
+      () => '/tmp/workspace',
+      {
+        get: vi.fn(() => sessionId),
+        set: vi.fn((_conversationId: string, nextSessionId: string | null) => {
+          sessionId = nextSessionId
+        })
+      }
+    )
+
+    const req = {
+      modelId: 'gpt-5.5-medium',
+      messages: [{ role: 'user' as const, content: 'keep going' }],
+      conversationId: 'conv-2',
+      requestId: 'req-2'
+    } as any
+
+    const sendPromise = client.send(req, new AbortController().signal, 'sys', 'keep going', 'agent', {
+      getQueuedContext: () => null
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(client.resumeRequest('req-2')).toBe(true)
+    await sendPromise
+
+    const resumedArgs = spawnMock.mock.calls[1]?.[1] as string[]
+    expect(resumedArgs.at(-1)).toContain('Continue from where you left off.')
+    expect(resumedArgs.at(-1)).not.toContain('[Conversation history]')
   })
 
   // The background utility path (titles, classification) genuinely has no tools,

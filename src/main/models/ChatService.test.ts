@@ -956,7 +956,9 @@ describe('ChatService provider hardening', () => {
     expect(cursorSend).toHaveBeenCalledOnce()
     const call = cursorSend.mock.calls[0] as any[]
     expect(call[4]).toBe('ask')
-    expect(call[5]).toEqual({ enableBrowserTools: false })
+    expect(call[5]).toEqual(
+      expect.objectContaining({ enableBrowserTools: false, getQueuedContext: expect.any(Function) })
+    )
   })
 
   it('enables Cursor browser MCP only for browser-intent turns', async () => {
@@ -981,7 +983,41 @@ describe('ChatService provider hardening', () => {
     expect(cursorSend).toHaveBeenCalledOnce()
     const call = cursorSend.mock.calls[0] as any[]
     expect(call[4]).toBe('agent')
-    expect(call[5]).toEqual({ enableBrowserTools: true })
+    expect(call[5]).toEqual(
+      expect.objectContaining({ enableBrowserTools: true, getQueuedContext: expect.any(Function) })
+    )
+  })
+
+  it('passes queued interjection context into Cursor turns for resumed follow-ups', async () => {
+    const { service } = makeService()
+    const cursorSend = vi.fn(async (_req, _signal, _system, _user, _mode, options) => {
+      expect(service.interject({
+        requestId: 'req-cursor-interject',
+        text: 'switch to ripgrep and focus on src/main',
+        pause: false,
+        autoResume: false
+      } as any)).toBe(true)
+      const queued = options?.getQueuedContext?.()
+      expect(queued).toContain('switch to ripgrep and focus on src/main')
+      expect(options.enableBrowserTools).toBe(false)
+      return { text: 'done' }
+    })
+    ;(service as any).cursorClient = {
+      send: cursorSend,
+      complete: vi.fn(),
+      status: vi.fn(),
+      listModels: vi.fn()
+    }
+
+    await service.send({
+      requestId: 'req-cursor-interject',
+      modelId: 'composer-2.5',
+      conversationId: 'conv-cursor-interject',
+      mode: 'agent',
+      messages: [{ role: 'user', content: 'search the repo for cursor code' }]
+    } as any)
+
+    expect(cursorSend).toHaveBeenCalledOnce()
   })
 
   it('runs browse_task/search on the user\'s picked model — no silent gemini substitution', () => {

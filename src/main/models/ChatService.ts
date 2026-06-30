@@ -334,6 +334,18 @@ export class ChatService {
   }
 
   /**
+   * Pre-warm the Cursor MCP bridge for imminent browser-enabled turns.
+   * Call this when a Cursor model is selected or browser intent is detected.
+   */
+  warmCursorBridge(): void {
+    // Fire-and-forget: warming is an optimization, not required for correctness
+    this.cursor().warmBridge().catch((err) => {
+      // Silent failure: if warming fails, the turn will create the bridge fresh
+      console.log('[ChatService] Bridge warm failed (non-critical):', err)
+    })
+  }
+
+  /**
    * Live Codex model catalog from the app-server's `model/list`, so the picker
    * always matches the installed CLI. Returns [] if Codex isn't reachable; the
    * renderer then falls back to the static codex entries in MODELS.
@@ -489,7 +501,8 @@ export class ChatService {
     // active handles it. Non-matching requests are silent no-ops.
     const codexPaused = this.codexClient?.pauseRequest(requestId) ?? false
     const claudeCodePaused = this.claudeCodeClient?.pauseRequest(requestId) ?? false
-    if (!gatePaused && !codexPaused && !claudeCodePaused) return false
+    const cursorPaused = this.cursorClient?.pauseRequest(requestId) ?? false
+    if (!gatePaused && !codexPaused && !claudeCodePaused && !cursorPaused) return false
     this.emit({
       requestId,
       type: 'loop_state',
@@ -501,7 +514,9 @@ export class ChatService {
         ? 'Task paused — Codex interrupted the in-flight turn. Click resume to continue from the same step.'
         : claudeCodePaused
           ? 'Task paused — Claude Code interrupted the in-flight turn. Click resume to continue from the same step.'
-          : 'Task paused — the agent is holding before its next step. Click resume to continue.'
+          : cursorPaused
+            ? 'Task paused — Cursor Agent interrupted the in-flight turn. Click resume to continue from the same session.'
+            : 'Task paused — the agent is holding before its next step. Click resume to continue.'
     })
     return true
   }
@@ -585,9 +600,9 @@ export class ChatService {
         openAiKey: () => this.openAiKey(),
         grokKey: () => this.grokKey(),
         claudeCodeComplete: (providerModelId, system, user) =>
-          this.claudeCode().complete(providerModelId, system, user).then((result) => result.text),
+          this.claudeCode().complete(providerModelId, system, prependDateContextToText(user)).then((result) => result.text),
         cursorComplete: (providerModelId, system, user) =>
-          this.cursor().complete(providerModelId, system, user).then((result) => result.text)
+          this.cursor().complete(providerModelId, system, prependDateContextToText(user)).then((result) => result.text)
       }
     })
   }
@@ -709,7 +724,7 @@ export class ChatService {
           stage: options.stage ?? 'complete',
           input: { system, user }
         })
-        const text = await this.codex().complete(model.id, system, user)
+        const text = await this.codex().complete(model.id, system, prependDateContextToText(user))
         call.finish({ output: text })
         return text
       } else if (model.provider === 'claudecode') {
@@ -722,7 +737,7 @@ export class ChatService {
         const result = await this.claudeCode().complete(
           model.id,
           system,
-          user,
+          prependDateContextToText(user),
           options.conversationId
         )
         call.finish({
@@ -741,7 +756,7 @@ export class ChatService {
           stage: options.stage ?? 'complete',
           input: { system, user }
         })
-        const result = await this.cursor().complete(model.id, system, user, options.conversationId)
+        const result = await this.cursor().complete(model.id, system, prependDateContextToText(user), options.conversationId)
         call.finish({
           output: result.text,
           usage: {
@@ -886,7 +901,10 @@ export class ChatService {
             cursorSystem,
             actionableText,
             cursorMode,
-            { enableBrowserTools: enableCursorMcp }
+            {
+              enableBrowserTools: enableCursorMcp,
+              getQueuedContext: () => this.consumeQueuedInterjection(req.requestId)
+            }
           )
           supervisor.complete('Cursor Agent task completed.')
           call.finish({

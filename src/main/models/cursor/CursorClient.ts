@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { promisify } from 'node:util'
 import type { ChatRequest, ChatStreamEvent, CursorStatus } from '../../../../shared/types'
+import type { ChatMessage } from '../../../../shared/chat'
 import type { BridgeRegistration } from '../claudeCode/ClaudeCodeBridgeServer'
 import { CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from '../claudeCode/browserTools'
 import { formatCursorConversationPrompt } from './cursorPrompt'
@@ -12,6 +13,12 @@ const execFileAsync = promisify(execFile)
 const CURSOR_BIN = process.env.GLADDIS_CURSOR_BIN || 'agent'
 const FAILED_PROBE_RETRY_MS = 5000
 const STATUS_CACHE_TTL_MS = 10_000
+const DEFAULT_CURSOR_RESUME_PROMPT = 'Continue from where you left off.'
+
+function cursorDebug(message: string): void {
+  if (!process.env.GLADDIS_CURSOR_DEBUG) return
+  process.stderr.write(`[cursor] ${message}\n`)
+}
 
 let activeProbe: Promise<{ installed: boolean; version: string | null }> | null = null
 let cachedProbe: { installed: boolean; version: string | null } | null = null
@@ -68,6 +75,14 @@ export function probeCursorBinary(): Promise<{ installed: boolean; version: stri
 
 export class CursorClient {
   private readonly activeProcesses = new Map<string, import('node:child_process').ChildProcess>()
+  private readonly pausedRequests = new Set<string>()
+  private readonly resumeResolvers = new Map<string, () => void>()
+  /** Pre-warmed bridge session for imminent browser-enabled turns */
+  private warmedBridge: {
+    bridge: Awaited<ReturnType<CreateCursorBridgeSession>>
+    workdir: string
+    createdAt: number
+  } | null = null
 
   constructor(
     private readonly emit: (e: ChatStreamEvent) => void,
@@ -77,11 +92,20 @@ export class CursorClient {
   ) {}
 
   pauseRequest(requestId: string): boolean {
+    if (!this.activeProcesses.has(requestId) || this.pausedRequests.has(requestId)) return false
+    this.pausedRequests.add(requestId)
     return this.stopRequest(requestId)
   }
 
-  resumeRequest(_requestId: string): boolean {
-    return false
+  resumeRequest(requestId: string): boolean {
+    if (!this.pausedRequests.has(requestId)) return false
+    this.pausedRequests.delete(requestId)
+    const resolve = this.resumeResolvers.get(requestId)
+    if (resolve) {
+      this.resumeResolvers.delete(requestId)
+      resolve()
+    }
+    return true
   }
 
   stopRequest(requestId: string): boolean {
@@ -104,6 +128,63 @@ export class CursorClient {
     } finally {
       activeStatus = null
     }
+  }
+
+  /**
+   * Pre-warm the MCP bridge session for an imminent browser-enabled turn.
+   * This moves the ~50-150ms bridge setup cost off the critical path.
+   * The warmed bridge is valid for the current workspace directory.
+   */
+  async warmBridge(): Promise<void> {
+    if (!this.createBridgeSession) return
+    const workdir = this.getWorkspaceRoot() ?? process.cwd()
+
+    // Dispose any stale warmed bridge from a different workspace
+    if (this.warmedBridge && this.warmedBridge.workdir !== workdir) {
+      this.warmedBridge.bridge.dispose()
+      this.warmedBridge = null
+    }
+
+    // Skip if already warmed for this workspace
+    if (this.warmedBridge) return
+
+    const bridge = await this.createBridgeSession({
+      conversationId: null,
+      modelId: 'warmup',
+      requestId: null
+    })
+
+    this.warmedBridge = { bridge, workdir, createdAt: Date.now() }
+    cursorDebug(`bridge warmed for ${workdir}`)
+  }
+
+  /** Clear the warmed bridge, disposing if present. */
+  clearWarmedBridge(): void {
+    if (this.warmedBridge) {
+      this.warmedBridge.bridge.dispose()
+      this.warmedBridge = null
+      cursorDebug('bridge warm cleared')
+    }
+  }
+
+  private takeWarmedBridge(
+    workdir: string,
+    conversationId: string | null,
+    modelId: string,
+    requestId: string | null
+  ): Awaited<ReturnType<CreateCursorBridgeSession>> | null {
+    if (!this.warmedBridge) return null
+    const { bridge, workdir: warmedWorkdir } = this.warmedBridge
+
+    // Can only reuse if workspace matches
+    if (warmedWorkdir !== workdir) {
+      this.clearWarmedBridge()
+      return null
+    }
+
+    this.warmedBridge = null
+    cursorDebug(`bridge reused warmed session for ${workdir}`)
+    return bridge
   }
 
   private async computeStatus(): Promise<CursorStatus> {
@@ -150,7 +231,8 @@ export class CursorClient {
     return this.runTurn({
       modelId,
       system,
-      user,
+      messages: [{ role: 'user', content: user }],
+      latestUserText: user,
       conversationId: conversationId ?? null,
       requestId: null,
       signal: null,
@@ -165,52 +247,72 @@ export class CursorClient {
     system: string,
     user: string,
     mode: 'ask' | 'agent',
-    options: { enableBrowserTools?: boolean } = {}
+    options: { enableBrowserTools?: boolean; getQueuedContext?: () => string | null } = {}
   ): Promise<{ text: string; usage?: CursorUsage }> {
     return this.runTurn({
       modelId: req.modelId,
       system,
-      user: formatCursorConversationPrompt(req.messages, user),
+      messages: req.messages,
+      latestUserText: user,
       conversationId: req.conversationId ?? null,
       requestId: req.requestId,
       signal,
       mode,
-      enableBrowserTools: options.enableBrowserTools === true
+      enableBrowserTools: options.enableBrowserTools === true,
+      getQueuedContext: options.getQueuedContext
     })
   }
 
   private async runTurn(args: {
     modelId: string
     system: string
-    user: string
+    messages: ChatMessage[]
+    latestUserText: string
     conversationId: string | null
     requestId: string | null
     signal: AbortSignal | null
     mode: 'ask' | 'agent'
     enableBrowserTools: boolean
+    getQueuedContext?: () => string | null
   }): Promise<{ text: string; usage?: CursorUsage }> {
+    const turnStart = Date.now()
+    cursorDebug(`turn start requestId=${args.requestId ?? 'none'}`)
     const probe = await probeCursorBinary()
     if (!probe.installed) throw new Error('Cursor Agent CLI not found')
 
     const workdir = this.getWorkspaceRoot() ?? process.cwd()
     const needsMcpBridge = args.enableBrowserTools && !!this.createBridgeSession
 
-    // Register the bridge session outside the lock — the token and URL are stable
-    // per workdir (persistTokenKey), so this is idempotent and cheap.
-    const bridge = needsMcpBridge
-      ? await this.createBridgeSession!({
+    // Use pre-warmed bridge if available and valid, otherwise create fresh
+    let bridge: Awaited<ReturnType<CreateCursorBridgeSession>> | null = null
+    if (needsMcpBridge) {
+      const warmed = this.takeWarmedBridge(workdir, args.conversationId, args.modelId, args.requestId)
+      if (warmed) {
+        bridge = warmed
+        cursorDebug(`bridge reused warmed +${Date.now() - turnStart}ms`)
+      } else {
+        bridge = await this.createBridgeSession!({
           conversationId: args.conversationId,
           modelId: args.modelId,
           requestId: args.requestId
         })
-      : null
+        cursorDebug(`bridge created fresh +${Date.now() - turnStart}ms`)
+      }
+    }
 
-    const runTurn = async (): Promise<{ text: string; usage?: CursorUsage }> => {
-      const mcpConfig = bridge ? await ensureWorkspaceMcpConfig(workdir, bridge.mcpConfig) : null
-      const prompt = [
-        args.system.trim() ? '[System]\n' + args.system.trim() : '',
-        '[User]\n' + args.user
-      ].filter(Boolean).join('\n\n')
+    const buildUserBody = (resumeId: string | null, userText: string): string => {
+      if (resumeId) return userText.trim()
+      return formatCursorConversationPrompt(args.messages, userText, {
+        includeHistory: true
+      })
+    }
+
+    const buildPrompt = (resumeId: string | null, userText: string): string => [
+      args.system.trim() ? '[System]\n' + args.system.trim() : '',
+      '[User]\n' + buildUserBody(resumeId, userText)
+    ].filter(Boolean).join('\n\n')
+
+    const buildCliArgs = (resumeId: string | null, userText: string): string[] => {
       const cliArgs = [
         '--print',
         '--output-format',
@@ -225,166 +327,306 @@ export class CursorClient {
       if (bridge) cliArgs.push('--approve-mcps')
       if (args.mode === 'ask') cliArgs.push('--mode', 'ask')
       else cliArgs.push('--force')
-      const persistedSessionId = args.conversationId ? this.sessions.get(args.conversationId) : null
-      if (persistedSessionId) cliArgs.push('--resume', persistedSessionId)
-      cliArgs.push(prompt)
+      if (resumeId) cliArgs.push('--resume', resumeId)
+      cliArgs.push(buildPrompt(resumeId, userText))
+      return cliArgs
+    }
 
-      try {
-        return await new Promise((resolve, reject) => {
-          const child = spawn(CURSOR_BIN, cliArgs, {
-            cwd: workdir,
-            env: bridge ? { ...process.env, ...bridge.env } : process.env,
-            stdio: ['ignore', 'pipe', 'pipe']
-          })
+    let accumulatedText = ''
+    let accumulatedUsage: CursorUsage | undefined
+    let currentResumeId = args.conversationId ? this.sessions.get(args.conversationId) : null
+    let currentUserText = args.latestUserText
 
-          if (args.requestId) this.activeProcesses.set(args.requestId, child)
+    try {
+      while (true) {
+        if (bridge) {
+          await ensureWorkspaceMcpConfigLocked(workdir, bridge.mcpConfig)
+          cursorDebug(`mcp config ready +${Date.now() - turnStart}ms`)
+        }
 
-          let settled = false
-          let emittedText = ''
-          let finalText: string | null = null
-          let finalUsage: CursorUsage | undefined
-          let stderr = ''
+        const runResult = await this.spawnTurn(
+          args,
+          buildCliArgs(currentResumeId, currentUserText),
+          workdir,
+          bridge,
+          turnStart
+        )
+        accumulatedText = runResult.text
+        accumulatedUsage = mergeCursorUsage(accumulatedUsage, runResult.usage)
 
-          const persistSessionId = (value: unknown): void => {
-            if (!args.conversationId || typeof value !== 'string' || !value.trim()) return
-            this.sessions.set(args.conversationId, value)
+        if (!runResult.pausedForResume || args.signal?.aborted) break
+
+        await new Promise<void>((resolve) => {
+          if (!args.requestId || !this.pausedRequests.has(args.requestId)) {
+            resolve()
+            return
           }
+          this.resumeResolvers.set(args.requestId, resolve)
+        })
 
-          const finish = (fn: () => void): void => {
-            if (settled) return
-            settled = true
-            if (args.requestId) this.activeProcesses.delete(args.requestId)
-            args.signal?.removeEventListener('abort', onAbort)
-            stdoutRl.close()
-            stderrRl.close()
-            fn()
-          }
+        if (args.signal?.aborted) break
 
-          const emitDelta = (text: string): void => {
-            if (!text) return
-            let delta = text
-            if (text.startsWith(emittedText)) delta = text.slice(emittedText.length)
-            if (!delta) return
-            emittedText += delta
-            if (args.requestId) this.emit({ requestId: args.requestId, type: 'delta', text: delta })
-          }
+        const queuedContext = args.getQueuedContext?.()?.trim()
+        currentUserText =
+          queuedContext && queuedContext.length > 0 ? queuedContext : DEFAULT_CURSOR_RESUME_PROMPT
+        currentResumeId = args.conversationId ? this.sessions.get(args.conversationId) : null
+        if (!currentResumeId) break
+      }
 
-          const onAbort = (): void => {
-            child.kill('SIGTERM')
-            setTimeout(() => {
-              if (child.exitCode === null) child.kill('SIGKILL')
-            }, 1500).unref()
-          }
+      return { text: accumulatedText, usage: accumulatedUsage }
+    } finally {
+      bridge?.dispose()
+      cursorDebug(`turn done +${Date.now() - turnStart}ms`)
+    }
+  }
 
-          if (args.signal?.aborted) {
-            onAbort()
-          } else {
-            args.signal?.addEventListener('abort', onAbort, { once: true })
-          }
+  private async spawnTurn(
+    args: {
+      modelId: string
+      system: string
+      messages: ChatMessage[]
+      latestUserText: string
+      conversationId: string | null
+      requestId: string | null
+      signal: AbortSignal | null
+      mode: 'ask' | 'agent'
+      enableBrowserTools: boolean
+    },
+    cliArgs: string[],
+    workdir: string,
+    bridge: BridgeRegistration | null,
+    turnStart: number
+  ): Promise<{ text: string; usage?: CursorUsage; pausedForResume: boolean }> {
+    return new Promise((resolve, reject) => {
+      const prompt = cliArgs.at(-1) ?? ''
+      const flags = [
+        cliArgs.includes('--resume') ? 'resume' : 'fresh',
+        cliArgs.includes('--approve-mcps') ? 'mcp' : 'no-mcp',
+        args.mode
+      ].join(' ')
+      cursorDebug(
+        `spawn +${Date.now() - turnStart}ms promptChars=${prompt.length} ${flags}`
+      )
+      const child = spawn(CURSOR_BIN, cliArgs, {
+        cwd: workdir,
+        env: bridge ? { ...process.env, ...bridge.env } : process.env,
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
 
-          const stdoutRl = createInterface({ input: child.stdout })
+      if (args.requestId) this.activeProcesses.set(args.requestId, child)
+
+      let settled = false
+      let emittedText = ''
+      let loggedFirstToken = false
+      let loggedFirstStdout = false
+      let finalText: string | null = null
+      let finalUsage: CursorUsage | undefined
+      let stderr = ''
+
+      const persistSessionId = (value: unknown): void => {
+        if (!args.conversationId || typeof value !== 'string' || !value.trim()) return
+        this.sessions.set(args.conversationId, value)
+      }
+
+      const finish = (fn: () => void): void => {
+        if (settled) return
+        settled = true
+        if (args.requestId) this.activeProcesses.delete(args.requestId)
+        args.signal?.removeEventListener('abort', onAbort)
+        stdoutRl.close()
+        stderrRl.close()
+        fn()
+      }
+
+      const emitDelta = (text: string, kind: CursorAssistantEventKind): void => {
+        const { delta, nextEmitted } = computeCursorEmitDelta(emittedText, text, kind)
+        emittedText = nextEmitted
+        if (!delta) return
+        if (!loggedFirstToken) {
+          loggedFirstToken = true
+          cursorDebug(`first token +${Date.now() - turnStart}ms`)
+        }
+        if (args.requestId) this.emit({ requestId: args.requestId, type: 'delta', text: delta })
+      }
+
+      const onAbort = (): void => {
+        child.kill('SIGTERM')
+        setTimeout(() => {
+          if (child.exitCode === null) child.kill('SIGKILL')
+        }, 1500).unref()
+      }
+
+      if (args.signal?.aborted) {
+        onAbort()
+      } else {
+        args.signal?.addEventListener('abort', onAbort, { once: true })
+      }
+
+      const stdoutRl = createInterface({ input: child.stdout })
           stdoutRl.on('line', (line) => {
             const trimmed = line.trim()
             if (!trimmed) return
+            if (!loggedFirstStdout) {
+              loggedFirstStdout = true
+              cursorDebug(`first stdout +${Date.now() - turnStart}ms`)
+            }
             let msg: any
-            try {
-              msg = JSON.parse(trimmed)
-            } catch {
-              return
-            }
+        try {
+          msg = JSON.parse(trimmed)
+        } catch {
+          return
+        }
 
-            persistSessionId(msg.session_id)
+        persistSessionId(msg.session_id)
 
-            if (msg.type === 'tool_call') {
-              if (args.requestId && msg.subtype === 'started' && typeof msg.call_id === 'string') {
-                this.emit({
-                  requestId: args.requestId,
-                  type: 'tool_call',
-                  tool: formatCursorToolName(msg.tool_call),
-                  args: cursorToolArgs(msg.tool_call),
-                  callId: msg.call_id
-                })
-              } else if (args.requestId && msg.subtype === 'completed' && typeof msg.call_id === 'string') {
-                this.emit({
-                  requestId: args.requestId,
-                  type: 'tool_result',
-                  callId: msg.call_id,
-                  ok: cursorToolOk(msg.tool_call),
-                  preview: cursorToolPreview(msg.tool_call)
-                })
-              }
-              return
-            }
+        if (msg.type === 'tool_call') {
+          if (args.requestId && msg.subtype === 'started' && typeof msg.call_id === 'string') {
+            this.emit({
+              requestId: args.requestId,
+              type: 'tool_call',
+              tool: formatCursorToolName(msg.tool_call),
+              args: cursorToolArgs(msg.tool_call),
+              callId: msg.call_id
+            })
+          } else if (args.requestId && msg.subtype === 'completed' && typeof msg.call_id === 'string') {
+            this.emit({
+              requestId: args.requestId,
+              type: 'tool_result',
+              callId: msg.call_id,
+              ok: cursorToolOk(msg.tool_call),
+              preview: cursorToolPreview(msg.tool_call)
+            })
+          }
+          return
+        }
 
-            if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
-              const text = assistantMessageText(msg)
-              const kind = classifyAssistantEvent(msg)
-              if (shouldEmitAssistantStreamText(kind)) emitDelta(text)
-              return
-            }
+        if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) {
+          const text = assistantMessageText(msg)
+          const kind = classifyAssistantEvent(msg)
+          if (shouldEmitAssistantStreamText(kind)) emitDelta(text, kind)
+          return
+        }
 
-            if (msg.type === 'result') {
-              if (typeof msg.result === 'string') {
-                finalText = msg.result
-                emitDelta(msg.result)
-              }
-              finalUsage = normalizeUsage(msg.usage)
-              if (msg.is_error || msg.subtype === 'error') {
-                const message = typeof msg.result === 'string' && msg.result.trim()
-                  ? msg.result
-                  : 'Cursor Agent returned an error.'
-                finish(() => reject(new Error(message)))
-              }
-            }
-          })
+        if (msg.type === 'result') {
+          if (typeof msg.result === 'string') {
+            finalText = msg.result
+            emitDelta(msg.result, 'final_flush')
+          }
+          finalUsage = normalizeUsage(msg.usage)
+          if (msg.is_error || msg.subtype === 'error') {
+            const message = typeof msg.result === 'string' && msg.result.trim()
+              ? msg.result
+              : 'Cursor Agent returned an error.'
+            finish(() => reject(new Error(message)))
+          }
+        }
+      })
 
-          const stderrRl = createInterface({ input: child.stderr })
-          stderrRl.on('line', (line) => {
-            stderr += line + '\n'
-            if (process.env.GLADDIS_CURSOR_DEBUG) process.stderr.write('[cursor] ' + line + '\n')
-          })
+      const stderrRl = createInterface({ input: child.stderr })
+      stderrRl.on('line', (line) => {
+        stderr += line + '\n'
+        if (process.env.GLADDIS_CURSOR_DEBUG) {
+          const trimmed = line.trim()
+          if (trimmed) cursorDebug(`stderr +${Date.now() - turnStart}ms ${trimmed}`)
+        }
+      })
 
-          child.on('error', (error) => finish(() => reject(error)))
-          child.on('close', (code) => {
-            if (settled) return
-            if (args.signal?.aborted) {
-              finish(() => resolve({ text: finalText ?? emittedText, usage: finalUsage }))
-              return
-            }
-            if (code && code !== 0) {
-              const message = stderr.trim() || 'Cursor Agent exited with code ' + code
-              finish(() => reject(new Error(message)))
-              return
-            }
-            finish(() => resolve({ text: finalText ?? emittedText, usage: finalUsage }))
-          })
-        })
-      } finally {
-        await mcpConfig?.dispose()
-        bridge?.dispose()
-      }
-    }
-
-    // Only serialize when we might actually write the MCP config file. On warm
-    // turns (fingerprint already cached) the write is skipped, so no lock needed.
-    if (bridge && !isMcpConfigWarm(workdir, bridge.mcpConfig)) {
-      return withWorkspaceMcpLock(workdir, runTurn)
-    }
-    return runTurn()
+      child.on('error', (error) => finish(() => reject(error)))
+      child.on('close', (code) => {
+        if (settled) return
+        const paused = args.requestId ? this.pausedRequests.has(args.requestId) : false
+        if (paused) {
+          finish(() => resolve({
+            text: finalText ?? emittedText,
+            usage: finalUsage,
+            pausedForResume: true
+          }))
+          return
+        }
+        if (args.signal?.aborted) {
+          finish(() => resolve({ text: finalText ?? emittedText, usage: finalUsage, pausedForResume: false }))
+          return
+        }
+        if (code && code !== 0) {
+          const message = stderr.trim() || 'Cursor Agent exited with code ' + code
+          finish(() => reject(new Error(message)))
+          return
+        }
+        finish(() => resolve({ text: finalText ?? emittedText, usage: finalUsage, pausedForResume: false }))
+      })
+    })
   }
 }
 
-/**
- * True when the MCP config for `workdir` is already written and matches the
- * bridge's config — meaning `ensureWorkspaceMcpConfig` will be a no-op and the
- * workspace lock can be skipped entirely.
- */
-export function isMcpConfigWarm(workdir: string, mcpConfigJson: string): boolean {
+function mergeCursorUsage(base: CursorUsage | undefined, next: CursorUsage | undefined): CursorUsage | undefined {
+  if (!next) return base
+  if (!base) return next
+  return {
+    inputTokens: (base.inputTokens ?? 0) + (next.inputTokens ?? 0),
+    outputTokens: (base.outputTokens ?? 0) + (next.outputTokens ?? 0),
+    cachedInputTokens: (base.cachedInputTokens ?? 0) + (next.cachedInputTokens ?? 0)
+  }
+}
+
+function gladdisMcpFingerprint(mcpConfigJson: string): string | null {
   const bridgeConfig = parseMcpConfig(mcpConfigJson)
   const gladdisEntry = bridgeConfig.mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]
-  if (!gladdisEntry) return true
-  const fingerprint = JSON.stringify(gladdisEntry)
+  if (!gladdisEntry) return null
+  return JSON.stringify(gladdisEntry)
+}
+
+/**
+ * True when the in-memory fingerprint matches — fast path only.
+ */
+export function isMcpConfigWarm(workdir: string, mcpConfigJson: string): boolean {
+  const fingerprint = gladdisMcpFingerprint(mcpConfigJson)
+  if (fingerprint === null) return true
   return workspaceMcpFingerprints.get(workdir) === fingerprint
+}
+
+/**
+ * True when `ensureWorkspaceMcpConfig` would be a no-op. Checks the on-disk
+ * file after a cache miss so cold app restarts can skip the workspace lock.
+ */
+export async function probeMcpConfigWarm(workdir: string, mcpConfigJson: string): Promise<boolean> {
+  const fingerprint = gladdisMcpFingerprint(mcpConfigJson)
+  if (fingerprint === null) return true
+  if (workspaceMcpFingerprints.get(workdir) === fingerprint) return true
+
+  const file = join(workdir, '.cursor', 'mcp.json')
+  try {
+    const previous = await readFile(file, 'utf8')
+    const existing = parseMcpConfig(previous)
+    const onDisk = JSON.stringify(existing.mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME] ?? null)
+    if (onDisk === fingerprint) {
+      workspaceMcpFingerprints.set(workdir, fingerprint)
+      return true
+    }
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+  return false
+}
+
+async function ensureWorkspaceMcpConfigLocked(
+  workdir: string,
+  mcpConfigJson: string
+): Promise<{ dispose: () => Promise<void> }> {
+  // Fast path: memory-only check avoids async disk I/O when already warm
+  if (isMcpConfigWarm(workdir, mcpConfigJson)) {
+    return { dispose: async () => {} }
+  }
+  return withWorkspaceMcpLock(workdir, async () => {
+    // Double-check inside lock: another concurrent call may have warmed it
+    if (isMcpConfigWarm(workdir, mcpConfigJson)) {
+      return { dispose: async () => {} }
+    }
+    // Cold path: verify against disk before writing
+    if (await probeMcpConfigWarm(workdir, mcpConfigJson)) {
+      return { dispose: async () => {} }
+    }
+    return ensureWorkspaceMcpConfig(workdir, mcpConfigJson)
+  })
 }
 
 /** Keep a stable Gladdis MCP entry in `.cursor/mcp.json`; write only when it changes. */
@@ -455,9 +697,73 @@ function cursorCliModel(modelId: string): string {
   switch (modelId) {
     case 'composer-2.5':
       return 'composer-2.5'
+    case 'composer-2.5-fast':
+      return 'composer-2.5-fast'
     default:
       return modelId
   }
+}
+
+export function collapseWhitespace(text: string): string {
+  return text.replace(/\s+/g, '')
+}
+
+/**
+ * Compute the next stream delta for Cursor CLI assistant text.
+ * Handles cumulative snapshots, incremental suffix chunks ("p" + "ong"), and
+ * reformatted final_flush snapshots that would otherwise re-emit the full reply.
+ */
+export function computeCursorEmitDelta(
+  emitted: string,
+  text: string,
+  kind: CursorAssistantEventKind
+): { delta: string; nextEmitted: string } {
+  if (!text) return { delta: '', nextEmitted: emitted }
+
+  if (text.startsWith(emitted)) {
+    return { delta: text.slice(emitted.length), nextEmitted: text }
+  }
+
+  if (kind === 'stream_delta') {
+    return { delta: text, nextEmitted: emitted + text }
+  }
+
+  if (kind === 'final_flush' && emitted) {
+    const normText = collapseWhitespace(text)
+    const normEmitted = collapseWhitespace(emitted)
+    if (normText === normEmitted) {
+      return { delta: '', nextEmitted: text }
+    }
+    if (normText.startsWith(normEmitted) && normText.length > normEmitted.length) {
+      const delta = reconcileNormalizedSuffix(emitted, text)
+      return { delta, nextEmitted: text }
+    }
+    // The terminal `result` (and some final_flush snapshots) restate the
+    // pre-tool-call preamble plus a reformatted/partial reply — content that was
+    // already streamed across tool boundaries. Such a snapshot is a substring of
+    // what we emitted rather than a prefix of it, so the checks above miss it and
+    // the fallthrough would re-emit the whole reply (the "answer repeated N times,
+    // one per tool call" bug). If everything in this snapshot was already shown,
+    // emit nothing and keep the longer accumulated text as the source of truth.
+    if (normEmitted.includes(normText)) {
+      return { delta: '', nextEmitted: emitted }
+    }
+  }
+
+  return { delta: text, nextEmitted: emitted + text }
+}
+
+function reconcileNormalizedSuffix(emitted: string, text: string): string {
+  const target = collapseWhitespace(text)
+  for (let start = emitted.length; start <= text.length; start++) {
+    const suffix = text.slice(start)
+    if (collapseWhitespace(emitted + suffix) === target) return suffix
+  }
+  for (let start = 0; start < text.length; start++) {
+    const suffix = text.slice(start)
+    if (suffix && collapseWhitespace(emitted + suffix) === target) return suffix
+  }
+  return ''
 }
 
 function normalizeUsage(value: any): CursorUsage | undefined {

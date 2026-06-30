@@ -337,4 +337,108 @@ describe('runOpenAiToolLoop', () => {
     expect(toolMessages).toHaveLength(1)
     expect(toolMessages[0].tool_call_id).toBe('call_watch')
   })
+
+  it('blocks broad OpenAI read_file calls on code paths until a repo narrowing tool runs', async () => {
+    const frames = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"src/main/models/providers/openai.ts\\"}"}}]}}]}\n' +
+        'data: [DONE]\n',
+      'data: {"choices":[{"delta":{"content":"Done."}}]}\n' +
+        'data: [DONE]\n'
+    ]
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      body: sseBody(frames.shift() ?? 'data: [DONE]\n')
+    })))
+
+    const { audit } = fakeAudit()
+    const events: ChatStreamEvent[] = []
+    const run = vi.fn(async () => ({ ok: true, text: 'should not be reached' }))
+
+    await runOpenAiToolLoop({
+      apiKey: 'openai-test',
+      audit,
+      emit: (evt) => events.push(evt),
+      req: {
+        requestId: 'openai-read-policy-1',
+        modelId: 'openai-gpt-5.5',
+        messages: [{ role: 'user', content: 'inspect openai provider' }]
+      },
+      modelId: 'openai-gpt-5.5',
+      signal: new AbortController().signal,
+      tools: { run } as never,
+      ctx: {
+        tabId: 'tab-1',
+        workspaceRoot: '/workspace/project',
+        fullResults: new Map()
+      },
+      toolDefs: [
+        { name: 'read_file', description: 'read file', parameters: { type: 'object', properties: {} } },
+        { name: 'search_repo', description: 'search repo', parameters: { type: 'object', properties: {} } },
+        { name: 'read_spans', description: 'read spans', parameters: { type: 'object', properties: {} } }
+      ],
+      agentSystem: 'sys',
+      workspaceBlock: null,
+      maxTokens: 100,
+      keepResults: 5
+    })
+
+    expect(run).not.toHaveBeenCalled()
+    const toolResult = events.find((evt) => evt.type === 'tool_result')
+    expect(toolResult?.ok).toBe(false)
+    expect(toolResult?.preview).toContain('OpenAI local-work policy')
+    expect(toolResult?.preview).toContain('search_repo')
+    expect(toolResult?.preview).toContain('read_spans')
+  })
+
+  it('allows direct read_file after search_repo has already narrowed the task', async () => {
+    const frames = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_search","type":"function","function":{"name":"search_repo","arguments":"{\\"query\\":\\"runOpenAiToolLoop\\"}"}}]}}]}\n' +
+        'data: [DONE]\n',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"src/main/models/providers/openai.ts\\"}"}}]}}]}\n' +
+        'data: [DONE]\n',
+      'data: {"choices":[{"delta":{"content":"Done."}}]}\n' +
+        'data: [DONE]\n'
+    ]
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      body: sseBody(frames.shift() ?? 'data: [DONE]\n')
+    })))
+
+    const { audit } = fakeAudit()
+    const run = vi.fn(async (name: string) => ({ ok: true, text: `${name} ok` }))
+
+    await runOpenAiToolLoop({
+      apiKey: 'openai-test',
+      audit,
+      emit: () => {},
+      req: {
+        requestId: 'openai-read-policy-2',
+        modelId: 'openai-gpt-5.5',
+        messages: [{ role: 'user', content: 'inspect openai provider' }]
+      },
+      modelId: 'openai-gpt-5.5',
+      signal: new AbortController().signal,
+      tools: { run } as never,
+      ctx: {
+        tabId: 'tab-1',
+        workspaceRoot: '/workspace/project',
+        fullResults: new Map()
+      },
+      toolDefs: [
+        { name: 'read_file', description: 'read file', parameters: { type: 'object', properties: {} } },
+        { name: 'search_repo', description: 'search repo', parameters: { type: 'object', properties: {} } },
+        { name: 'read_spans', description: 'read spans', parameters: { type: 'object', properties: {} } }
+      ],
+      agentSystem: 'sys',
+      workspaceBlock: null,
+      maxTokens: 100,
+      keepResults: 5
+    })
+
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(run.mock.calls[0][0]).toBe('search_repo')
+    expect(run.mock.calls[1][0]).toBe('read_file')
+  })
 })

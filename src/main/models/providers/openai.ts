@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatRequest, ChatStreamEvent } from '../../../../shared/types'
+import * as nodePath from 'node:path'
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
 import { resolveTurnTools } from '../agentTools'
@@ -41,6 +42,51 @@ type ModelAudit = {
 }
 
 const STUB_PREFIX = '[trimmed]'
+const OPENAI_REPO_PRIMER_TOOLS = new Set([
+  'repo_overview',
+  'search_repo',
+  'repo_grep_task',
+  'read_spans',
+  'search_files',
+  'list_dir'
+])
+const OPENAI_DIRECT_READ_BASENAMES = new Set([
+  'package.json',
+  'tsconfig.json',
+  'electron.vite.config.ts',
+  'vite.config.ts',
+  '.gitignore'
+])
+const OPENAI_CODE_LIKE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.mts',
+  '.cts',
+  '.py',
+  '.rb',
+  '.go',
+  '.rs',
+  '.java',
+  '.kt',
+  '.swift',
+  '.php',
+  '.cs',
+  '.cpp',
+  '.cc',
+  '.cxx',
+  '.c',
+  '.h',
+  '.hpp',
+  '.hh',
+  '.sql',
+  '.sh',
+  '.bash',
+  '.zsh'
+])
 
 /* ----------------------------- OpenAI wire types ----------------------------- */
 
@@ -74,6 +120,10 @@ type StreamedTurn = {
   usage?: FinishUsage
 }
 
+type OpenAiLocalWorkState = {
+  hasRepoPrimer: boolean
+}
+
 type OpenAiReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh'
 
 /* ----------------------------- Helpers ----------------------------- */
@@ -88,6 +138,99 @@ const OPENAI_MODEL_ALIASES: Record<string, string> = {
 function openAiApiModelId(modelId: string): string {
   const cleanId = modelId.replace(/^openai-/, '')
   return OPENAI_MODEL_ALIASES[cleanId] ?? cleanId
+}
+
+function hasNumericArg(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (typeof value === 'string' && value.trim()) return Number.isFinite(Number(value))
+  return false
+}
+
+function isAllowlistedDirectRead(pathLike: string): boolean {
+  return OPENAI_DIRECT_READ_BASENAMES.has(nodePath.basename(pathLike.trim()))
+}
+
+function isCodeLikePath(pathLike: string): boolean {
+  const clean = pathLike.trim()
+  if (!clean) return false
+  if (/^(src|app|lib|server|client|tests?|scripts)\//i.test(clean)) return true
+  return OPENAI_CODE_LIKE_EXTENSIONS.has(nodePath.extname(clean).toLowerCase())
+}
+
+function openAiReadPolicyOutcome(pathLike: string): { ok: false; text: string } {
+  const clean = pathLike.trim()
+  const dir = nodePath.dirname(clean)
+  const scopedPath = dir && dir !== '.' ? `, "path": ${JSON.stringify(dir)}` : ''
+  return {
+    ok: false,
+    text:
+      `OpenAI local-work policy: do not start with a broad read_file on ${clean}. ` +
+      'Locate the relevant region first to save tokens, then read only that window. ' +
+      `Use search_repo({"query":"symbol_or_phrase"${scopedPath}}) or ` +
+      `repo_grep_task({"task":"what you need to inspect"${scopedPath}}), then follow the suggested ` +
+      `read_spans call. If you already know the area, call read_spans({"items":[{"path":${JSON.stringify(clean)},"start_line":1,"end_line":80}]}) ` +
+      'or read_file with explicit start_line/end_line.'
+  }
+}
+
+function shouldGateOpenAiRead(
+  name: string,
+  toolArgs: Record<string, any>,
+  ctx: ToolContext,
+  toolDefs: ToolDef[],
+  state: OpenAiLocalWorkState
+): boolean {
+  if (name !== 'read_file') return false
+  if (!ctx.workspaceRoot) return false
+  if (state.hasRepoPrimer) return false
+  if (!toolDefs.some((tool) => tool.name === 'search_repo') || !toolDefs.some((tool) => tool.name === 'read_spans')) {
+    return false
+  }
+  const pathLike = String(toolArgs.path ?? '').trim()
+  if (!pathLike) return false
+  if (isAllowlistedDirectRead(pathLike)) return false
+  if (!isCodeLikePath(pathLike)) return false
+  if (toolArgs.full === true) return true
+  return !hasNumericArg(toolArgs.start_line) && !hasNumericArg(toolArgs.end_line)
+}
+
+function noteOpenAiToolState(
+  state: OpenAiLocalWorkState,
+  name: string,
+  toolArgs: Record<string, any>
+): void {
+  if (OPENAI_REPO_PRIMER_TOOLS.has(name)) {
+    state.hasRepoPrimer = true
+    return
+  }
+  if (name === 'read_file' && (hasNumericArg(toolArgs.start_line) || hasNumericArg(toolArgs.end_line))) {
+    state.hasRepoPrimer = true
+  }
+}
+
+async function runOpenAiToolWithPolicy(args: {
+  name: string
+  toolArgs: Record<string, any>
+  ctx: ToolContext
+  toolDefs: ToolDef[]
+  state: OpenAiLocalWorkState
+  runTool: (name: string, toolArgs: Record<string, unknown>) => Promise<{
+    ok: boolean
+    text: string
+    imageBase64?: string
+    structuredContent?: Record<string, unknown>
+  }>
+}): Promise<{
+  ok: boolean
+  text: string
+  imageBase64?: string
+  structuredContent?: Record<string, unknown>
+}> {
+  if (shouldGateOpenAiRead(args.name, args.toolArgs, args.ctx, args.toolDefs, args.state)) {
+    return openAiReadPolicyOutcome(String(args.toolArgs.path ?? ''))
+  }
+  noteOpenAiToolState(args.state, args.name, args.toolArgs)
+  return args.runTool(args.name, args.toolArgs)
 }
 
 /** Max completion tokens accepted by /v1/chat/completions for each model family. */
@@ -505,6 +648,7 @@ export async function runOpenAiToolLoop(args: {
   const messages: OpenAiMessage[] = [formattedSystem, ...toOpenAiMessages(args.req)]
   const resultMsgs: OpenAiMessage[] = []
   const validation = createToolValidationState()
+  const localWorkState: OpenAiLocalWorkState = { hasRepoPrimer: false }
 
   for (let turn = 0; !args.signal.aborted; turn++) {
     // Pause is honored at the iteration boundary so the model state stays
@@ -593,7 +737,15 @@ export async function runOpenAiToolLoop(args: {
         callId,
         name,
         toolArgs: parsedArgs,
-        runTool: (toolName, toolArgs) => args.tools.run(toolName, toolArgs, args.ctx),
+        runTool: (toolName, toolArgs) =>
+          runOpenAiToolWithPolicy({
+            name: toolName,
+            toolArgs,
+            ctx: args.ctx,
+            toolDefs: args.toolDefs,
+            state: localWorkState,
+            runTool: (innerName, innerArgs) => args.tools.run(innerName, innerArgs, args.ctx)
+          }),
         emitToolCall: args.emit,
         emitToolResult: args.emit,
         rememberFullResult: (toolCallId, text) => args.ctx.fullResults!.set(toolCallId, text),

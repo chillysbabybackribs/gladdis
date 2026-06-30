@@ -256,7 +256,8 @@ export class ClaudeCodeBridgeServer {
       tools: CLAUDE_CODE_BROWSER_TOOLS.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: tool.inputSchema
+        inputSchema: tool.inputSchema,
+        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {})
       }))
     }))
 
@@ -281,7 +282,7 @@ export class ClaudeCodeBridgeServer {
               }]
             : [])
         ],
-        structuredContent: buildStructuredToolResult(toolName, request.params.arguments, outcome),
+        ...(outcome.structuredContent ? { structuredContent: outcome.structuredContent } : {}),
         isError: outcome.ok === false
       }
     })
@@ -328,19 +329,4 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   const raw = Buffer.concat(chunks).toString('utf8').trim()
   if (!raw) return null
   return JSON.parse(raw)
-}
-
-function buildStructuredToolResult(
-  toolName: string,
-  args: unknown,
-  outcome: ToolOutcome
-): Record<string, unknown> {
-  return {
-    tool: toolName,
-    ok: outcome.ok,
-    text: outcome.text,
-    hasImage: Boolean(outcome.imageBase64),
-    arguments: record(args),
-    ...(outcome.structuredContent ? { data: outcome.structuredContent } : {})
-  }
 }

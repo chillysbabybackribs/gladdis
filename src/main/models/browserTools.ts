@@ -65,6 +65,7 @@ export interface ToolDef {
     properties: Record<string, unknown>
     required?: string[]
   }
+  outputSchema?: Record<string, unknown>
 }
 
 export const TOOLS: ToolDef[] = AGENT_TOOLS

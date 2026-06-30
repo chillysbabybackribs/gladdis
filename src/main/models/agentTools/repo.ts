@@ -1,5 +1,24 @@
 import type { ToolDef } from '../browserTools'
 
+const REPO_CONTEXT_SCHEMA = {
+  type: 'object',
+  properties: {
+    chars: { type: 'number' },
+    estimatedTokens: { type: 'number' }
+  },
+  required: ['chars', 'estimatedTokens']
+} as const
+
+const SPAN_COORDINATE_SCHEMA = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    startLine: { type: 'number' },
+    endLine: { type: 'number' }
+  },
+  required: ['path', 'startLine', 'endLine']
+} as const
+
 /**
  * REPO — repository intelligence (CapabilityBroker-backed).
  * `repo_overview` for orientation, `search_repo`/`read_spans` for surgical
@@ -19,6 +38,20 @@ export const REPO_TOOLS: ToolDef[] = [
           description: 'Optional focus area or task wording to bias the summary toward.'
         }
       }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        workspaceRoot: { type: 'string' },
+        packageManager: { type: ['string', 'null'] },
+        packageName: { type: ['string', 'null'] },
+        scripts: { type: 'array', items: { type: 'string' } },
+        keyFiles: { type: 'array', items: { type: 'string' } },
+        topDirectories: { type: 'array', items: { type: 'string' } },
+        entryPoints: { type: 'array', items: { type: 'string' } },
+        focus: { type: 'string' }
+      },
+      required: ['workspaceRoot', 'packageManager', 'packageName', 'scripts', 'keyFiles', 'topDirectories', 'entryPoints']
     }
   },
   {
@@ -43,6 +76,40 @@ export const REPO_TOOLS: ToolDef[] = [
         }
       },
       required: ['query']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        workspaceRoot: { type: 'string' },
+        query: { type: 'string' },
+        path: { type: 'string' },
+        glob: { type: 'string' },
+        totalHits: { type: 'number' },
+        hits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              kind: { type: 'string' },
+              line: { type: 'number' },
+              text: { type: 'string' }
+            },
+            required: ['path', 'kind', 'line', 'text']
+          }
+        },
+        suggestedSpans: { type: 'array', items: SPAN_COORDINATE_SCHEMA },
+        context: {
+          type: 'object',
+          properties: {
+            ...REPO_CONTEXT_SCHEMA.properties,
+            hitCount: { type: 'number' },
+            suggestedSpanCount: { type: 'number' }
+          },
+          required: ['chars', 'estimatedTokens', 'hitCount', 'suggestedSpanCount']
+        }
+      },
+      required: ['workspaceRoot', 'query', 'totalHits', 'hits', 'suggestedSpans', 'context']
     }
   },
   {
@@ -78,6 +145,38 @@ export const REPO_TOOLS: ToolDef[] = [
           }
         }
       }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        workspaceRoot: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              startLine: { type: 'number' },
+              endLine: { type: 'number' },
+              totalLines: { type: 'number' },
+              truncated: { type: 'boolean' },
+              defaultWindow: { type: 'boolean' },
+              content: { type: 'string' }
+            },
+            required: ['path', 'startLine', 'endLine', 'totalLines', 'truncated', 'defaultWindow', 'content']
+          }
+        },
+        context: {
+          type: 'object',
+          properties: {
+            ...REPO_CONTEXT_SCHEMA.properties,
+            itemCount: { type: 'number' },
+            includedLines: { type: 'number' }
+          },
+          required: ['chars', 'estimatedTokens', 'itemCount', 'includedLines']
+        }
+      },
+      required: ['workspaceRoot', 'items', 'context']
     }
   },
   {
@@ -101,6 +200,41 @@ export const REPO_TOOLS: ToolDef[] = [
         }
       },
       required: ['query']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        workspaceRoot: { type: 'string' },
+        query: { type: 'string' },
+        searchedFiles: { type: 'array', items: { type: 'string' } },
+        suggestedSpans: { type: 'array', items: SPAN_COORDINATE_SCHEMA },
+        context: {
+          type: 'object',
+          properties: {
+            promptChars: { type: 'number' },
+            estimatedPromptTokens: { type: 'number' },
+            searchSummaryChars: { type: 'number' },
+            readSpanChars: { type: 'number' },
+            estimatedReadSpanTokens: { type: 'number' },
+            suggestedSpanCount: { type: 'number' },
+            selectedFileBytes: { type: 'number' },
+            estimatedFullFileTokens: { type: 'number' },
+            estimatedTokensSavedBySpans: { type: 'number' }
+          },
+          required: [
+            'promptChars',
+            'estimatedPromptTokens',
+            'searchSummaryChars',
+            'readSpanChars',
+            'estimatedReadSpanTokens',
+            'suggestedSpanCount',
+            'selectedFileBytes',
+            'estimatedFullFileTokens',
+            'estimatedTokensSavedBySpans'
+          ]
+        }
+      },
+      required: ['workspaceRoot', 'query', 'searchedFiles', 'suggestedSpans', 'context']
     }
   },
   {
@@ -126,6 +260,26 @@ export const REPO_TOOLS: ToolDef[] = [
           description: 'Optional natural-language goal used to choose the best validation check when none is specified.'
         }
       }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        workspaceRoot: { type: 'string' },
+        language: { type: 'string', enum: ['node', 'python', 'rust', 'go', 'unknown'] },
+        checks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              check: { type: 'string', enum: ['typecheck', 'test', 'build', 'check'] },
+              ok: { type: 'boolean' },
+              output: { type: 'string' }
+            },
+            required: ['check', 'ok', 'output']
+          }
+        }
+      },
+      required: ['workspaceRoot', 'language', 'checks']
     }
   }
 ]

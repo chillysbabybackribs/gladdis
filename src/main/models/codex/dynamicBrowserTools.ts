@@ -36,7 +36,8 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
     namespace: 'gladdis',
     name: tool.name,
     description: tool.description,
-    inputSchema: tool.parameters as unknown as JsonValue
+    inputSchema: tool.parameters as unknown as JsonValue,
+    ...(tool.outputSchema ? { outputSchema: tool.outputSchema as unknown as JsonValue } : {})
   })) as JsonValue[]
 
 // The single source of truth — for EVERY provider, not just Codex — for the hard

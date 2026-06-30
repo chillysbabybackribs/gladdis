@@ -19,7 +19,12 @@ describe('ClaudeCodeBridgeServer', () => {
       imageBase64: null,
       structuredContent: {
         workspaceRoot: '/tmp/workspace',
-        packageName: 'demo'
+        packageManager: 'npm',
+        packageName: 'demo',
+        scripts: ['build', 'test'],
+        keyFiles: ['package.json'],
+        topDirectories: ['src'],
+        entryPoints: ['src/main.ts']
       }
     }))
     const bridge = new ClaudeCodeBridgeServer(
@@ -67,6 +72,17 @@ describe('ClaudeCodeBridgeServer', () => {
 
     const tools = await client.listTools()
     expect(tools.tools.map((tool) => tool.name)).toContain('read_page')
+    expect(tools.tools.find((tool) => tool.name === 'repo_overview')).toEqual(
+      expect.objectContaining({
+        outputSchema: expect.objectContaining({
+          type: 'object',
+          properties: expect.objectContaining({
+            workspaceRoot: expect.objectContaining({ type: 'string' }),
+            packageName: expect.anything()
+          })
+        })
+      })
+    )
 
     const result = await client.callTool({
       name: 'repo_overview',
@@ -85,15 +101,13 @@ describe('ClaudeCodeBridgeServer', () => {
     )
     expect(result.content).toEqual([{ type: 'text', text: 'tool ok' }])
     expect(result.structuredContent).toEqual({
-      tool: 'repo_overview',
-      ok: true,
-      text: 'tool ok',
-      hasImage: false,
-      arguments: { focus: 'bridge test' },
-      data: {
-        workspaceRoot: '/tmp/workspace',
-        packageName: 'demo'
-      }
+      workspaceRoot: '/tmp/workspace',
+      packageManager: 'npm',
+      packageName: 'demo',
+      scripts: ['build', 'test'],
+      keyFiles: ['package.json'],
+      topDirectories: ['src'],
+      entryPoints: ['src/main.ts']
     })
 
     await transport.close()

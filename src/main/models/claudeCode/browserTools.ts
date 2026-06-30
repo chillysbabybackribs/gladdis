@@ -34,7 +34,8 @@ export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
   .map((tool) => ({
     name: tool.name,
     description: tool.description,
-    inputSchema: tool.parameters
+    inputSchema: tool.parameters,
+    outputSchema: tool.outputSchema
   }))
 
 export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =

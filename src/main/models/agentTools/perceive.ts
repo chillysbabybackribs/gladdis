@@ -1,5 +1,21 @@
 import type { ToolDef } from '../browserTools'
 
+const READ_PAGE_CACHE_SCHEMA = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', enum: ['hit', 'miss'] },
+    capturedAt: { type: 'number' },
+    hits: { type: 'number' },
+    misses: { type: 'number' },
+    expired: { type: 'number' },
+    evictions: { type: 'number' },
+    size: { type: 'number' },
+    limit: { type: 'number' },
+    ttlMs: { type: 'number' }
+  },
+  required: ['status', 'capturedAt', 'hits', 'misses', 'expired', 'evictions', 'size', 'limit', 'ttlMs']
+} as const
+
 /**
  * PERCEIVE — `read_page`. The LLM calls this to read the current page.
  * Internally runs the deterministic PageExtractor and formats through
@@ -22,6 +38,16 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
           description: 'If true, only include actions currently visible in the viewport.'
         }
       }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        pageUrl: { type: 'string' },
+        focus: { type: 'string' },
+        viewportOnly: { type: 'boolean' },
+        cache: READ_PAGE_CACHE_SCHEMA
+      },
+      required: ['pageUrl', 'viewportOnly', 'cache']
     }
   },
   {
@@ -72,6 +98,15 @@ export const CAPTURE_TOOLS: ToolDef[] = [
           description: 'If true, capture the entire scrollable page instead of just the viewport.'
         }
       }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', const: 'active_tab' },
+        fullPage: { type: 'boolean' },
+        mimeType: { type: 'string', const: 'image/png' }
+      },
+      required: ['target', 'fullPage', 'mimeType']
     }
   },
   {
@@ -79,6 +114,14 @@ export const CAPTURE_TOOLS: ToolDef[] = [
     description:
       'Capture the full Gladdis app window (chat + browser) as an image. ' +
       'Use this for complete app state checks.',
-    parameters: { type: 'object', properties: {} }
+    parameters: { type: 'object', properties: {} },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string', const: 'app_window' },
+        mimeType: { type: 'string', const: 'image/png' }
+      },
+      required: ['target', 'mimeType']
+    }
   }
 ]

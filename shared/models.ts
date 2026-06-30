@@ -1,7 +1,7 @@
 // 'openai' is a key slot for the text-to-speech feature (audible replies)
 // and now also a fully supported chat model provider for modern OpenAI models.
 // 'grok' (xAI) is a real chat provider, reached over xAI's OpenAI-compatible API.
-export type Provider = 'anthropic' | 'google' | 'codex' | 'claudecode' | 'openai' | 'grok'
+export type Provider = 'anthropic' | 'google' | 'codex' | 'claudecode' | 'cursor' | 'openai' | 'grok'
 
 /**
  * Whether the model has been seen working against its provider as of the last
@@ -36,6 +36,20 @@ export const MODELS: ModelOption[] = [
   { id: 'claude-code-opus', label: 'Claude Code · Opus', provider: 'claudecode', availability: 'verified' },
   { id: 'claude-code-sonnet', label: 'Claude Code · Sonnet', provider: 'claudecode', availability: 'verified' },
   { id: 'claude-code-haiku', label: 'Claude Code · Haiku 4.5', provider: 'claudecode', availability: 'verified' },
+  // Cursor routes these to the named vendor model through the Cursor Agent CLI's
+  // `--model` flag (its own billing/agent loop, not our API providers). IDs are
+  // Cursor-native names (effort/thinking baked in) from `agent models`, not our
+  // API-provider IDs. A curated 10 to start; the CLI exposes ~60 for this account.
+  { id: 'composer-2.5', label: 'Cursor · Composer 2.5', provider: 'cursor', availability: 'verified' },
+  { id: 'claude-opus-4-8-high', label: 'Cursor · Opus 4.8', provider: 'cursor', availability: 'verified' },
+  { id: 'claude-opus-4-8-thinking-high', label: 'Cursor · Opus 4.8 Thinking', provider: 'cursor', availability: 'verified' },
+  { id: 'claude-4.6-sonnet-medium', label: 'Cursor · Sonnet 4.6', provider: 'cursor', availability: 'verified' },
+  { id: 'gpt-5.5-medium', label: 'Cursor · GPT-5.5', provider: 'cursor', availability: 'verified' },
+  { id: 'gpt-5.5-high', label: 'Cursor · GPT-5.5 High', provider: 'cursor', availability: 'verified' },
+  { id: 'gpt-5.4-high', label: 'Cursor · GPT-5.4 High', provider: 'cursor', availability: 'verified' },
+  { id: 'gemini-3.1-pro', label: 'Cursor · Gemini 3.1 Pro', provider: 'cursor', availability: 'verified' },
+  { id: 'gemini-3.5-flash', label: 'Cursor · Gemini 3.5 Flash', provider: 'cursor', availability: 'verified' },
+  { id: 'grok-4.3', label: 'Cursor · Grok 4.3', provider: 'cursor', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview-customtools', label: 'Gemini 3.1 Pro Preview Custom Tools', provider: 'google', availability: 'verified' },

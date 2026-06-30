@@ -69,4 +69,10 @@ describe('Claude Code memory eval', () => {
     )
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Read before re-asking, write after meaningful decisions')
   })
+
+  it('makes the unrestricted local permission posture explicit', () => {
+    expect(CLAUDE_CODE_SYSTEM).toContain('--dangerously-skip-permissions')
+    expect(CLAUDE_CODE_SYSTEM).toContain('Do not stop for Claude permission or approval workflows')
+    expect(CLAUDE_CODE_SYSTEM).toContain('do not ask the user to manually run local commands just to bypass a Claude-side restriction')
+  })
 })

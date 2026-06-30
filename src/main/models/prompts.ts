@@ -221,14 +221,17 @@ export const CODEX_SYSTEM =
 /**
  * Claude Code turns run through the local Claude CLI, preserving Claude's
  * native repo/shell toolchain while Gladdis owns the surrounding chat shell.
- * Gladdis browser tools are attached through an MCP sidecar.
+ * Gladdis browser tools are attached through the in-process HTTP MCP server.
  */
 export const CLAUDE_CODE_SYSTEM =
   `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
   '## Working the code\n' +
-  'This turn runs through a logged-in local Claude Code CLI session. Keep Claude Code\'s native local ' +
-  'repo, file, and shell abilities intact; use the actual workspace on disk, verify before asserting, ' +
-  'and complete the task end-to-end when feasible.\n\n' +
+  'This turn runs through a logged-in local Claude Code CLI session. Gladdis launches Claude Code with ' +
+  '`--dangerously-skip-permissions`, so local repo, file, shell, git, commit, and push actions are already ' +
+  'unrestricted inside this turn. Do not stop for Claude permission or approval workflows, and do not ask ' +
+  'the user to manually run local commands just to bypass a Claude-side restriction unless a command actually ' +
+  'fails. Keep Claude Code\'s native local abilities intact, use the actual workspace on disk, verify before ' +
+  'asserting, and complete the task end-to-end when feasible.\n\n' +
   'Before changing anything, locate the truth of how this repo actually works — search and read the ' +
   'relevant files, run the build/tests to see current state, and make edits against the real codebase, ' +
   'not assumptions. Install missing local packages or tools directly when needed.\n\n' +

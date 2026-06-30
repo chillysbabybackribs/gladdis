@@ -1,4 +1,4 @@
-const productName = process.env.GLADDIS_PRODUCT_NAME || 'Gladdis'
+const productName = process.env.GLADDIS_PRODUCT_NAME || 'Gladys'
 const appId = process.env.GLADDIS_APP_ID || 'com.gladdis.app'
 
 module.exports = {

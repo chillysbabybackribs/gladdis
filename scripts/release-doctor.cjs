@@ -15,7 +15,7 @@ function printStatus(label, ok, detail) {
 
 console.log('Release doctor')
 console.log(`Version: ${pkg.version}`)
-console.log(`Product name: ${process.env.GLADDIS_PRODUCT_NAME || 'Gladdis'}${process.env.GLADDIS_PRODUCT_NAME ? ' (env override)' : ' (default placeholder)'}`)
+console.log(`Product name: ${process.env.GLADDIS_PRODUCT_NAME || 'Gladys'}${process.env.GLADDIS_PRODUCT_NAME ? ' (env override)' : ' (default placeholder)'}`)
 console.log(`App ID: ${process.env.GLADDIS_APP_ID || 'com.gladdis.app'}${process.env.GLADDIS_APP_ID ? ' (env override)' : ' (default placeholder)'}`)
 console.log('')
 

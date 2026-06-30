@@ -1,5 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { join } from 'node:path'
 import { GoogleGenAI } from '@google/genai'
 import type { KeyStore } from './KeyStore'
 import {
@@ -169,7 +168,7 @@ export class ChatService {
   private codexClient: CodexClient | null = null
   /** Lazily-created Claude Code driver (spawns the local CLI per turn). */
   private claudeCodeClient: ClaudeCodeClient | null = null
-  /** Lazily-created localhost bridge from Claude's MCP subprocess to BrowserTools. */
+  /** Lazily-created local HTTP MCP server for Claude Code browser/context tools. */
   private claudeCodeBridgeServer: ClaudeCodeBridgeServer | null = null
   private dynamicModels = new Map<string, ModelOption>()
   private readonly toolStarts = new Map<string, number>()
@@ -346,8 +345,7 @@ export class ChatService {
                   ...options,
                   conversationId: null
                 })
-            },
-            join(__dirname, 'claude-code-mcp.js')
+            }
           )
       )
     }

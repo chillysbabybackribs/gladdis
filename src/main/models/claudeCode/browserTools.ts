@@ -1,6 +1,8 @@
 import { AGENT_TOOLS } from '../agentTools'
 import { GLADDIS_WEB_TOOLS_RULE } from '../codex/dynamicBrowserTools'
 
+export const CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME = 'gladdis'
+
 export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
   'recall_history',
   'repo_overview',

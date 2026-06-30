@@ -1,8 +1,16 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import type { BrowserTools, ToolContext } from '../browserTools'
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { ChatStreamEvent } from '../../../../shared/types'
+import {
+  CLAUDE_CODE_BROWSER_TOOL_NAMES,
+  CLAUDE_CODE_BROWSER_TOOLS,
+  CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME
+} from './browserTools'
 
 interface BridgeSession {
   conversationId: string | null
@@ -17,9 +25,23 @@ interface BridgeRegistration {
   mcpConfig: string
 }
 
+interface ActiveTransport {
+  handle: (req: IncomingMessage, res: ServerResponse, parsedBody?: unknown) => Promise<void>
+  close: () => Promise<void>
+}
+
+const MCP_PATH = '/mcp'
+const GUARDRAIL_GUIDANCE =
+  'Use the Gladdis MCP tools for browser work: search, fetch_page, navigate, browse_task, read_page, ' +
+  'grep_page, grep_click, grep_type, screenshot, or screenshot_app. ' +
+  'Never use native shell/CLI browser commands (google-chrome, chromium, playwright, puppeteer, xdg-open on URLs, ' +
+  'curl/wget against localhost:9222) - they bypass Gladdis and the user cannot see them.'
+
 export class ClaudeCodeBridgeServer {
   private server = createServer((req, res) => void this.handle(req, res))
   private sessions = new Map<string, BridgeSession>()
+  private sessionIdsByToken = new Map<string, Set<string>>()
+  private transports = new Map<string, ActiveTransport>()
   private ready: Promise<void> | null = null
   private port: number | null = null
 
@@ -28,33 +50,51 @@ export class ClaudeCodeBridgeServer {
     private readonly emit: (event: ChatStreamEvent) => void
   ) {}
 
-  async registerSession(session: BridgeSession, mcpScriptPath: string): Promise<BridgeRegistration> {
+  async registerSession(session: BridgeSession): Promise<BridgeRegistration> {
     await this.ensureStarted()
     const token = randomUUID()
     this.sessions.set(token, session)
     return {
       dispose: () => {
         this.sessions.delete(token)
+        const sessionIds = this.sessionIdsByToken.get(token)
+        this.sessionIdsByToken.delete(token)
+        for (const sessionId of sessionIds ?? []) {
+          const transport = this.transports.get(sessionId)
+          this.transports.delete(sessionId)
+          void transport?.close()
+        }
       },
-      env: {
-        ELECTRON_RUN_AS_NODE: '1',
-        GLADDIS_CLAUDE_BRIDGE_URL: `http://127.0.0.1:${this.port}`,
-        GLADDIS_CLAUDE_BRIDGE_TOKEN: token
-      },
+      env: {},
       mcpConfig: JSON.stringify({
         mcpServers: {
-          gladdis: {
-            command: process.execPath,
-            args: [mcpScriptPath],
-            env: {
-              ELECTRON_RUN_AS_NODE: '1',
-              GLADDIS_CLAUDE_BRIDGE_URL: `http://127.0.0.1:${this.port}`,
-              GLADDIS_CLAUDE_BRIDGE_TOKEN: token
+          [CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]: {
+            type: 'http',
+            url: `http://127.0.0.1:${this.port}${MCP_PATH}`,
+            headers: {
+              Authorization: `Bearer ${token}`
             }
           }
         }
       })
     }
+  }
+
+  async close(): Promise<void> {
+    this.sessions.clear()
+    this.sessionIdsByToken.clear()
+    const transports = [...this.transports.values()]
+    this.transports.clear()
+    await Promise.allSettled(transports.map((transport) => transport.close()))
+    if (this.port === null) return
+    await new Promise<void>((resolve, reject) => {
+      this.server.close((error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
+    this.ready = null
+    this.port = null
   }
 
   private async ensureStarted(): Promise<void> {
@@ -77,25 +117,46 @@ export class ClaudeCodeBridgeServer {
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
-      if (req.method !== 'POST' || req.url !== '/call') {
+      if (requestPath(req) !== MCP_PATH) {
         this.json(res, 404, { error: 'Not found' })
         return
       }
-      const body = record(await readJson(req))
-      const token = typeof body.token === 'string' ? body.token : ''
-      const name = typeof body.name === 'string' ? body.name : ''
-      const args = record(body.arguments)
-      const session = this.authorize(token)
-      if (!session) {
+
+      const sessionId = headerValue(req.headers['mcp-session-id'])
+      const transport = sessionId ? this.transports.get(sessionId) : null
+
+      if (transport) {
+        await transport.handle(req, res)
+        return
+      }
+
+      if (req.method !== 'POST') {
+        this.json(res, 400, { error: 'Invalid or missing session ID' })
+        return
+      }
+
+      const body = await readJson(req)
+      if (!isInitializeRequest(body)) {
+        this.json(res, 400, {
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'Bad Request: No valid session ID provided'
+          },
+          id: null
+        })
+        return
+      }
+
+      const token = bearerToken(req)
+      const session = token ? this.authorize(token) : null
+      if (!session || !token) {
         this.json(res, 401, { error: 'Unauthorized' })
         return
       }
-      const outcome = await this.tools.run(name, args, this.toolContext(session))
-      this.json(res, 200, {
-        ok: outcome.ok,
-        text: outcome.text,
-        imageBase64: outcome.imageBase64 ?? null
-      })
+
+      const freshTransport = await this.createTransport(token, session)
+      await freshTransport.handle(req, res, body)
     } catch (error) {
       this.json(res, 500, {
         ok: false,
@@ -145,10 +206,110 @@ export class ClaudeCodeBridgeServer {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
     res.end(JSON.stringify(body))
   }
+
+  private async createTransport(token: string, session: BridgeSession): Promise<{
+    handle: (req: IncomingMessage, res: ServerResponse, parsedBody?: unknown) => Promise<void>
+  }> {
+    let transport: StreamableHTTPServerTransport | null = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sessionId) => {
+        const sessionIds = this.sessionIdsByToken.get(token) ?? new Set<string>()
+        sessionIds.add(sessionId)
+        this.sessionIdsByToken.set(token, sessionIds)
+        if (transport) {
+          this.transports.set(sessionId, {
+            handle: async (req, res, parsedBody) => {
+              await transport!.handleRequest(req, res, parsedBody)
+            },
+            close: () => transport!.close()
+          })
+        }
+      }
+    })
+
+    transport.onclose = () => {
+      const sessionId = transport?.sessionId
+      if (!sessionId) return
+      this.transports.delete(sessionId)
+      const sessionIds = this.sessionIdsByToken.get(token)
+      sessionIds?.delete(sessionId)
+      if (sessionIds && sessionIds.size === 0) this.sessionIdsByToken.delete(token)
+    }
+
+    const server = this.createMcpServer(session)
+    await server.connect(transport)
+
+    return {
+      handle: async (req, res, parsedBody) => {
+        await transport!.handleRequest(req, res, parsedBody)
+      }
+    }
+  }
+
+  private createMcpServer(session: BridgeSession): Server {
+    const server = new Server(
+      { name: 'gladdis-browser-tools', version: '1.0.0' },
+      { capabilities: { tools: { listChanged: false } } }
+    )
+
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: CLAUDE_CODE_BROWSER_TOOLS.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema
+      }))
+    }))
+
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const toolName = request.params.name
+      if (!CLAUDE_CODE_BROWSER_TOOL_NAMES.has(toolName)) {
+        return {
+          content: [{ type: 'text' as const, text: `Unknown Gladdis tool "${toolName}". ${GUARDRAIL_GUIDANCE}` }],
+          isError: true
+        }
+      }
+
+      const outcome = await this.tools.run(toolName, record(request.params.arguments), this.toolContext(session))
+      return {
+        content: [
+          ...(outcome.text ? [{ type: 'text' as const, text: outcome.text }] : []),
+          ...(outcome.imageBase64
+            ? [{
+                type: 'image' as const,
+                data: outcome.imageBase64,
+                mimeType: 'image/png'
+              }]
+            : [])
+        ],
+        isError: outcome.ok === false
+      }
+    })
+
+    return server
+  }
 }
 
 function record(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
+}
+
+function requestPath(req: IncomingMessage): string {
+  return (req.url ?? '').split('?')[0] || '/'
+}
+
+function headerValue(value: string | string[] | undefined): string | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null
+}
+
+function bearerToken(req: IncomingMessage): string | null {
+  const raw = headerValue(req.headers.authorization)?.trim()
+  if (!raw) return null
+  const match = /^Bearer\s+(.+)$/i.exec(raw)
+  return match?.[1]?.trim() || null
+}
+
+function isInitializeRequest(value: unknown): boolean {
+  return record(value).method === 'initialize'
 }
 
 function safeEqual(left: string, right: string): boolean {

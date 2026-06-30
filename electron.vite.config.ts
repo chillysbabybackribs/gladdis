@@ -6,10 +6,7 @@ export default defineConfig({
   main: {
     build: {
       rollupOptions: {
-        input: {
-          index: resolve(__dirname, 'src/main/index.ts'),
-          'claude-code-mcp': resolve(__dirname, 'src/main/models/claudeCode/gladdisMcpServer.ts')
-        },
+        input: { index: resolve(__dirname, 'src/main/index.ts') },
         // @lydell/node-pty loads a platform-specific .node binary at runtime
         // (require('@lydell/node-pty-${platform}-${arch}')), which Rollup cannot
         // bundle. Externalize it (and its platform subpackages) so the main

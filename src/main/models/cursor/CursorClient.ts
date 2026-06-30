@@ -1059,6 +1059,84 @@ function extractToolResultText(
     return formatToolError(detail ? prefixScope(command, detail) : command || 'Command failed')
   }
 
+  if (toolName === 'edit_file' || toolName === 'write_file') {
+    const path = typeof argRecord.path === 'string' ? argRecord.path.trim() : scope
+    const detail = compactPreview(
+      firstNonEmptyText([
+        resultRecord.error,
+        resultRecord.message,
+        resultRecord.summary,
+        resultRecord.output,
+        resultRecord.text,
+        resultRecord.content
+      ])
+    )
+    if (detail) return ok ? detail : formatToolError(path ? prefixScope(path, detail) : detail)
+    if (ok) return `${toolName === 'edit_file' ? 'Edited' : 'Wrote'} ${path || 'file'}`
+    return formatToolError(path || `${toolName} failed`)
+  }
+
+  if (toolName === 'read_file') {
+    const path = typeof argRecord.path === 'string' ? argRecord.path.trim() : scope
+    const startLine = typeof argRecord.start_line === 'number' ? argRecord.start_line : undefined
+    const endLine = typeof argRecord.end_line === 'number' ? argRecord.end_line : undefined
+    const detail = compactPreview(
+      firstNonEmptyText([
+        resultRecord.error,
+        resultRecord.message,
+        resultRecord.summary,
+        resultRecord.description,
+        resultRecord.title
+      ])
+    )
+    if (detail) return ok ? detail : formatToolError(path ? prefixScope(path, detail) : detail)
+    if (ok) {
+      if (path && startLine && endLine) return `Read ${path} (${startLine}-${endLine})`
+      return path ? `Read ${path}` : 'Read file'
+    }
+    return formatToolError(path || 'read_file failed')
+  }
+
+  if (toolName === 'search_files') {
+    const query = typeof argRecord.query === 'string' ? argRecord.query.trim() : scope
+    const hitCount = searchHitCount(resultRecord)
+    const detail = compactPreview(
+      firstNonEmptyText([
+        resultRecord.error,
+        resultRecord.message,
+        resultRecord.summary,
+        resultRecord.output,
+        resultRecord.text,
+        resultRecord.description
+      ])
+    )
+    if (detail) return ok ? detail : formatToolError(query ? prefixScope(query, detail) : detail)
+    if (ok) {
+      if (typeof hitCount === 'number') {
+        return query ? `Search found ${hitCount} hit(s) for ${query}` : `Search found ${hitCount} hit(s)`
+      }
+      return query ? `Searched for ${query}` : 'Search completed.'
+    }
+    return formatToolError(query || 'search_files failed')
+  }
+
+  if (toolName === 'list_dir') {
+    const path = typeof argRecord.path === 'string' ? argRecord.path.trim() : scope
+    const detail = compactPreview(
+      firstNonEmptyText([
+        resultRecord.error,
+        resultRecord.message,
+        resultRecord.summary,
+        resultRecord.output,
+        resultRecord.text,
+        resultRecord.description
+      ])
+    )
+    if (detail) return ok ? detail : formatToolError(path ? prefixScope(path, detail) : detail)
+    if (ok) return path ? `Listed ${path}` : 'Listed directory'
+    return formatToolError(path || 'list_dir failed')
+  }
+
   const detail = compactPreview(
     firstNonEmptyText([
       resultRecord.error,
@@ -1097,6 +1175,15 @@ function compactPreview(text: string): string {
   const normalized = text.replace(/\s+/g, ' ').trim()
   if (!normalized) return ''
   return normalized.length > 280 ? normalized.slice(0, 279) + '…' : normalized
+}
+
+function searchHitCount(resultRecord: Record<string, unknown>): number | undefined {
+  if (Array.isArray(resultRecord.hits)) return resultRecord.hits.length
+  if (Array.isArray(resultRecord.matches)) return resultRecord.matches.length
+  if (typeof resultRecord.hitCount === 'number' && Number.isFinite(resultRecord.hitCount)) return resultRecord.hitCount
+  if (typeof resultRecord.count === 'number' && Number.isFinite(resultRecord.count)) return resultRecord.count
+  if (typeof resultRecord.total === 'number' && Number.isFinite(resultRecord.total)) return resultRecord.total
+  return undefined
 }
 
 async function withWorkspaceMcpLock<T>(workdir: string, task: () => Promise<T>): Promise<T> {

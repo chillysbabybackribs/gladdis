@@ -249,6 +249,50 @@ Tip: use --model <id> to switch.
       })
     ).toBe('[tool error] npm test -- CursorClient.test.ts: FAIL CursorClient.test.ts expected true to be false')
   })
+
+  it('keeps successful edit previews scoped to the touched file', () => {
+    expect(
+      cursorToolPreview({
+        editToolCall: {
+          args: { path: 'src/main/index.ts' },
+          result: { success: true }
+        }
+      })
+    ).toBe('Edited src/main/index.ts')
+  })
+
+  it('surfaces failed no-op edits as actionable tool errors', () => {
+    expect(
+      cursorToolPreview({
+        editToolCall: {
+          args: { path: 'src/main/index.ts' },
+          result: { success: false, message: 'old_string equals new_string; nothing to change' }
+        }
+      })
+    ).toBe('[tool error] src/main/index.ts: old_string equals new_string; nothing to change')
+  })
+
+  it('avoids dumping raw file contents for successful reads', () => {
+    expect(
+      cursorToolPreview({
+        readToolCall: {
+          args: { path: 'src/main/index.ts', start_line: 10, end_line: 30 },
+          result: { content: 'very long file body that should not become the preview' }
+        }
+      })
+    ).toBe('Read src/main/index.ts (10-30)')
+  })
+
+  it('summarizes successful searches instead of falling back to vague text', () => {
+    expect(
+      cursorToolPreview({
+        searchToolCall: {
+          args: { query: 'runCursorWithRepairLoop' },
+          result: { hits: [{ path: 'src/main/models/ChatService.ts' }, { path: 'src/main/models/ChatService.test.ts' }] }
+        }
+      })
+    ).toBe('Search found 2 hit(s) for runCursorWithRepairLoop')
+  })
 })
 
 describe('isMcpConfigWarm', () => {

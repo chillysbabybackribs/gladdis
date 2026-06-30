@@ -12,6 +12,7 @@ import { ModelCallLedger } from './models/ModelCallLedger'
 import { AutoDreamScheduler } from './models/memory/AutoDreamScheduler'
 import { IPC } from '../../shared/types'
 import type { PtyHost } from './terminal/PtyHost'
+import { ChatStreamIpcBatcher } from './chatStreamIpcBatcher'
 
 /**
  * Lazy service factory. Services are created on-demand to reduce startup memory
@@ -29,6 +30,11 @@ export class ServiceRegistry {
   private _chat: ChatService | null = null
   private _autoDream: AutoDreamScheduler | null = null
   private _ptyHost: PtyHost | null = null
+  private readonly chatStreamBatcher = new ChatStreamIpcBatcher((event) => {
+    if (!this.uiView.webContents.isDestroyed()) {
+      this.uiView.webContents.send(IPC.CHAT_STREAM, event)
+    }
+  })
 
   constructor(
     private readonly win: BaseWindow,
@@ -111,11 +117,7 @@ export class ServiceRegistry {
     if (!this._chat) {
       this._chat = new ChatService(
         this.keys,
-        (e) => {
-          if (!this.uiView.webContents.isDestroyed()) {
-            this.uiView.webContents.send(IPC.CHAT_STREAM, e)
-          }
-        },
+        (e) => this.chatStreamBatcher.push(e),
         this.tools,
         this.audit,
         this.chats,

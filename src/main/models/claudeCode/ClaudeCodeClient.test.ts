@@ -184,4 +184,90 @@ describe('ClaudeCodeClient', () => {
       ])
     )
   })
+
+  it('parses fallback assistant tool_use blocks with structured args when no live chip was emitted', async () => {
+    installExecFileProbe()
+
+    spawnMock.mockImplementation(() => {
+      const child = new FakeChildProcess()
+
+      queueMicrotask(() => {
+        emitJsonLine(child.stdout, {
+          type: 'assistant',
+          session_id: 'session-456',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_repo',
+                name: 'memory_read',
+                input: {
+                  scope: 'workspace',
+                  keys: ['release_channel']
+                }
+              }
+            ]
+          }
+        })
+        emitJsonLine(child.stdout, {
+          type: 'result',
+          session_id: 'session-456',
+          result: 'Used the saved release channel.'
+        })
+        child.stdout.end()
+        child.stderr.end()
+        child.exitCode = 0
+        child.emit('close', 0, null)
+      })
+
+      return child
+    })
+
+    const { ClaudeCodeClient } = await import('./ClaudeCodeClient')
+    const emitted: ChatStreamEvent[] = []
+    const client = new ClaudeCodeClient(
+      (event) => emitted.push(event),
+      () => '/tmp/workspace',
+      {
+        get: vi.fn(() => null),
+        set: vi.fn()
+      },
+      async () => ({
+        dispose: vi.fn(),
+        env: {},
+        mcpConfig: JSON.stringify({
+          mcpServers: {
+            gladdis: {
+              type: 'http',
+              url: 'http://127.0.0.1:43123/mcp',
+              headers: { Authorization: 'Bearer test-token' }
+            }
+          }
+        })
+      })
+    )
+
+    await client.send(
+      {
+        requestId: 'req-2',
+        conversationId: 'conv-2',
+        modelId: 'claude-code',
+        messages: []
+      } as any,
+      new AbortController().signal,
+      CLAUDE_CODE_SYSTEM,
+      'Reuse saved workspace decisions before you continue.'
+    )
+
+    expect(emitted).toContainEqual({
+      requestId: 'req-2',
+      type: 'tool_call',
+      tool: 'gladdis.memory_read',
+      args: {
+        scope: 'workspace',
+        keys: ['release_channel']
+      },
+      callId: 'toolu_repo'
+    })
+  })
 })

@@ -15,6 +15,15 @@ function findAssistantIndex(messages: Message[], assistantMessageId?: string | n
   return -1
 }
 
+function commitLiveText(message: Message): Message {
+  if (!message.liveText) return message
+  return {
+    ...message,
+    liveText: undefined,
+    parts: appendText(message.parts ?? [], message.liveText)
+  }
+}
+
 export function applyStreamEventToMessages(
   messages: Message[],
   event: ChatStreamEvent,
@@ -23,7 +32,8 @@ export function applyStreamEventToMessages(
   const targetId = event.assistantMessageId ?? fallbackAssistantMessageId ?? null
   const index = findAssistantIndex(messages, targetId)
   if (index === -1) return messages
-  const message = messages[index]
+  const original = messages[index]
+  const message = event.type === 'delta' ? original : commitLiveText(original)
   if (message.role !== 'assistant') return messages
   const parts = message.parts ?? []
   const out = messages.slice()
@@ -32,7 +42,7 @@ export function applyStreamEventToMessages(
     out[index] = {
       ...message,
       text: message.text + event.text,
-      parts: appendText(parts, event.text)
+      liveText: (message.liveText ?? '') + event.text
     }
     return out
   }
@@ -43,6 +53,10 @@ export function applyStreamEventToMessages(
       text: message.text + note,
       parts: appendText(parts, note)
     }
+    return out
+  }
+  if (event.type === 'done') {
+    out[index] = message
     return out
   }
   if (event.type === 'contract_trace') {

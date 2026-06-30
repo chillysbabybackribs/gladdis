@@ -64,7 +64,48 @@ describe('applyStreamEventToMessages', () => {
     })
 
     expect(next[0].text).toBe('alpha tail')
-    expect(next[0].parts).toEqual([{ kind: 'text', text: 'alpha tail' }])
+    expect(next[0].parts).toEqual([{ kind: 'text', text: 'alpha' }])
+    expect(next[0].liveText).toBe(' tail')
+  })
+
+  it('keeps streaming prose out of parts until a structural event needs ordering', () => {
+    const messages: Message[] = [
+      { id: 'assistant-a', role: 'assistant', text: 'alpha', parts: [{ kind: 'text', text: 'alpha' }] }
+    ]
+
+    const withDelta = applyStreamEventToMessages(messages, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'delta',
+      text: ' beta'
+    })
+
+    expect(withDelta[0].parts).toEqual([{ kind: 'text', text: 'alpha' }])
+    expect(withDelta[0].liveText).toBe(' beta')
+
+    const withTool = applyStreamEventToMessages(withDelta, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'tool_call',
+      tool: 'memory_read',
+      args: { scope: 'workspace' },
+      callId: 'tool-1'
+    })
+
+    expect(withTool[0].parts).toEqual([
+      { kind: 'text', text: 'alpha beta' },
+      {
+        kind: 'tool',
+        tool: {
+          callId: 'tool-1',
+          tool: 'memory_read',
+          args: { scope: 'workspace' },
+          status: 'running',
+          startedAt: undefined
+        }
+      }
+    ])
+    expect(withTool[0].liveText).toBeUndefined()
   })
 
   it('keeps tool timing on the matching assistant message', () => {
@@ -233,5 +274,27 @@ describe('applyStreamEventToMessages', () => {
         artifactId: undefined
       }
     ])
+  })
+
+  it('materializes any trailing live text when the turn ends', () => {
+    const messages: Message[] = [
+      {
+        id: 'assistant-a',
+        role: 'assistant',
+        text: 'alpha beta',
+        parts: [{ kind: 'text', text: 'alpha' }],
+        liveText: ' beta'
+      }
+    ]
+
+    const next = applyStreamEventToMessages(messages, {
+      requestId: 'req-a',
+      assistantMessageId: 'assistant-a',
+      type: 'done',
+      text: 'alpha beta'
+    } as any)
+
+    expect(next[0].parts).toEqual([{ kind: 'text', text: 'alpha beta' }])
+    expect(next[0].liveText).toBeUndefined()
   })
 })

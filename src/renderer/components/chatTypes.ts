@@ -69,6 +69,12 @@ export interface Message {
   role: 'user' | 'assistant'
   /** Flattened text of the turn, kept in sync with `parts` for persistence. */
   text: string
+  /**
+   * Trailing in-flight prose for the current streaming segment. Keeping this
+   * separate avoids cloning the full `parts` array on every delta once a turn
+   * has accumulated lots of tool/activity blocks.
+   */
+  liveText?: string
   /** Optional context line shown under a user message (the attached page). */
   meta?: string
   /** Ordered prose/tool fragments for an assistant turn (live + new saves). */

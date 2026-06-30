@@ -106,6 +106,9 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       }
     })
     flushAll()
+    if (message.liveText) {
+      blocks.push(<MarkdownBlock key="live-text" text={message.liveText} />)
+    }
     return <>{blocks}</>
   }
 
@@ -114,8 +117,8 @@ export const ChatMessageBody = memo(function ChatMessageBody({ message }: { mess
       {message.tools && message.tools.length > 0 && (
         <ToolRun tools={message.tools} />
       )}
-      {message.text ? (
-        <MarkdownBlock text={message.text} />
+      {(message.liveText || message.text) ? (
+        <MarkdownBlock text={message.liveText || message.text} />
       ) : (
         !(message.tools && message.tools.length) && (
           <span className="typing">

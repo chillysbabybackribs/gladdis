@@ -59,14 +59,20 @@
               >
             </div>
           </div>
-          <div class="hero-mobile-video-shell">
-            <video
-              class="hero-mobile-video"
-              controls
-              playsinline
-              preload="metadata"
-              poster="./assets/gladys-mobile-preview-poster.jpg"
-            >
+        <div class="hero-mobile-video-shell">
+          <button
+            class="hero-mobile-video-cover"
+            type="button"
+            data-mobile-video-cover
+            aria-label="Play Gladys preview video"
+          ></button>
+          <video
+            class="hero-mobile-video"
+            data-mobile-video
+            controls
+            playsinline
+            preload="metadata"
+          >
               <source src="./assets/gladys-mobile-preview.mp4" type="video/mp4" />
               Your browser does not support the Gladys preview video.
             </video>

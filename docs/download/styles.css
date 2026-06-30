@@ -167,6 +167,22 @@ main {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
 }
 
+.hero-mobile-video-cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border: 0;
+  padding: 0;
+  background:
+    radial-gradient(circle at top, rgba(68, 147, 248, 0.12), transparent 42%),
+    #0a0a0b;
+  cursor: pointer;
+}
+
+.hero-mobile-video-shell.is-playing .hero-mobile-video-cover {
+  display: none;
+}
+
 .hero-mobile-video {
   display: block;
   width: 100%;
@@ -175,6 +191,13 @@ main {
   border: 0;
   background: #070708;
   object-fit: cover;
+  opacity: 1;
+  transition: opacity 160ms ease;
+}
+
+.hero-mobile-video-shell:not(.is-playing) .hero-mobile-video {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .hero-mobile-copy {
@@ -1601,6 +1624,10 @@ main {
     margin: 0 auto;
     border-radius: 18px;
     box-shadow: 0 18px 44px rgba(0, 0, 0, 0.3);
+  }
+
+  .hero-mobile-video-cover {
+    border-radius: 18px;
   }
 
   .hero-mobile-video {

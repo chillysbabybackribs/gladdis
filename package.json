@@ -2,6 +2,7 @@
   "name": "gladdis",
   "version": "0.1.0",
   "description": "CDP-owned browser + chat desktop app (Cursor-dark themed)",
+  "desktopName": "gladys",
   "main": "out/main/index.js",
   "author": "dp",
   "license": "MIT",

@@ -57,6 +57,11 @@ module.exports = {
   },
   linux: {
     category: 'Development',
+    executableName: 'gladys',
+    syncDesktopName: true,
+    maintainer: 'dp',
+    synopsis: 'Gladys desktop workshop',
+    description: 'Gladys is an Electron desktop workshop for chat, browser automation, and local development workflows.',
     target: [
       'AppImage',
       'deb'

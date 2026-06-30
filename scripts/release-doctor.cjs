@@ -13,6 +13,10 @@ function printStatus(label, ok, detail) {
   console.log(`${state.padEnd(4)} ${label}${detail ? ` - ${detail}` : ''}`)
 }
 
+function printDeferred(label, detail) {
+  console.log(`INFO ${label}${detail ? ` - ${detail}` : ''}`)
+}
+
 console.log('Release doctor')
 console.log(`Version: ${pkg.version}`)
 console.log(`Product name: ${process.env.GLADDIS_PRODUCT_NAME || 'Gladys'}${process.env.GLADDIS_PRODUCT_NAME ? ' (env override)' : ' (default placeholder)'}`)
@@ -20,34 +24,16 @@ console.log(`App ID: ${process.env.GLADDIS_APP_ID || 'com.gladdis.app'}${process
 console.log('')
 
 printStatus(
-  'macOS icon',
-  existsSync(join(root, 'build', 'icon.icns')),
-  'required for polished macOS packaging'
-)
-printStatus(
-  'Windows icon',
-  existsSync(join(root, 'build', 'icon.ico')),
-  'required for polished Windows packaging'
-)
-printStatus(
   'Linux icon',
   existsSync(join(root, 'build', 'icon.png')),
   'required for polished Linux packaging'
 )
-printStatus(
-  'Apple notarization env',
-  envConfigured('APPLE_ID') && envConfigured('APPLE_APP_SPECIFIC_PASSWORD') && envConfigured('APPLE_TEAM_ID'),
-  'set APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID'
-)
-printStatus(
-  'Windows signing env',
-  envConfigured('CSC_LINK') && envConfigured('CSC_KEY_PASSWORD'),
-  'set CSC_LINK and CSC_KEY_PASSWORD in CI or your shell'
-)
+printDeferred('macOS packaging', 'deferred while Linux is the only active release target')
+printDeferred('Windows packaging', 'deferred while Linux is the only active release target')
 printStatus(
   'Release workflow',
   existsSync(join(root, '.github', 'workflows', 'release-packages.yml')),
-  'GitHub Actions packaging pipeline scaffold'
+  'GitHub Actions packaging pipeline scaffold for Linux'
 )
 printStatus(
   'Landing page / download host',

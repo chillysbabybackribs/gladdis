@@ -253,7 +253,7 @@ export async function runFetchPage(
   }
 
   const started = Date.now()
-  const beforeNav = await currentPageReadiness(deps.tabs, ctx.tabId)
+  const beforeNavUrl = currentVisibleTabUrl(deps.tabs, ctx.tabId)
   const beforeNavigateMs = Date.now() - started
   const navigateStarted = Date.now()
   const navigationCapture = deps.tabs.takeArmedNetworkCapture(ctx.tabId) ?? PRE_NAVIGATION_CAPTURE
@@ -267,7 +267,7 @@ export async function runFetchPage(
   })
   const navigateCaptureMs = Date.now() - navigateStarted
   const readableStarted = Date.now()
-  await waitForVisibleNavigationReadable(deps.tabs, ctx.tabId, url, beforeNav.url)
+  await waitForVisibleNavigationReadable(deps.tabs, ctx.tabId, url, beforeNavUrl)
   const readableMs = Date.now() - readableStarted
   const extractStarted = Date.now()
   const capData = await deps.extractor.run(ctx.tabId)
@@ -333,19 +333,18 @@ async function waitForVisibleNavigationReadable(
   tabId: string,
   expectedUrl: string,
   previousUrl: string | null = null,
-  timeoutMs = 4_000
+  timeoutMs = 1_200
 ): Promise<void> {
   const expected = normalizeUrl(expectedUrl)
   const previous = previousUrl ? normalizeUrl(previousUrl) : null
+  const initial = await currentPageReadiness(tabs, tabId)
+  if (isReadableNavigationState(initial, expected, previous)) return
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const state = await currentPageReadiness(tabs, tabId)
-    const current = state.url ? normalizeUrl(state.url) : null
-    const readable = state.readyState !== 'loading'
-    if (current && readable && (current === expected || (previous !== null && current !== previous))) return
-    await sleep(100)
+    if (isReadableNavigationState(state, expected, previous)) return
+    await sleep(50)
   }
-  await tabs.waitForNavigationSettled(tabId, 750)
 }
 
 async function currentPageReadiness(
@@ -363,5 +362,24 @@ async function currentPageReadiness(
     }
   } catch {
     return { url: null, readyState: null }
+  }
+}
+
+function isReadableNavigationState(
+  state: { url: string | null; readyState: string | null },
+  expected: string,
+  previous: string | null
+): boolean {
+  const current = state.url ? normalizeUrl(state.url) : null
+  const readable = state.readyState === 'interactive' || state.readyState === 'complete'
+  return !!current && readable && (current === expected || (previous !== null && current !== previous))
+}
+
+function currentVisibleTabUrl(tabs: TabManager, tabId: string): string | null {
+  try {
+    const match = tabs.list().find((tab) => tab.id === tabId)
+    return typeof match?.url === 'string' ? match.url : null
+  } catch {
+    return null
   }
 }

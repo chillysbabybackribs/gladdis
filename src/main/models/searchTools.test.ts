@@ -31,8 +31,11 @@ vi.mock('./unifiedSearch', () => ({
 import { BrowserTools } from './browserTools'
 import { runUnifiedSearch } from './unifiedSearch'
 
-function makeTools() {
+function makeTools(options?: {
+  readinessSequence?: Array<{ url: string; readyState: string }>
+}) {
   let currentUrl = 'https://start.test/'
+  const readinessSequence = [...(options?.readinessSequence ?? [])]
   const navigate = vi.fn((_id: string, url: string) => {
     currentUrl = url
     return Promise.resolve()
@@ -47,7 +50,16 @@ function makeTools() {
     navigateWithNetworkCapture,
     waitForNavigationSettled: vi.fn(async () => undefined),
     takeArmedNetworkCapture: vi.fn(() => null),
-    cdpSend: vi.fn(async () => ({ result: { value: { url: currentUrl, readyState: 'complete' } } })),
+    cdpSend: vi.fn(async () => ({
+      result: {
+        value:
+          readinessSequence.shift() ??
+          {
+            url: currentUrl,
+            readyState: 'complete'
+          }
+      }
+    })),
     list: () => [{ id: 'tab-1', url: currentUrl, loading: false }],
     create: vi.fn(() => ({ id: 'tab-new' }))
   }
@@ -213,5 +225,15 @@ describe('unified search tool', () => {
     await tools.run('search', { query: 'shared query' }, { tabId: 'tab-1', conversationId: 'conv-B' })
 
     expect(vi.mocked(runUnifiedSearch)).toHaveBeenCalledTimes(2)
+  })
+
+  it('fetch_page does not fall back to an extra settle wait after navigation already looks readable', async () => {
+    const { tools, tabs } = makeTools({
+      readinessSequence: [{ url: 'https://example.com/a', readyState: 'complete' }]
+    })
+
+    await tools.run('fetch_page', { url: 'https://example.com/a' }, { tabId: 'tab-1' })
+
+    expect(tabs.waitForNavigationSettled).not.toHaveBeenCalled()
   })
 })

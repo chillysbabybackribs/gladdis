@@ -89,7 +89,7 @@ const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: s
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
   { enabled: (names) => names.has('search') || names.has('deep_search') || names.has('fetch_page'), text: BROWSER_OVERVIEW },
   { enabled: (names) => names.has('browse_task') || names.has('read_page') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
-  { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier'), text: FILESYSTEM_OVERVIEW },
+  { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('repo_grep_task') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
   { enabled: (names) => names.has('run_command') || names.has('launch_web_dev_server'), text: SHELL_GUIDANCE },
   { enabled: (names) => names.has('run_validation') || names.has('verify_change'), text: VALIDATION_GUIDANCE },
@@ -124,7 +124,7 @@ function guidanceKey(tools: ToolDef[]): GuidanceBit {
   let key = 0
   if (names.has('search') || names.has('deep_search') || names.has('fetch_page')) key |= GUIDANCE_BITS.browserSearch
   if (names.has('browse_task') || names.has('read_page') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
-  if (names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier')) key |= GUIDANCE_BITS.filesystemRead
+  if (names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('repo_grep_task') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier')) key |= GUIDANCE_BITS.filesystemRead
   if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
   if (names.has('run_command') || names.has('launch_web_dev_server')) key |= GUIDANCE_BITS.shell
   if (names.has('run_validation') || names.has('verify_change')) key |= GUIDANCE_BITS.validation

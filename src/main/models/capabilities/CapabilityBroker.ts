@@ -5,7 +5,15 @@ import type {
   LoopPhase,
   LoopStateEventName
 } from '../../../../shared/types'
-import type { ReadSpansInput, RepoOverviewInput, RepoOverviewResult, SearchRepoInput, SearchRepoResult } from './RepoIntelligenceService'
+import type {
+  ReadSpansInput,
+  RepoGrepTaskInput,
+  RepoGrepTaskResult,
+  RepoOverviewInput,
+  RepoOverviewResult,
+  SearchRepoInput,
+  SearchRepoResult
+} from './RepoIntelligenceService'
 import type { ResearchDossierInput, ResearchDossierResult } from './ResearchDossierService'
 import type { ValidationCheck, VerifyChangeInput, VerifyChangeResult } from './ValidationService'
 
@@ -26,6 +34,15 @@ export interface SearchRepoArgs {
   query: string
   path?: string
   glob?: string
+  maxResults?: number
+}
+
+export interface RepoGrepTaskArgs {
+  workspaceRoot: string
+  task: string
+  path?: string
+  glob?: string
+  maxVariations?: number
   maxResults?: number
 }
 
@@ -85,6 +102,7 @@ interface RepoOverviewCacheEntry extends CapabilityResponse {
 export interface CapabilityServices {
   repoOverview: (input: RepoOverviewInput) => Promise<RepoOverviewResult>
   searchRepo: (input: SearchRepoInput) => Promise<SearchRepoResult>
+  repoGrepTask?: (input: RepoGrepTaskInput) => Promise<RepoGrepTaskResult>
   readSpans: (input: ReadSpansInput) => Promise<{ summary: string; structuredPayload: unknown }>
   researchDossier?: (input: ResearchDossierInput) => Promise<ResearchDossierResult>
   verifyChange?: (input: VerifyChangeInput) => Promise<VerifyChangeResult>
@@ -93,12 +111,15 @@ export interface CapabilityServices {
 export class CapabilityBroker {
   private readonly repoOverviewCache = new Map<string, RepoOverviewCacheEntry>()
   private readonly searchRepoCache = new Map<string, TimedCacheEntry<CapabilityCachePayload>>()
+  private readonly repoGrepTaskCache = new Map<string, TimedCacheEntry<CapabilityCachePayload>>()
   private readonly readSpansCache = new Map<string, TimedCacheEntry<CapabilityCachePayload>>()
   private readonly searchRepoCacheStats: TimedCacheStats = { hitCount: 0, missCount: 0, expiredCount: 0, evictionCount: 0 }
+  private readonly repoGrepTaskCacheStats: TimedCacheStats = { hitCount: 0, missCount: 0, expiredCount: 0, evictionCount: 0 }
   private readonly readSpansCacheStats: TimedCacheStats = { hitCount: 0, missCount: 0, expiredCount: 0, evictionCount: 0 }
   private capabilityCallSequence = 0
   private static readonly CAPABILITY_CACHE_TTL_MS = 120_000
   private static readonly SEARCH_REPO_CACHE_LIMIT = 32
+  private static readonly REPO_GREP_TASK_CACHE_LIMIT = 24
   private static readonly READ_SPANS_CACHE_LIMIT = 24
 
   constructor(
@@ -221,6 +242,70 @@ export class CapabilityBroker {
       return {
         ok: false,
         summary: `search_repo failed: ${message}`,
+        cacheStatus: 'miss'
+      }
+    }
+  }
+
+  async repoGrepTask(ctx: BrokerCallContext, args: RepoGrepTaskArgs): Promise<CapabilityResponse> {
+    if (!this.services.repoGrepTask) {
+      return {
+        ok: false,
+        summary: 'repo_grep_task is not configured.',
+        cacheStatus: 'miss'
+      }
+    }
+    const cacheKey = this.repoGrepTaskCacheKey(args)
+    const startedAt = Date.now()
+    const callId = this.nextCapabilityCallId(ctx, 'repo_grep_task')
+    this.emitPhase(ctx, 'inspect', `Finding repository sections for ${args.task}.`)
+    const cacheMetrics = () =>
+      this.cacheMetrics(this.repoGrepTaskCacheStats, this.repoGrepTaskCache, CapabilityBroker.REPO_GREP_TASK_CACHE_LIMIT)
+    this.emitCapability(ctx, callId, 'repo_grep_task', 'capability_requested', {
+      summary: `Finding repo sections for ${args.task}.`
+    })
+
+    const cached = this.getCache(this.repoGrepTaskCache, cacheKey, this.repoGrepTaskCacheStats)
+    if (cached) {
+      this.emitCapability(ctx, callId, 'repo_grep_task', 'capability_cache_hit', {
+        cached: true,
+        summary: 'Using cached repo_grep_task result.',
+        ...cacheMetrics()
+      })
+      this.emitCapability(ctx, callId, 'repo_grep_task', 'capability_completed', {
+        cached: true,
+        summary: cached.summary,
+        ...cacheMetrics()
+      })
+      return { ...cached, cacheStatus: 'hit' }
+    }
+
+    this.emitCapability(ctx, callId, 'repo_grep_task', 'capability_started', {
+      summary: 'Running task-oriented repo grep.'
+    })
+    try {
+      const result = await this.services.repoGrepTask(args)
+      const response: CapabilityCachePayload = {
+        ok: true,
+        summary: result.summary,
+        structuredPayload: result.structuredPayload
+      }
+      this.setCache(this.repoGrepTaskCache, cacheKey, response, CapabilityBroker.REPO_GREP_TASK_CACHE_LIMIT, this.repoGrepTaskCacheStats)
+      this.emitCapability(ctx, callId, 'repo_grep_task', 'capability_completed', {
+        summary: result.summary,
+        durationMs: Date.now() - startedAt,
+        ...cacheMetrics()
+      })
+      return { ...response, cacheStatus: 'miss' }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      this.emitCapability(ctx, callId, 'repo_grep_task', 'capability_failed', {
+        summary: message,
+        durationMs: Date.now() - startedAt
+      })
+      return {
+        ok: false,
+        summary: `repo_grep_task failed: ${message}`,
         cacheStatus: 'miss'
       }
     }
@@ -417,6 +502,17 @@ export class CapabilityBroker {
       query: args.query,
       path: args.path?.trim() || null,
       glob: args.glob ?? null,
+      maxResults: args.maxResults ?? null
+    })
+  }
+
+  private repoGrepTaskCacheKey(args: RepoGrepTaskArgs): string {
+    return JSON.stringify({
+      workspaceRoot: args.workspaceRoot,
+      task: args.task,
+      path: args.path?.trim() || null,
+      glob: args.glob ?? null,
+      maxVariations: args.maxVariations ?? null,
       maxResults: args.maxResults ?? null
     })
   }

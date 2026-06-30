@@ -10,7 +10,7 @@
  *              Internally runs PageExtractor, formats through PageDigest.
  *   CAPTURE  → `screenshot`, `screenshot_app`. PNGs returned to the model.
  *   SEARCH   → `search`, `deep_search`, `fetch_page`.
- *   REPO     → `repo_overview`, `search_repo`, `read_spans`,
+ *   REPO     → `repo_overview`, `repo_grep_task`, `search_repo`, `read_spans`,
  *              `research_dossier`, `verify_change` (CapabilityBroker-backed).
  *   TASK     → `browse_task` — multi-step pipeline (Planner → Runner →
  *              finalResponse). One LLM tool call drives a whole flow.

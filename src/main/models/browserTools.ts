@@ -35,6 +35,7 @@ import {
 import { type ReadPageCacheEntry, runGrepPage, runReadPage, runScreenshot, runScreenshotApp } from './tools/perceiveTools'
 import {
   runReadSpans,
+  runRepoGrepTask,
   runRepoOverview,
   runResearchDossier,
   runSearchRepo,
@@ -311,6 +312,8 @@ export class BrowserTools {
           return runRepoOverview(this.repoCapabilityDeps(), args, ctx)
         case 'search_repo':
           return runSearchRepo(this.repoCapabilityDeps(), args, ctx)
+        case 'repo_grep_task':
+          return runRepoGrepTask(this.repoCapabilityDeps(), args, ctx)
         case 'read_spans':
           return runReadSpans(this.repoCapabilityDeps(), args, ctx)
         case 'research_dossier':

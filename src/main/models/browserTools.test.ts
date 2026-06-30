@@ -89,6 +89,32 @@ describe('BrowserTools', () => {
     expect(result.text).not.toContain('outside.ts:1')
   })
 
+  it('routes repo_grep_task through the capability broker and returns exact sections', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gladdis-repo-grep-task-tool-'))
+    await writeFile(join(dir, 'TaskTool.ts'), 'export function repoGrepTaskNeedle() {\n  return true\n}\n')
+
+    const tools = new BrowserTools({} as any, {} as any, {} as any)
+    tools.setWorkspaceRoot(dir)
+    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
+
+    const result = await tools.run(
+      'repo_grep_task',
+      { task: 'find repoGrepTaskNeedle implementation', glob: '*.ts', max_results: 2 },
+      { tabId: 'tab-1', requestId: 'req-2c', conversationId: 'conv-2c', taskId: 'task-2c' }
+    )
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Repo grep task: find repoGrepTaskNeedle implementation')
+    expect(result.text).toContain('TaskTool.ts')
+    expect(result.text).toContain('repoGrepTaskNeedle')
+    expect(result.structuredContent?.spans).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'TaskTool.ts',
+        content: expect.stringContaining('repoGrepTaskNeedle')
+      })
+    ]))
+  })
+
   it('routes read_spans through the capability broker and returns bounded code windows', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gladdis-read-spans-tool-'))
     await writeFile(join(dir, 'example.ts'), ['alpha', 'beta', 'gamma', 'delta'].join('\n'))

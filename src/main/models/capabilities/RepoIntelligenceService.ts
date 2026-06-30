@@ -35,6 +35,15 @@ export interface SearchRepoInput {
   maxResults?: number
 }
 
+export interface RepoGrepTaskInput {
+  workspaceRoot: string
+  task: string
+  path?: string
+  glob?: string
+  maxVariations?: number
+  maxResults?: number
+}
+
 export interface SearchRepoResult {
   summary: string
   structuredPayload: {
@@ -57,6 +66,38 @@ export interface SearchRepoResult {
     context: RepoContextAccounting & {
       hitCount: number
       suggestedSpanCount: number
+    }
+  }
+}
+
+export interface RepoGrepTaskResult {
+  summary: string
+  structuredPayload: {
+    workspaceRoot: string
+    task: string
+    path?: string
+    glob?: string
+    variations: string[]
+    hits: Array<{
+      variation: string
+      path: string
+      kind: string
+      line: number
+      text: string
+    }>
+    spans: Array<{
+      path: string
+      startLine: number
+      endLine: number
+      totalLines: number
+      truncated: boolean
+      content: string
+      matchedVariations: string[]
+    }>
+    context: RepoContextAccounting & {
+      variationCount: number
+      hitCount: number
+      spanCount: number
     }
   }
 }
@@ -289,6 +330,113 @@ export class RepoIntelligenceService {
     }
   }
 
+  async repoGrepTask(input: RepoGrepTaskInput): Promise<RepoGrepTaskResult> {
+    const workspaceRoot = path.resolve(input.workspaceRoot)
+    this.touchIndex(workspaceRoot)
+    this.files.setRoot(workspaceRoot)
+    const searchPath = typeof input.path === 'string' && input.path.trim() ? input.path.trim() : '.'
+    const maxVariations = Math.min(10, Math.max(1, input.maxVariations ?? 6))
+    const maxResults = Math.min(10, Math.max(1, input.maxResults ?? 5))
+    const variations = buildRepoGrepVariations(input.task, maxVariations)
+
+    const searches = await Promise.all(
+      variations.map(async (variation) => {
+        const result = await this.searchRepo({
+          workspaceRoot,
+          query: variation,
+          path: input.path,
+          glob: input.glob,
+          maxResults: Math.max(maxResults, 6)
+        })
+        return { variation, hits: result.structuredPayload.hits }
+      })
+    )
+
+    const rankedHits = rankRepoGrepHits(searches, maxResults * 3)
+    const spanMap = new Map<string, {
+      path: string
+      startLine: number
+      endLine: number
+      matchedVariations: Set<string>
+    }>()
+    for (const hit of rankedHits) {
+      const startLine = hit.line > 0 ? Math.max(1, hit.line - 8) : 1
+      const endLine = hit.line > 0 ? hit.line + 16 : 80
+      const key = `${hit.path}:${startLine}:${endLine}`
+      const prior = spanMap.get(key)
+      if (prior) {
+        prior.matchedVariations.add(hit.variation)
+      } else {
+        spanMap.set(key, {
+          path: hit.path,
+          startLine,
+          endLine,
+          matchedVariations: new Set([hit.variation])
+        })
+      }
+    }
+
+    const spanInputs = Array.from(spanMap.values()).slice(0, maxResults)
+    const read = spanInputs.length > 0
+      ? await this.readSpans({ workspaceRoot, items: spanInputs })
+      : null
+    const spans = read
+      ? read.structuredPayload.items.map((item, index) => ({
+        path: item.path,
+        startLine: item.startLine,
+        endLine: item.endLine,
+        totalLines: item.totalLines,
+        truncated: item.truncated,
+        content: item.content,
+        matchedVariations: Array.from(spanInputs[index]?.matchedVariations ?? [])
+      }))
+      : []
+
+    const hitLines = rankedHits
+      .slice(0, maxResults * 2)
+      .map((hit) => `${hit.path}:${hit.line} [${hit.variation}]${hit.text ? ` - ${hit.text}` : ''}`)
+    const spanBlocks = spans.map((span) => {
+      const meta =
+        `=== ${span.path} (lines ${span.startLine}-${span.endLine} of ${span.totalLines}; ` +
+        `matched: ${span.matchedVariations.join(', ')}) ===`
+      return `${meta}\n${span.content}`
+    })
+    const summary = [
+      `Repo grep task: ${input.task}`,
+      `Path: ${searchPath}`,
+      input.glob ? `Glob: ${input.glob}` : null,
+      `Variations: ${variations.join(' | ')}`,
+      hitLines.length ? `Hits:\n${hitLines.join('\n')}` : 'Hits: none',
+      spanBlocks.length ? `Sections:\n${spanBlocks.join('\n\n')}` : null
+    ].filter((line): line is string => Boolean(line)).join('\n')
+
+    return {
+      summary,
+      structuredPayload: {
+        workspaceRoot,
+        task: input.task,
+        ...(searchPath !== '.' ? { path: searchPath } : {}),
+        ...(input.glob ? { glob: input.glob } : {}),
+        variations,
+        hits: rankedHits.map((hit) => ({
+          variation: hit.variation,
+          path: hit.path,
+          kind: hit.kind,
+          line: hit.line,
+          text: hit.text
+        })),
+        spans,
+        context: {
+          chars: summary.length,
+          estimatedTokens: estimateContextTokens(summary.length),
+          variationCount: variations.length,
+          hitCount: rankedHits.length,
+          spanCount: spans.length
+        }
+      }
+    }
+  }
+
   async readSpans(input: ReadSpansInput): Promise<ReadSpansResult> {
     const workspaceRoot = path.resolve(input.workspaceRoot)
     this.files.setRoot(workspaceRoot)
@@ -410,6 +558,107 @@ export class RepoIntelligenceService {
     return results
   }
 }
+
+function buildRepoGrepVariations(task: string, maxVariations: number): string[] {
+  const normalized = task.replace(/\s+/g, ' ').trim()
+  const candidates: string[] = []
+  const add = (value: string): void => {
+    const next = value.replace(/\s+/g, ' ').trim()
+    if (!next) return
+    if (next.length < 3) return
+    if (!candidates.some((existing) => existing.toLowerCase() === next.toLowerCase())) {
+      candidates.push(next)
+    }
+  }
+
+  for (const quoted of normalized.matchAll(/["'`](.+?)["'`]/g)) add(quoted[1])
+  for (const identifier of normalized.matchAll(/\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\b/g)) {
+    const value = identifier[0]
+    if (STOP_WORDS.has(value.toLowerCase())) continue
+    if (/[A-Z_$]|\./.test(value) || value.includes('_') || value.length >= 5) add(value)
+  }
+  add(normalized)
+
+  const words = normalized
+    .toLowerCase()
+    .replace(/[^a-z0-9_$.\s-]/g, ' ')
+    .split(/\s+/)
+    .filter((word) => word.length >= 3 && !STOP_WORDS.has(word))
+  for (let size = Math.min(4, words.length); size >= 2; size -= 1) {
+    for (let index = 0; index <= words.length - size; index += 1) {
+      add(words.slice(index, index + size).join(' '))
+      if (candidates.length >= maxVariations) return candidates.slice(0, maxVariations)
+    }
+  }
+  for (const word of words) {
+    add(word)
+    if (candidates.length >= maxVariations) break
+  }
+  return candidates.slice(0, maxVariations)
+}
+
+function rankRepoGrepHits(
+  searches: Array<{
+    variation: string
+    hits: Array<{ path: string; kind: string; line: number; text: string }>
+  }>,
+  limit: number
+): Array<{ variation: string; path: string; kind: string; line: number; text: string; score: number }> {
+  const deduped = new Map<string, { variation: string; path: string; kind: string; line: number; text: string; score: number }>()
+  searches.forEach((search, variationIndex) => {
+    search.hits.forEach((hit, hitIndex) => {
+      const key = `${hit.path}:${hit.line}:${hit.kind}:${hit.text}`
+      const score =
+        (searches.length - variationIndex) * 100 +
+        Math.max(0, 50 - hitIndex) +
+        (hit.kind === 'symbol' ? 45 : hit.kind === 'path' ? 25 : 0) +
+        (hit.line > 0 ? Math.max(0, 20 - Math.floor(hit.line / 50)) : 0)
+      const next = { ...hit, variation: search.variation, score }
+      const prior = deduped.get(key)
+      if (!prior || next.score > prior.score) deduped.set(key, next)
+    })
+  })
+  return Array.from(deduped.values())
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path) || a.line - b.line)
+    .slice(0, limit)
+}
+
+const STOP_WORDS = new Set([
+  'about',
+  'after',
+  'again',
+  'all',
+  'and',
+  'are',
+  'but',
+  'can',
+  'code',
+  'create',
+  'file',
+  'find',
+  'for',
+  'from',
+  'how',
+  'into',
+  'let',
+  'make',
+  'need',
+  'not',
+  'our',
+  'repo',
+  'repository',
+  'search',
+  'task',
+  'that',
+  'the',
+  'this',
+  'tool',
+  'use',
+  'what',
+  'when',
+  'where',
+  'with'
+])
 
 export function estimateContextTokens(chars: number): number {
   return Math.ceil(Math.max(0, chars) / 4)

@@ -281,6 +281,7 @@ export interface StoredLoopStatePart extends LoopStateTrace {
 export type CapabilityName =
   | 'repo_overview'
   | 'search_repo'
+  | 'repo_grep_task'
   | 'read_spans'
   | 'research_dossier'
   | 'verify_change'

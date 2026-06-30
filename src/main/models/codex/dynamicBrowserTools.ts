@@ -8,6 +8,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'recall_history',
   'repo_overview',
   'search_repo',
+  'repo_grep_task',
   'read_spans',
   'research_dossier',
   'verify_change',
@@ -66,7 +67,7 @@ export const CODEX_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
   'For browser work beyond search use the gladdis.* tools too: navigate, browse_task, read_page, grep_page, ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
-  'recall_history, repo_overview, search_repo, read_spans, research_dossier, and verify_change. ' +
+  'recall_history, repo_overview, repo_grep_task, search_repo, read_spans, research_dossier, and verify_change. ' +
   'Prefer grep_click/grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
   'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, ' +
   'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +

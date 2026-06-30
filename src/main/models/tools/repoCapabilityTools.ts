@@ -6,7 +6,7 @@ export interface RepoCapabilityToolsDeps {
   getWorkspaceRoot: () => string | null
 }
 
-type CapabilityName = 'repo_overview' | 'search_repo' | 'read_spans' | 'research_dossier' | 'verify_change'
+type CapabilityName = 'repo_overview' | 'search_repo' | 'repo_grep_task' | 'read_spans' | 'research_dossier' | 'verify_change'
 
 /** Build the broker's per-call context from a {@link ToolContext}. */
 function brokerCtx(name: CapabilityName, ctx: ToolContext) {
@@ -63,6 +63,32 @@ export async function runSearchRepo(
     query,
     path: typeof args.path === 'string' ? args.path : undefined,
     glob: typeof args.glob === 'string' ? args.glob : undefined,
+    maxResults: Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : undefined
+  })
+  return {
+    ok: result.ok,
+    text: result.summary,
+    structuredContent: asStructuredContent(result.structuredPayload)
+  }
+}
+
+export async function runRepoGrepTask(
+  deps: RepoCapabilityToolsDeps,
+  args: Record<string, any>,
+  ctx: ToolContext
+): Promise<ToolOutcome> {
+  const wired = ensureWired(deps, 'repo_grep_task')
+  if ('ok' in wired) return wired
+  const task = String(args.task ?? args.query ?? '').trim()
+  if (!task) {
+    return { ok: false, text: 'repo_grep_task: "task" is required.' }
+  }
+  const result = await deps.capabilityBroker!.repoGrepTask(brokerCtx('repo_grep_task', ctx), {
+    workspaceRoot: wired.workspaceRoot,
+    task,
+    path: typeof args.path === 'string' ? args.path : undefined,
+    glob: typeof args.glob === 'string' ? args.glob : undefined,
+    maxVariations: Number.isFinite(Number(args.max_variations)) ? Number(args.max_variations) : undefined,
     maxResults: Number.isFinite(Number(args.max_results)) ? Number(args.max_results) : undefined
   })
   return {

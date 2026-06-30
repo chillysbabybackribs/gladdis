@@ -168,6 +168,59 @@ describe('RepoIntelligenceService', () => {
     await fs.rm(workspace, { recursive: true, force: true })
   })
 
+  it('runs task-oriented repo grep variations and returns exact sections', async () => {
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-repo-grep-task-'))
+    await fs.mkdir(path.join(workspace, 'src'), { recursive: true })
+    await fs.writeFile(
+      path.join(workspace, 'src', 'repoCapabilityTools.ts'),
+      [
+        'export async function runRepoGrepTask() {',
+        '  return "repo grep task dispatch"',
+        '}',
+        'export async function runSearchRepo() {',
+        '  return "search repo dispatch"',
+        '}'
+      ].join('\n')
+    )
+    await fs.writeFile(
+      path.join(workspace, 'src', 'other.ts'),
+      'export const unrelatedThing = true\n'
+    )
+
+    const service = new RepoIntelligenceService()
+    const result = await service.repoGrepTask({
+      workspaceRoot: workspace,
+      task: 'wire repo_grep_task into runRepoGrepTask dispatch',
+      path: 'src',
+      glob: '*.ts',
+      maxVariations: 5,
+      maxResults: 3
+    })
+
+    expect(result.summary).toContain('Repo grep task: wire repo_grep_task into runRepoGrepTask dispatch')
+    expect(result.summary).toContain('Variations:')
+    expect(result.summary).toContain('Sections:')
+    expect(result.summary).toContain('runRepoGrepTask')
+    expect(result.structuredPayload.variations).toContain('runRepoGrepTask')
+    expect(result.structuredPayload.hits.some((hit) => hit.path === 'src/repoCapabilityTools.ts')).toBe(true)
+    expect(result.structuredPayload.spans).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'src/repoCapabilityTools.ts',
+        content: expect.stringContaining('runRepoGrepTask'),
+        matchedVariations: expect.arrayContaining(['runRepoGrepTask'])
+      })
+    ]))
+    expect(result.structuredPayload.context).toEqual(expect.objectContaining({
+      chars: result.summary.length,
+      estimatedTokens: expect.any(Number),
+      variationCount: result.structuredPayload.variations.length,
+      hitCount: result.structuredPayload.hits.length,
+      spanCount: result.structuredPayload.spans.length
+    }))
+
+    await fs.rm(workspace, { recursive: true, force: true })
+  })
+
   it('reads bounded file spans for targeted repo inspection', async () => {
     const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'gladdis-read-spans-'))
     await fs.mkdir(path.join(workspace, 'src'), { recursive: true })

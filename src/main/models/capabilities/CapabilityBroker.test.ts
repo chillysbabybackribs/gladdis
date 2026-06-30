@@ -125,6 +125,60 @@ describe('CapabilityBroker', () => {
     ).toEqual(['search_repo:task-2b:2'])
   })
 
+  it('emits and caches the repo_grep_task lifecycle', async () => {
+    const emitted: ChatStreamEvent[] = []
+    const broker = new CapabilityBroker(
+      {
+        repoOverview: async () => ({
+          summary: 'unused',
+          structuredPayload: {}
+        }),
+        searchRepo: async () => ({
+          summary: 'unused',
+          structuredPayload: {}
+        }),
+        repoGrepTask: async ({ task }: { task: string }) => ({
+          summary: `Repo grep task: ${task}\nSections:\n=== src/tool.ts (lines 1-2 of 2) ===\nexport const tool = true`,
+          structuredPayload: {
+            workspaceRoot: '/tmp/demo',
+            task,
+            variations: [task],
+            hits: [],
+            spans: [],
+            context: { chars: 0, estimatedTokens: 0, variationCount: 1, hitCount: 0, spanCount: 0 }
+          }
+        }),
+        readSpans: async () => ({
+          summary: 'unused',
+          structuredPayload: {}
+        })
+      } as any,
+      (event) => emitted.push(event)
+    )
+    const ctx = { requestId: 'req-2c', assistantMessageId: 'msg-2c', taskId: 'task-2c' }
+    const args = { workspaceRoot: '/tmp/demo', task: 'repo tool dispatch', glob: '*.ts', maxResults: 3 }
+
+    const first = await broker.repoGrepTask(ctx, args)
+    const second = await broker.repoGrepTask(ctx, args)
+
+    expect(first.ok).toBe(true)
+    expect(first.cacheStatus).toBe('miss')
+    expect(second.ok).toBe(true)
+    expect(second.cacheStatus).toBe('hit')
+    expect(
+      emitted
+        .filter((event): event is Extract<ChatStreamEvent, { type: 'capability_activity' }> => event.type === 'capability_activity')
+        .map((event) => `${event.capability}:${event.event}`)
+    ).toEqual([
+      'repo_grep_task:capability_requested',
+      'repo_grep_task:capability_started',
+      'repo_grep_task:capability_completed',
+      'repo_grep_task:capability_requested',
+      'repo_grep_task:capability_cache_hit',
+      'repo_grep_task:capability_completed'
+    ])
+  })
+
   it('emits the read_spans lifecycle without caching', async () => {
     const emitted: ChatStreamEvent[] = []
     const broker = new CapabilityBroker(

@@ -21,9 +21,10 @@ const SPAN_COORDINATE_SCHEMA = {
 
 /**
  * REPO — repository intelligence (CapabilityBroker-backed).
- * `repo_overview` for orientation, `search_repo`/`read_spans` for surgical
- * reads, `research_dossier` for Gemini-summarized recon, `verify_change`
- * to gate edits behind validation.
+ * `repo_overview` for orientation, `repo_grep_task` for task-shaped targeted
+ * grep plus sections, `search_repo`/`read_spans` for surgical reads,
+ * `research_dossier` for Gemini-summarized recon, `verify_change` to gate
+ * edits behind validation.
  */
 export const REPO_TOOLS: ToolDef[] = [
   {
@@ -110,6 +111,88 @@ export const REPO_TOOLS: ToolDef[] = [
         }
       },
       required: ['workspaceRoot', 'query', 'totalHits', 'hits', 'suggestedSpans', 'context']
+    }
+  },
+  {
+    name: 'repo_grep_task',
+    description:
+      'Find exact repository sections for a natural-language task by running multiple deterministic query variations in parallel, then returning bounded code spans.',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: {
+          type: 'string',
+          description: 'Natural-language task or prompt describing what code sections are needed.'
+        },
+        path: {
+          type: 'string',
+          description: 'Optional subfolder or file path to scope the search, relative to the selected workspace root.'
+        },
+        glob: {
+          type: 'string',
+          description: 'Optional file glob to narrow the search, e.g. "*.ts" or "src/**/*.tsx".'
+        },
+        max_variations: {
+          type: 'number',
+          description: 'Maximum generated query variations. Default 6, max 10.'
+        },
+        max_results: {
+          type: 'number',
+          description: 'Maximum code sections to return. Default 5, max 10.'
+        }
+      },
+      required: ['task']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        workspaceRoot: { type: 'string' },
+        task: { type: 'string' },
+        path: { type: 'string' },
+        glob: { type: 'string' },
+        variations: { type: 'array', items: { type: 'string' } },
+        hits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              variation: { type: 'string' },
+              path: { type: 'string' },
+              kind: { type: 'string' },
+              line: { type: 'number' },
+              text: { type: 'string' }
+            },
+            required: ['variation', 'path', 'kind', 'line', 'text']
+          }
+        },
+        spans: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              startLine: { type: 'number' },
+              endLine: { type: 'number' },
+              totalLines: { type: 'number' },
+              truncated: { type: 'boolean' },
+              content: { type: 'string' },
+              matchedVariations: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['path', 'startLine', 'endLine', 'totalLines', 'truncated', 'content', 'matchedVariations']
+          }
+        },
+        context: {
+          type: 'object',
+          properties: {
+            ...REPO_CONTEXT_SCHEMA.properties,
+            variationCount: { type: 'number' },
+            hitCount: { type: 'number' },
+            spanCount: { type: 'number' }
+          },
+          required: ['chars', 'estimatedTokens', 'variationCount', 'hitCount', 'spanCount']
+        }
+      },
+      required: ['workspaceRoot', 'task', 'variations', 'hits', 'spans', 'context']
     }
   },
   {

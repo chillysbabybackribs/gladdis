@@ -199,7 +199,7 @@ export class RemoteChatServer {
       }
 
       if (req.method === 'GET' && path === '/api/models') {
-        this.json(res, 200, { models: MODELS })
+        this.json(res, 200, { models: phoneModels() })
         return
       }
       if (req.method === 'GET' && path === '/api/chats') {
@@ -490,6 +490,22 @@ export class RemoteChatServer {
   }
 }
 
+// Curated "limited" model set for the phone client. Kept small and stable on
+// purpose; the full MODELS list (~40 entries across providers) is too much for a
+// phone picker. Order here is the order shown in the dropdown; the first that
+// actually exists in MODELS becomes the default.
+const PHONE_MODEL_IDS = [
+  'claude-haiku-4-5', // Haiku 4.5 (anthropic)
+  'gemini-3.1-flash-lite', // Gemini 3.1 Flash (google)
+  'openai-gpt-5.4', // GPT 5.4 (openai)
+  'gpt-5.4' // Codex · GPT-5.4 (codex)
+]
+
+function phoneModels(): ModelOption[] {
+  const byId = new Map(MODELS.map((model) => [model.id, model]))
+  return PHONE_MODEL_IDS.map((id) => byId.get(id)).filter((model): model is ModelOption => !!model)
+}
+
 function resolveModelId(value: unknown): string {
   if (typeof value === 'string' && MODELS.some((model) => model.id === value)) return value
   return firstVerifiedModel(MODELS).id
@@ -648,29 +664,209 @@ function remoteAppHtml(token: string): string {
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0b0d10">
+  <!-- viewport-fit=cover lets the page extend under the notch / home indicator
+       so we can pad it back with env(safe-area-inset-*). -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Matches --bg-app so the browser chrome / status bar blends with the shell. -->
+  <meta name="theme-color" content="#181818">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="/manifest.webmanifest">
   <title>Gladdis Remote Chat</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0b0d10; color: #f4f7fb; }
+    /* Design tokens ported verbatim from the desktop app
+       (src/renderer/styles/theme.css) so the PWA reads as the same product. */
+    :root {
+      color-scheme: dark;
+      --bg-app: #181818;
+      --bg-panel: #1c1c1c;
+      --bg-surface: #212121;
+      --bg-elevated: #262626;
+      --bg-active: #2d2d2d;
+      --border-subtle: #2b2b2b;
+      --border-strong: #3a3a3a;
+      --border-faint: rgba(255, 255, 255, 0.05);
+      --text-primary: #e6e6e6;
+      --text-secondary: #a8a8ac;
+      --text-muted: #757575;
+      --accent: #4493f8;
+      --accent-dim: #2d5f9e;
+      --accent-glow: rgba(68, 147, 248, 0.14);
+      --success: #3fb950;
+      --danger: #e46a61;
+      --radius: 8px;
+      --radius-lg: 12px;
+      --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif;
+      /* Safe-area insets, with a sane min so content never hugs the edge even
+         on devices that report 0 (and on browsers with a bottom URL bar). */
+      --safe-top: max(env(safe-area-inset-top), 0px);
+      --safe-bottom: max(env(safe-area-inset-bottom), 0px);
+      --safe-left: env(safe-area-inset-left);
+      --safe-right: env(safe-area-inset-right);
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
-    header { padding: 16px; border-bottom: 1px solid #222832; }
-    h1 { margin: 0; font-size: 17px; letter-spacing: 0; }
-    #status { margin-top: 6px; color: #9aa7b7; font-size: 13px; }
-    main { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
-    .msg { max-width: 86%; padding: 10px 12px; border: 1px solid #293241; border-radius: 8px; white-space: pre-wrap; line-height: 1.4; }
-    .user { align-self: flex-end; background: #1f3b31; }
-    .assistant { align-self: flex-start; background: #141922; }
-    form { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-top: 1px solid #222832; background: #0f1217; }
-    textarea { min-height: 48px; max-height: 140px; resize: vertical; border-radius: 8px; border: 1px solid #303846; background: #11161d; color: inherit; padding: 10px; font: inherit; }
-    button { border: 0; border-radius: 8px; background: #d7f7c2; color: #071006; padding: 0 16px; font: inherit; font-weight: 700; }
+    html { height: 100%; }
+    /* Pin the app to the *dynamic* viewport. 100dvh tracks the mobile URL bar
+       as it shows/hides (Chrome top OR bottom, Safari bottom), so the composer
+       is never hidden behind browser chrome. position: fixed + the height lock
+       stops iOS rubber-band scroll from detaching the layout. 100vh is the
+       fallback for engines without dvh. */
+    body {
+      margin: 0;
+      position: fixed;
+      inset: 0;
+      height: 100vh;
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      font-family: var(--font-ui);
+      font-size: 14px;
+      color: var(--text-primary);
+      background: var(--bg-app);
+      /* The desktop's only "texture": a faint blue glow from the top
+         (notepad.css) plus the glass translucency. */
+      background-image: radial-gradient(120% 80% at 50% -10%, rgba(68, 147, 248, 0.05), transparent 55%);
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+    header {
+      padding: calc(14px + var(--safe-top)) calc(16px + var(--safe-right)) 14px calc(16px + var(--safe-left));
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+    }
+    h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0; color: var(--text-primary); }
+    #status { margin-top: 5px; color: var(--text-secondary); font-size: 12.5px; }
+    main {
+      padding: 16px calc(16px + var(--safe-right)) 16px calc(16px + var(--safe-left));
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      overflow-anchor: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .msg {
+      max-width: 92%;
+      line-height: 1.55;
+      font-size: 15px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    /* Assistant: inline, no card — matches desktop .chat-msg.assistant. */
+    .assistant { align-self: stretch; max-width: 100%; color: var(--text-primary); }
+    /* User: elevated card — matches desktop .chat-msg.user. */
+    .user {
+      align-self: flex-end;
+      max-width: 86%;
+      padding: 10px 13px;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+    form {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: end;
+      padding: 12px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
+      border-top: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+    }
+    textarea {
+      min-height: 46px;
+      max-height: 140px;
+      resize: none;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
+      color: var(--text-primary);
+      padding: 12px;
+      /* 16px keeps iOS from zooming the viewport on focus. */
+      font-family: inherit;
+      font-size: 16px;
+      line-height: 1.5;
+      outline: none;
+      transition: border-color 0.14s ease;
+    }
+    textarea:focus { border-color: var(--accent-dim); box-shadow: 0 0 0 2px var(--accent-glow); }
+    textarea::placeholder { color: var(--text-muted); }
+    /* Send button: white-on-dark, matching desktop .composer-send. */
+    button {
+      border: 0;
+      border-radius: var(--radius-lg);
+      background: #fff;
+      color: #111;
+      padding: 0 18px;
+      min-height: 46px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 600;
+      transition: background 0.12s ease, transform 0.08s ease;
+    }
+    button:active { background: #d8d8d8; transform: translateY(1px); }
+    /* Header row: title left, model picker right. */
+    .head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    #model {
+      flex: 0 0 auto;
+      max-width: 56%;
+      font-family: inherit;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 6px 8px;
+      outline: none;
+    }
+    #model:focus { border-color: var(--accent-dim); }
+    /* Markdown rendering inside assistant messages. */
+    .assistant p { margin: 0 0 10px; }
+    .assistant p:last-child { margin-bottom: 0; }
+    .assistant h1, .assistant h2, .assistant h3 { margin: 14px 0 8px; line-height: 1.3; }
+    .assistant h1 { font-size: 20px; } .assistant h2 { font-size: 17px; } .assistant h3 { font-size: 15.5px; }
+    .assistant ul, .assistant ol { margin: 0 0 10px; padding-left: 22px; }
+    .assistant li { margin: 2px 0; }
+    .assistant a { color: var(--accent); }
+    .assistant code {
+      font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+      font-size: 13px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-faint);
+      border-radius: 5px;
+      padding: 1px 5px;
+    }
+    .assistant pre {
+      margin: 0 0 10px;
+      padding: 12px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .assistant pre code { background: none; border: 0; padding: 0; font-size: 12.5px; line-height: 1.5; }
+    .assistant strong { font-weight: 600; color: #fff; }
+    /* Blinking caret on the streaming reply. */
+    .assistant.streaming::after {
+      content: "";
+      display: inline-block;
+      width: 7px; height: 1.05em;
+      margin-left: 1px;
+      vertical-align: text-bottom;
+      background: var(--text-secondary);
+      animation: blink 1s step-start infinite;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
   </style>
 </head>
 <body>
   <header>
-    <h1>Gladdis Remote Chat</h1>
+    <div class="head-row">
+      <h1>Gladdis</h1>
+      <select id="model" aria-label="Model"></select>
+    </div>
     <div id="status">Connecting...</div>
   </header>
   <main id="messages"></main>
@@ -693,11 +889,88 @@ function remoteAppHtml(token: string): string {
     function add(role, text, messageId) {
       const el = document.createElement('div')
       el.className = 'msg ' + role
-      el.textContent = text
       if (messageId) el.dataset.messageId = messageId
+      if (role === 'assistant') setAssistantText(el, text || '')
+      else el.textContent = text
       messages.appendChild(el)
-      messages.scrollTop = messages.scrollHeight
+      scrollToBottomIfPinned()
       return el
+    }
+    // Pin-to-bottom: only auto-scroll if the user is already near the bottom, so
+    // reading scrollback isn't yanked away mid-stream.
+    function scrollToBottomIfPinned() {
+      const nearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80
+      if (nearBottom) messages.scrollTop = messages.scrollHeight
+    }
+    // Assistant text is markdown. We keep the raw source on the node and
+    // re-render on each streamed delta so formatting appears live, token by token.
+    function setAssistantText(el, raw) {
+      el.dataset.raw = raw
+      el.innerHTML = renderMarkdown(raw)
+    }
+    function appendAssistantText(el, delta) {
+      setAssistantText(el, (el.dataset.raw || '') + delta)
+    }
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+    }
+    // Tiny, dependency-free, XSS-safe markdown -> HTML. Everything is escaped
+    // first; only a known set of inline/block constructs are then re-introduced.
+    // Covers the formatting models actually emit in chat: fenced + inline code,
+    // bold/italic, headings, lists, links. Not full CommonMark by design.
+    function renderMarkdown(src) {
+      const lines = src.replace(/\\r\\n/g, '\\n').split('\\n')
+      let html = ''
+      let i = 0
+      let listType = null
+      const closeList = () => { if (listType) { html += '</' + listType + '>'; listType = null } }
+      while (i < lines.length) {
+        const line = lines[i]
+        // Fenced code block
+        const fence = line.match(/^\\s*\`\`\`(.*)$/)
+        if (fence) {
+          closeList()
+          const body = []
+          i++
+          while (i < lines.length && !/^\\s*\`\`\`/.test(lines[i])) { body.push(lines[i]); i++ }
+          i++ // skip closing fence
+          html += '<pre><code>' + escapeHtml(body.join('\\n')) + '</code></pre>'
+          continue
+        }
+        const heading = line.match(/^(#{1,3})\\s+(.*)$/)
+        if (heading) {
+          closeList()
+          const level = heading[1].length
+          html += '<h' + level + '>' + inline(heading[2]) + '</h' + level + '>'
+          i++; continue
+        }
+        const ul = line.match(/^\\s*[-*]\\s+(.*)$/)
+        const ol = line.match(/^\\s*\\d+\\.\\s+(.*)$/)
+        if (ul || ol) {
+          const want = ul ? 'ul' : 'ol'
+          if (listType !== want) { closeList(); listType = want; html += '<' + want + '>' }
+          html += '<li>' + inline((ul || ol)[1]) + '</li>'
+          i++; continue
+        }
+        if (line.trim() === '') { closeList(); i++; continue }
+        closeList()
+        html += '<p>' + inline(line) + '</p>'
+        i++
+      }
+      closeList()
+      return html
+    }
+    // Inline spans: escape, then re-introduce code / bold / italic / links.
+    function inline(text) {
+      // Pull out inline code first so its contents aren't formatted.
+      const codes = []
+      let s = text.replace(/\`([^\`]+)\`/g, (_m, c) => { codes.push(c); return '\\u0000' + (codes.length - 1) + '\\u0000' })
+      s = escapeHtml(s)
+      s = s.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>')
+      s = s.replace(/(^|[^*])\\*([^*]+)\\*/g, '$1<em>$2</em>')
+      s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^)\\s]+)\\)/g, (_m, label, url) => '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>')
+      s = s.replace(/\\u0000(\\d+)\\u0000/g, (_m, n) => '<code>' + escapeHtml(codes[Number(n)]) + '</code>')
+      return s
     }
     function clearMessages() {
       messages.textContent = ''
@@ -779,7 +1052,8 @@ function remoteAppHtml(token: string): string {
           type: 'send',
           clientMessageId: item.clientMessageId,
           text: item.text,
-          conversationId: item.conversationId
+          conversationId: item.conversationId,
+          modelId: item.modelId || selectedModel()
         }))
       }
       persistState()
@@ -900,15 +1174,20 @@ function remoteAppHtml(token: string): string {
           const assistant = assistants.get(stream.requestId)
           if (!assistant) return
           if (stream.type === 'delta') {
-            assistant.textContent += stream.text
+            assistant.classList.add('streaming')
+            appendAssistantText(assistant, stream.text)
+            scrollToBottomIfPinned()
           }
           if (stream.type === 'done') {
+            assistant.classList.remove('streaming')
             assistants.delete(stream.requestId)
             persistState()
             return
           }
           if (stream.type === 'error') {
-            assistant.textContent = assistant.textContent ? assistant.textContent + '\\n\\n' + stream.message : stream.message
+            assistant.classList.remove('streaming')
+            const prior = assistant.dataset.raw || ''
+            setAssistantText(assistant, prior ? prior + '\\n\\n' + stream.message : stream.message)
             assistants.delete(stream.requestId)
             persistState()
           }
@@ -919,7 +1198,8 @@ function remoteAppHtml(token: string): string {
           const pending = outbox.find((item) => item.sent && !item.acked)
           if (pending) {
             pending.sent = false
-            pending.assistant.textContent = pending.assistant.textContent || data.message
+            pending.assistant.classList.remove('streaming')
+            if (!(pending.assistant.dataset.raw || '')) setAssistantText(pending.assistant, data.message)
           }
           persistState()
         }
@@ -934,6 +1214,35 @@ function remoteAppHtml(token: string): string {
         reconnectTimer = setTimeout(connect, 800)
       })
     }
+    // ---- Model picker (limited set from /api/models) ----
+    const modelSelect = document.querySelector('#model')
+    const modelStorageKey = 'gladdis-remote-model:' + token
+    function selectedModel() { return modelSelect.value || undefined }
+    async function loadModels() {
+      try {
+        const res = await fetch('/api/models?token=' + encodeURIComponent(token))
+        if (!res.ok) return
+        const body = await res.json()
+        const models = Array.isArray(body.models) ? body.models : []
+        if (!models.length) { modelSelect.style.display = 'none'; return }
+        const saved = localStorage.getItem(modelStorageKey)
+        modelSelect.innerHTML = ''
+        for (const model of models) {
+          const opt = document.createElement('option')
+          opt.value = model.id
+          opt.textContent = model.label || model.id
+          modelSelect.appendChild(opt)
+        }
+        if (saved && models.some((m) => m.id === saved)) modelSelect.value = saved
+      } catch (_error) {
+        modelSelect.style.display = 'none'
+      }
+    }
+    modelSelect.addEventListener('change', () => {
+      try { localStorage.setItem(modelStorageKey, modelSelect.value) } catch (_error) {}
+    })
+    loadModels()
+
     connect()
     document.querySelector('#form').addEventListener('submit', async (event) => {
       event.preventDefault()
@@ -947,6 +1256,7 @@ function remoteAppHtml(token: string): string {
         clientMessageId: nextClientMessageId(),
         text,
         conversationId,
+        modelId: selectedModel(),
         requestId: null,
         assistantMessageId: null,
         assistant,

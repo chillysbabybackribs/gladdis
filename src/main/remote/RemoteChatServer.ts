@@ -7,6 +7,7 @@ import type {
   Conversation,
   ConversationMeta,
   ModelOption,
+  PhoneBridgeDevice,
   StoredMessage
 } from '../../../shared/types'
 import { MODELS } from '../../../shared/types'
@@ -16,6 +17,7 @@ export interface RemoteChatServerOptions {
   port?: number
   token?: string
   corsOrigin?: string
+  authenticateDevice?: (token: string) => PhoneBridgeDevice | null
 }
 
 export interface RemoteChatBridge {
@@ -90,6 +92,12 @@ export class RemoteChatServer {
 
   getInfo(): RemoteChatServerInfo | null {
     return this.info
+  }
+
+  appUrlForToken(token: string): string | null {
+    if (!this.info) return null
+    const appHost = advertisedHost(this.info.host)
+    return `http://${appHost}:${this.info.port}/app?token=${encodeURIComponent(token)}`
   }
 
   async close(): Promise<void> {
@@ -272,6 +280,7 @@ export class RemoteChatServer {
   private authorized(req: IncomingMessage): boolean {
     const supplied = bearerToken(req) ?? queryToken(req)
     if (!supplied) return false
+    if (this.options.authenticateDevice?.(supplied)) return true
     return safeEqual(supplied, this.token)
   }
 

@@ -523,6 +523,10 @@
   font-size: 11px;
   overflow-wrap: anywhere;
 }
+.phone-url.paired {
+  border-color: rgba(128, 190, 255, 0.45);
+  background: rgba(128, 190, 255, 0.08);
+}
 .phone-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -551,6 +555,38 @@
   color: var(--text-primary);
   font-size: 12px;
   line-height: 1.4;
+}
+.phone-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.phone-device,
+.phone-device-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.03);
+}
+.phone-device-empty {
+  justify-content: flex-start;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.phone-device-label {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.phone-device-meta {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 .modal-foot {
   display: flex;

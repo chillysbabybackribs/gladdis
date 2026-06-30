@@ -108,4 +108,29 @@ describe('RemoteChatServer', () => {
     expect(assistant?.text).toBe('Looks good.')
     expect(assistant?.parts).toEqual([{ kind: 'text', text: 'Looks good.' }])
   })
+
+  it('accepts durable device tokens through the auth hook', async () => {
+    const { bridge, send } = makeBridge()
+    server = new RemoteChatServer(bridge, {
+      token: 'server-token',
+      authenticateDevice: (token) => token === 'device-token'
+        ? { id: 'phone-1', label: 'Phone', createdAt: Date.now(), lastSeenAt: Date.now() }
+        : null
+    })
+    const info = await server.start()
+
+    const res = await fetch(`http://${info.host}:${info.port}/api/chat/send`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer device-token',
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({ text: 'from phone' })
+    })
+
+    expect(res.status).toBe(202)
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      messages: [{ role: 'user', content: 'from phone' }]
+    }))
+  })
 })

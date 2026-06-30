@@ -40,6 +40,7 @@ import {
   type DreamAutoConfig,
   type DreamRunRequest,
   type OptimizeAgentInput,
+  type PhoneBridgePairResult,
   type PhoneBridgeStartOptions,
   type PhoneBridgeStatus,
   type Provider,
@@ -51,11 +52,13 @@ import { AutoDreamScheduler } from './models/memory/AutoDreamScheduler'
 import { loadDreamHistory } from './models/memory/dreamHistory'
 import { ServiceRegistry } from './ServiceRegistry'
 import { RemoteChatServer } from './remote/RemoteChatServer'
+import { PhoneDeviceStore } from './remote/PhoneDeviceStore'
 
 let win: BaseWindow
 let uiView: WebContentsView
 let registry: ServiceRegistry
 let remoteChatServer: RemoteChatServer | null = null
+let phoneDeviceStore: PhoneDeviceStore
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const appId = process.env.GLADDIS_APP_ID ?? 'com.gladdis.app'
@@ -218,6 +221,7 @@ function createWindow(): void {
     },
     captureAppWindowPng
   )
+  phoneDeviceStore = new PhoneDeviceStore()
 
   // Start watching whichever workspace was open on launch (no-op if none).
   // Access via registry triggers lazy initialization of dependent services.
@@ -259,7 +263,8 @@ async function startRemoteChatServer(options: PhoneBridgeStartOptions = {}): Pro
       host: options.host ?? phoneBridgeHost,
       port: options.port ?? phoneBridgePort,
       token: phoneBridgeToken,
-      corsOrigin: phoneBridgeCorsOrigin
+      corsOrigin: phoneBridgeCorsOrigin,
+      authenticateDevice: (token) => phoneDeviceStore.authenticate(token)
     }
   )
   try {
@@ -287,8 +292,23 @@ function phoneBridgeStatus(info = remoteChatServer?.getInfo() ?? null): PhoneBri
     port: info?.port ?? phoneBridgePort ?? null,
     appUrl: info?.appUrl ?? null,
     token: info?.token ?? null,
-    corsOrigin: phoneBridgeCorsOrigin ?? null
+    corsOrigin: phoneBridgeCorsOrigin ?? null,
+    devices: phoneDeviceStore?.list() ?? []
   }
+}
+
+function pairPhoneDevice(label?: string): PhoneBridgePairResult {
+  const { device, token } = phoneDeviceStore.create(label)
+  return {
+    device,
+    token,
+    appUrl: remoteChatServer?.appUrlForToken(token) ?? null
+  }
+}
+
+function revokePhoneDevice(deviceId: string): PhoneBridgeStatus {
+  phoneDeviceStore.revoke(deviceId)
+  return phoneBridgeStatus()
 }
 
 function parseOptionalPort(value: string | undefined): number | undefined {
@@ -396,6 +416,8 @@ function registerIpc(): void {
     startRemoteChatServer(options)
   )
   ipcMain.handle(IPC.PHONE_STOP, () => stopRemoteChatServer())
+  ipcMain.handle(IPC.PHONE_PAIR_DEVICE, (_e, label?: string) => pairPhoneDevice(label))
+  ipcMain.handle(IPC.PHONE_REVOKE_DEVICE, (_e, deviceId: string) => revokePhoneDevice(deviceId))
 
   ipcMain.handle(IPC.WORKSPACE_GET, () => registry.workspace.get())
   ipcMain.handle(IPC.WORKSPACE_SET_FOLDER, (_e, folder: string | null) => applyWorkspaceFolder(folder))

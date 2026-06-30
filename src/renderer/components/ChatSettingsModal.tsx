@@ -77,6 +77,7 @@ export function ChatSettingsModal({
   const [phoneStatus, setPhoneStatus] = useState<PhoneBridgeStatus | null>(null)
   const [phoneBusy, setPhoneBusy] = useState(false)
   const [phoneError, setPhoneError] = useState<string | null>(null)
+  const [phoneInstallUrl, setPhoneInstallUrl] = useState<string | null>(null)
   const totals = auditRecords.reduce(
     (acc, r) => {
       acc.calls += 1
@@ -151,8 +152,33 @@ export function ChatSettingsModal({
     }
   }
   const copyPhoneUrl = async () => {
-    if (!phoneStatus?.appUrl) return
-    await navigator.clipboard?.writeText(phoneStatus.appUrl)
+    const url = phoneInstallUrl ?? phoneStatus?.appUrl
+    if (!url) return
+    await navigator.clipboard?.writeText(url)
+  }
+  const pairPhoneDevice = async () => {
+    setPhoneBusy(true)
+    setPhoneError(null)
+    try {
+      const result = await window.gladdis.phone.pairDevice()
+      setPhoneInstallUrl(result.appUrl)
+      setPhoneStatus(await window.gladdis.phone.status())
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPhoneBusy(false)
+    }
+  }
+  const revokePhoneDevice = async (deviceId: string) => {
+    setPhoneBusy(true)
+    setPhoneError(null)
+    try {
+      setPhoneStatus(await window.gladdis.phone.revokeDevice(deviceId))
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setPhoneBusy(false)
+    }
   }
   const codexLine = !codexStatus
     ? 'Checking...'
@@ -244,10 +270,13 @@ export function ChatSettingsModal({
               error={phoneError}
               status={phoneStatus}
               onCopy={copyPhoneUrl}
+              onPair={pairPhoneDevice}
               onRefresh={refreshPhone}
+              onRevoke={revokePhoneDevice}
               onStartLan={() => startPhone('0.0.0.0')}
               onStartLocal={() => startPhone()}
               onStop={stopPhone}
+              installUrl={phoneInstallUrl}
             />
           )}
           {tab === 'calls' && (
@@ -274,8 +303,11 @@ function PhonePane(props: {
   busy: boolean
   error: string | null
   status: PhoneBridgeStatus | null
+  installUrl: string | null
   onCopy: () => void
+  onPair: () => void
   onRefresh: () => void
+  onRevoke: (deviceId: string) => void
   onStartLan: () => void
   onStartLocal: () => void
   onStop: () => void
@@ -291,6 +323,11 @@ function PhonePane(props: {
       {status?.appUrl && (
         <div className="phone-url" title={status.appUrl}>
           {status.appUrl}
+        </div>
+      )}
+      {props.installUrl && (
+        <div className="phone-url paired" title={props.installUrl}>
+          {props.installUrl}
         </div>
       )}
       <div className="phone-grid">
@@ -312,14 +349,30 @@ function PhonePane(props: {
           </>
         ) : (
           <>
-            <button className="btn-primary" onClick={props.onCopy} disabled={!status?.appUrl}>Copy URL</button>
+            <button className="btn-primary" onClick={props.onPair} disabled={props.busy}>Pair phone</button>
+            <button className="btn-ghost" onClick={props.onCopy} disabled={!props.installUrl && !status?.appUrl}>Copy URL</button>
             <button className="btn-ghost" onClick={props.onStop} disabled={props.busy}>Stop</button>
           </>
         )}
         <button className="btn-ghost" onClick={props.onRefresh} disabled={props.busy}>Refresh</button>
       </div>
+      <div className="phone-devices">
+        {(status?.devices.length ?? 0) === 0 ? (
+          <div className="phone-device-empty">No paired phones yet.</div>
+        ) : status?.devices.map((device) => (
+          <div className="phone-device" key={device.id}>
+            <div>
+              <div className="phone-device-label">{device.label}</div>
+              <div className="phone-device-meta">
+                {device.lastSeenAt ? `Seen ${timeAgo(device.lastSeenAt)}` : `Paired ${timeAgo(device.createdAt)}`}
+              </div>
+            </div>
+            <button className="btn-ghost" onClick={() => props.onRevoke(device.id)} disabled={props.busy}>Revoke</button>
+          </div>
+        ))}
+      </div>
       <p className="modal-note">
-        LAN mode binds to 0.0.0.0 for trusted-network testing. The bridge still requires its generated bearer token.
+        LAN mode binds to 0.0.0.0 for trusted-network testing. Pairing creates a durable phone token so installed clients reconnect quickly.
       </p>
     </div>
   )

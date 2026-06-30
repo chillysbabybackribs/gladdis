@@ -101,7 +101,9 @@ const api: GladdisApi = {
   phone: {
     status: () => ipcRenderer.invoke(IPC.PHONE_STATUS),
     start: (options?: PhoneBridgeStartOptions) => ipcRenderer.invoke(IPC.PHONE_START, options),
-    stop: () => ipcRenderer.invoke(IPC.PHONE_STOP)
+    stop: () => ipcRenderer.invoke(IPC.PHONE_STOP),
+    pairDevice: (label?: string) => ipcRenderer.invoke(IPC.PHONE_PAIR_DEVICE, label),
+    revokeDevice: (deviceId: string) => ipcRenderer.invoke(IPC.PHONE_REVOKE_DEVICE, deviceId)
   },
   workspace: {
     get: () => ipcRenderer.invoke(IPC.WORKSPACE_GET),

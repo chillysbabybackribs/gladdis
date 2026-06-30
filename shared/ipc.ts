@@ -31,6 +31,8 @@ export const IPC = {
   PHONE_STATUS: 'phone:status',
   PHONE_START: 'phone:start',
   PHONE_STOP: 'phone:stop',
+  PHONE_PAIR_DEVICE: 'phone:pairDevice',
+  PHONE_REVOKE_DEVICE: 'phone:revokeDevice',
   WORKSPACE_GET: 'workspace:get',
   WORKSPACE_SET_FOLDER: 'workspace:setFolder',
   WORKSPACE_PICK_FOLDER: 'workspace:pickFolder',

@@ -25,7 +25,7 @@ import type {
   TtsResult,
   Workspace
 } from './chat'
-import type { PhoneBridgeStartOptions, PhoneBridgeStatus } from './phone'
+import type { PhoneBridgePairResult, PhoneBridgeStartOptions, PhoneBridgeStatus } from './phone'
 import type {
   OptimizeAgentInput,
   OptimizeAgentResult,
@@ -137,8 +137,12 @@ export interface GladdisApi {
     status: () => Promise<PhoneBridgeStatus>
     /** Start the bridge; pass host 0.0.0.0 only for trusted LAN testing. */
     start: (options?: PhoneBridgeStartOptions) => Promise<PhoneBridgeStatus>
-    /** Stop the bridge and revoke the in-memory token. */
+    /** Stop the bridge. A later start creates a fresh transient bridge token. */
     stop: () => Promise<PhoneBridgeStatus>
+    /** Create a durable phone device token and install URL. */
+    pairDevice: (label?: string) => Promise<PhoneBridgePairResult>
+    /** Revoke a paired phone device. */
+    revokeDevice: (deviceId: string) => Promise<PhoneBridgeStatus>
   }
   workspace: {
     /** The folder gladdis currently works from. */

@@ -3,6 +3,19 @@ export interface PhoneBridgeStartOptions {
   port?: number
 }
 
+export interface PhoneBridgeDevice {
+  id: string
+  label: string
+  createdAt: number
+  lastSeenAt: number | null
+}
+
+export interface PhoneBridgePairResult {
+  device: PhoneBridgeDevice
+  token: string
+  appUrl: string | null
+}
+
 export interface PhoneBridgeStatus {
   running: boolean
   host: string
@@ -10,4 +23,5 @@ export interface PhoneBridgeStatus {
   appUrl: string | null
   token: string | null
   corsOrigin: string | null
+  devices: PhoneBridgeDevice[]
 }

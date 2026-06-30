@@ -46,20 +46,11 @@ import {
 } from '../../shared/types'
 import { AutoDreamScheduler } from './models/memory/AutoDreamScheduler'
 import { loadDreamHistory } from './models/memory/dreamHistory'
+import { ServiceRegistry } from './ServiceRegistry'
 
 let win: BaseWindow
 let uiView: WebContentsView
-let tabs: TabManager
-let keys: KeyStore
-let chats: ChatStore
-let agents: AgentStore
-let chat: ChatService
-let extractor: PageExtractor
-let audit: ModelCallLedger
-let workspace: WorkspaceStore
-let tools: BrowserTools
-let ptyHost: PtyHost
-let autoDream: AutoDreamScheduler
+let registry: ServiceRegistry
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 const trustLocalCertificates = process.env.GLADDIS_TRUST_LOCAL_CERTS === '1'
@@ -77,12 +68,12 @@ const trustedLocalCertHosts = new Set([
 ])
 
 function applyWorkspaceFolder(folder: string | null) {
-  const previous = workspace.get().folder
-  const ws = workspace.setFolder(folder)
-  tools.setWorkspaceRoot(ws.folder)
-  chat.setCodexFolder(ws.folder)
-  if (previous && previous !== ws.folder) autoDream.stop(previous)
-  if (ws.folder) void autoDream.start(ws.folder)
+  const previous = registry.workspace.get().folder
+  const ws = registry.workspace.setFolder(folder)
+  registry.tools.setWorkspaceRoot(ws.folder)
+  registry.chat.setCodexFolder(ws.folder)
+  if (previous && previous !== ws.folder) registry.autoDream.stop(previous)
+  if (ws.folder) void registry.autoDream.start(ws.folder)
   if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.WORKSPACE_UPDATED, ws)
   return ws
 }
@@ -189,81 +180,34 @@ function createWindow(): void {
 
   const pushTabs = () => {
     if (uiView.webContents.isDestroyed()) return
-    uiView.webContents.send(IPC.TABS_UPDATED, tabs.snapshot())
+    uiView.webContents.send(IPC.TABS_UPDATED, registry.tabs.snapshot())
   }
 
-  tabs = new TabManager(
+  registry = new ServiceRegistry(
     win,
+    uiView,
     pushTabs,
     (e) => {
       // Forward CDP events to active pipeline Runner(s) for the tab that changed.
       // Supports concurrent turns from two chat panels with bounded overhead.
       broadcastCdpEvent(e)
       if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.CDP_EVENT, e)
-    }
-  )
-
-  keys = new KeyStore()
-  chats = new ChatStore()
-  agents = new AgentStore((next) => {
-    if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.AGENTS_UPDATED, next)
-  })
-  audit = new ModelCallLedger((event) => {
-    if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.AUDIT_EVENT, event)
-  })
-  extractor = new PageExtractor(tabs)
-  workspace = new WorkspaceStore()
-  tools = new BrowserTools(tabs, extractor, chats, keys)
-  tabs.setNavigationCacheInvalidator((tabId) => {
-    tools.clearPageCacheForTab(tabId)
-  })
-  // Apply the persisted working folder so fs tools resolve relative paths there.
-  tools.setWorkspaceRoot(workspace.get().folder)
-  // Wire the app-window capture (the root UI view lives here in main) so the
-  // screenshot_app tool can grab the whole window — same source the old composer
-  // "Screenshot App" button used (IPC.APP_CAPTURE), now a deterministic tool.
-  tools.setAppCapture(captureAppWindowPng)
-  chat = new ChatService(
-    keys,
-    (e) => {
-      if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.CHAT_STREAM, e)
     },
-    tools,
-    audit,
-    chats,
-    (e) => {
-      if (!uiView.webContents.isDestroyed()) uiView.webContents.send(IPC.DREAM_PROGRESS, e)
-    }
+    captureAppWindowPng
   )
-  // Seed Codex with the same persisted folder so its shell/cwd matches the fs
-  // tools after a restart, not just after the user re-picks (constructed here
-  // because chat must exist first).
-  chat.setCodexFolder(workspace.get().folder)
 
-  // Auto-dream scheduler: opt-in, Anthropic-calibrated 24h + 5-session dual
-  // gate. The scheduler reuses the same Dreamer instance ChatService owns,
-  // so manual + auto runs share the inFlight lock automatically.
-  autoDream = new AutoDreamScheduler({
-    dreamer: chat.getDreamerInstance(),
-    chats,
-    getWorkspaceRoot: () => workspace.get().folder,
-    notify: (event) => {
-      if (!uiView.webContents.isDestroyed()) {
-        uiView.webContents.send(IPC.DREAM_AUTO_NOTIFICATION, event)
-      }
-    }
-  })
   // Start watching whichever workspace was open on launch (no-op if none).
+  // Access via registry triggers lazy initialization of dependent services.
   void (async () => {
-    const folder = workspace.get().folder
-    if (folder) await autoDream.start(folder)
+    const folder = registry.workspace.get().folder
+    if (folder) await registry.autoDream.start(folder)
   })()
 
   registerIpc()
   registerApplicationMenu()
 
   // Open the homepage so gladdis always starts with exactly one browser tab.
-  tabs.ensureInitialTab()
+  registry.tabs.ensureInitialTab()
 }
 
 async function captureAppWindowPng(): Promise<string> {
@@ -302,141 +246,114 @@ async function captureAppWindowPng(): Promise<string> {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(IPC.TAB_CREATE, (_e, url?: string) => tabs.create(url))
-  ipcMain.handle(IPC.TAB_CLOSE, (_e, id: string) => tabs.close(id))
-  ipcMain.handle(IPC.TAB_SWITCH, (_e, id: string) => tabs.switch(id))
-  ipcMain.handle(IPC.TAB_NAVIGATE, (_e, id: string, url: string) => tabs.navigate(id, url))
-  ipcMain.handle(IPC.TAB_BACK, (_e, id: string) => tabs.back(id))
-  ipcMain.handle(IPC.TAB_FORWARD, (_e, id: string) => tabs.forward(id))
-  ipcMain.handle(IPC.TAB_RELOAD, (_e, id: string) => tabs.reload(id))
-  ipcMain.handle(IPC.TAB_REORDER, (_e, id: string, toIndex: number) => tabs.reorder(id, toIndex))
-  ipcMain.handle(IPC.TAB_LIST, () => tabs.list())
+  ipcMain.handle(IPC.TAB_CREATE, (_e, url?: string) => registry.tabs.create(url))
+  ipcMain.handle(IPC.TAB_CLOSE, (_e, id: string) => registry.tabs.close(id))
+  ipcMain.handle(IPC.TAB_SWITCH, (_e, id: string) => registry.tabs.switch(id))
+  ipcMain.handle(IPC.TAB_NAVIGATE, (_e, id: string, url: string) => registry.tabs.navigate(id, url))
+  ipcMain.handle(IPC.TAB_BACK, (_e, id: string) => registry.tabs.back(id))
+  ipcMain.handle(IPC.TAB_FORWARD, (_e, id: string) => registry.tabs.forward(id))
+  ipcMain.handle(IPC.TAB_RELOAD, (_e, id: string) => registry.tabs.reload(id))
+  ipcMain.handle(IPC.TAB_REORDER, (_e, id: string, toIndex: number) => registry.tabs.reorder(id, toIndex))
+  ipcMain.handle(IPC.TAB_LIST, () => registry.tabs.list())
   ipcMain.handle(IPC.TAB_CAPTURE, async (_e, id: string) => {
-    const base64 = await tabs.capturePagePng(id)
+    const base64 = await registry.tabs.capturePagePng(id)
     return `data:image/png;base64,${base64}`
   })
   ipcMain.handle(IPC.APP_CAPTURE, () => captureAppWindowPng())
-  ipcMain.on(IPC.LAYOUT_SET_BOUNDS, (_e, bounds: ViewBounds) => tabs.setBounds(bounds))
+  ipcMain.on(IPC.LAYOUT_SET_BOUNDS, (_e, bounds: ViewBounds) => registry.tabs.setBounds(bounds))
   ipcMain.on(IPC.LAYOUT_SET_BROWSER_VISIBLE, (_e, visible: boolean) =>
-    tabs.setBrowserVisible(visible)
+    registry.tabs.setBrowserVisible(visible)
   )
-  // Renderer holds the canonical browser-zoom value (persisted in
-  // localStorage alongside the chat zooms); main applies it uniformly to
-  // every WebContentsView. See TabManager.setZoomFactor for the contract.
-  ipcMain.on(IPC.BROWSER_SET_ZOOM, (_e, factor: number) => tabs.setZoomFactor(factor))
+  ipcMain.on(IPC.BROWSER_SET_ZOOM, (_e, factor: number) => registry.tabs.setZoomFactor(factor))
   ipcMain.handle(IPC.CDP_SEND, (_e, cmd: CdpCommand) =>
-    tabs.cdpSend(cmd.tabId, cmd.method, cmd.params)
+    registry.tabs.cdpSend(cmd.tabId, cmd.method, cmd.params)
   )
 
   // Chat / models
   ipcMain.on(IPC.CHAT_SEND, (_e, req: ChatRequest) => {
-    // Signal the auto-dream scheduler so it knows the user is active and
-    // delays any scheduled dream until the conversation goes quiet.
-    const folder = workspace.get().folder
-    if (folder) autoDream.nudge(folder)
-    void chat.send(req)
+    const folder = registry.workspace.get().folder
+    if (folder) registry.autoDream.nudge(folder)
+    void registry.chat.send(req)
   })
-  ipcMain.on(IPC.CHAT_INTERJECT, (_e, req: ChatInterjectionRequest) => chat.interject(req))
-  ipcMain.on(IPC.CHAT_ABORT, (_e, requestId: string) => chat.abort(requestId))
-  ipcMain.on(IPC.CHAT_PAUSE, (_e, requestId: string) => chat.pauseRequest(requestId))
-  ipcMain.on(IPC.CHAT_RESUME, (_e, requestId: string) => chat.resumeRequest(requestId))
-  ipcMain.handle(IPC.KEYS_STATUS, () => keys.status())
-  ipcMain.handle(IPC.KEYS_SET, (_e, provider: Provider, key: string) => keys.set(provider, key))
+  ipcMain.on(IPC.CHAT_INTERJECT, (_e, req: ChatInterjectionRequest) => registry.chat.interject(req))
+  ipcMain.on(IPC.CHAT_ABORT, (_e, requestId: string) => registry.chat.abort(requestId))
+  ipcMain.on(IPC.CHAT_PAUSE, (_e, requestId: string) => registry.chat.pauseRequest(requestId))
+  ipcMain.on(IPC.CHAT_RESUME, (_e, requestId: string) => registry.chat.resumeRequest(requestId))
+  ipcMain.handle(IPC.KEYS_STATUS, () => registry.keys.status())
+  ipcMain.handle(IPC.KEYS_SET, (_e, provider: Provider, key: string) => registry.keys.set(provider, key))
 
-  // Text-to-speech for audible replies (opt-in via the composer toggle). Reads
-  // text the model already produced; independent of chat/Codex generation.
   ipcMain.handle(IPC.TTS_SPEAK, (_e, text: string, voice?: string) =>
-    synthesizeSpeech(keys, text, voice)
+    synthesizeSpeech(registry.keys, text, voice)
   )
 
-  // Codex (local app-server) status. The Codex working folder follows the
-  // single workspace folder applied through applyWorkspaceFolder.
-  ipcMain.handle(IPC.CODEX_STATUS, () => chat.codexStatus())
-  ipcMain.handle(IPC.CODEX_MODELS, () => chat.codexModels())
-  ipcMain.handle(IPC.CLAUDE_CODE_STATUS, () => chat.claudeCodeStatus())
+  ipcMain.handle(IPC.CODEX_STATUS, () => registry.chat.codexStatus())
+  ipcMain.handle(IPC.CODEX_MODELS, () => registry.chat.codexModels())
+  ipcMain.handle(IPC.CLAUDE_CODE_STATUS, () => registry.chat.claudeCodeStatus())
 
-  // Working folder: the single "work from here" choice. One picker drives both
-  // routes — gladdis's own fs tools (relative-path root) AND Codex's starting cwd
-  // (where its shell runs, what its pwd reports). Without the Codex half, the
-  // header folder set fs-tool paths but Codex's shell still ran in homedir, so
-  // `pwd` answered the home dir instead of the chosen folder.
-  ipcMain.handle(IPC.WORKSPACE_GET, () => workspace.get())
+  ipcMain.handle(IPC.WORKSPACE_GET, () => registry.workspace.get())
   ipcMain.handle(IPC.WORKSPACE_SET_FOLDER, (_e, folder: string | null) => applyWorkspaceFolder(folder))
   ipcMain.handle(IPC.WORKSPACE_PICK_FOLDER, async () => {
     const result = await dialog.showOpenDialog(win, {
       title: 'Choose a folder to work from',
-      defaultPath: workspace.get().folder ?? undefined,
+      defaultPath: registry.workspace.get().folder ?? undefined,
       properties: ['openDirectory', 'createDirectory'],
       buttonLabel: 'Use folder'
     })
-    if (result.canceled || result.filePaths.length === 0) return workspace.get()
+    if (result.canceled || result.filePaths.length === 0) return registry.workspace.get()
     return applyWorkspaceFolder(result.filePaths[0])
   })
   ipcMain.handle(IPC.WORKSPACE_CREATE_FOLDER, (_e, folder: string) =>
     createAndUseWorkspaceFolder(folder)
   )
 
-  ipcMain.handle(IPC.AUDIT_LIST, () => audit.list())
+  ipcMain.handle(IPC.AUDIT_LIST, () => registry.audit.list())
 
-  // Custom agents are reusable prompt/model presets created from the app menu.
-  ipcMain.handle(IPC.AGENTS_LIST, () => agents.list())
+  ipcMain.handle(IPC.AGENTS_LIST, () => registry.agents.list())
   ipcMain.handle(IPC.AGENTS_OPTIMIZE, (_e, input: OptimizeAgentInput) =>
-    chat.agentOptimizer.optimizeAgent(input)
+    registry.chat.agentOptimizer.optimizeAgent(input)
   )
-  ipcMain.handle(IPC.AGENTS_SAVE, (_e, input: SaveAgentInput) => agents.save(input))
-  ipcMain.handle(IPC.AGENTS_DELETE, (_e, id: string) => agents.delete(id))
+  ipcMain.handle(IPC.AGENTS_SAVE, (_e, input: SaveAgentInput) => registry.agents.save(input))
+  ipcMain.handle(IPC.AGENTS_DELETE, (_e, id: string) => registry.agents.delete(id))
 
-  // Chat history persistence. Both panels persist independently and each
-  // restores its own side on launch, so the optional `panel` arg is what
-  // keeps left and right chats from ever appearing on the wrong side.
-  ipcMain.handle(IPC.CHATS_LIST, (_e, panel?: ChatPanelSide) => chats.list(panel))
-  ipcMain.handle(IPC.CHATS_GET, (_e, id: string) => chats.get(id))
-  ipcMain.handle(IPC.CHATS_SAVE, (_e, conv: Conversation) => chats.save(conv))
+  ipcMain.handle(IPC.CHATS_LIST, (_e, panel?: ChatPanelSide) => registry.chats.list(panel))
+  ipcMain.handle(IPC.CHATS_GET, (_e, id: string) => registry.chats.get(id))
+  ipcMain.handle(IPC.CHATS_SAVE, (_e, conv: Conversation) => registry.chats.save(conv))
   ipcMain.on(IPC.CHATS_SAVE_SYNC, (e, conv: Conversation) => {
-    e.returnValue = chats.save(conv)
+    e.returnValue = registry.chats.save(conv)
   })
-  ipcMain.handle(IPC.CHATS_DELETE, (_e, id: string) => chats.delete(id))
-  ipcMain.handle(IPC.CHATS_LAST_ACTIVE, (_e, panel?: ChatPanelSide) => chats.lastActive(panel))
+  ipcMain.handle(IPC.CHATS_DELETE, (_e, id: string) => registry.chats.delete(id))
+  ipcMain.handle(IPC.CHATS_LAST_ACTIVE, (_e, panel?: ChatPanelSide) => registry.chats.lastActive(panel))
   ipcMain.handle(IPC.CHATS_TITLE, async (_e, id: string, modelId: string) => {
-    const conv = chats.get(id)
+    const conv = registry.chats.get(id)
     if (!conv) return null
-    const title = await chat.generateTitle(
+    const title = await registry.chat.generateTitle(
       modelId,
       conv.messages.map((m) => ({ role: m.role, text: m.text }))
     )
-    if (title) chats.setTitle(id, title)
+    if (title) registry.chats.setTitle(id, title)
     return title
   })
   ipcMain.handle(
     IPC.CHATS_SEARCH,
-    (_e, query: string, limit?: number, panel?: ChatPanelSide) => chats.search(query, limit, panel)
+    (_e, query: string, limit?: number, panel?: ChatPanelSide) => registry.chats.search(query, limit, panel)
   )
 
-  // Deep page extraction (perception layer)
-  ipcMain.handle(IPC.EXTRACT_RUN, (_e, tabId: string) => extractor.run(tabId))
+  ipcMain.handle(IPC.EXTRACT_RUN, (_e, tabId: string) => registry.extractor.run(tabId))
   ipcMain.handle(IPC.EXTRACT_OVERLAY, (_e, tabId: string, on: boolean) =>
-    extractor.overlay(tabId, on)
+    registry.extractor.overlay(tabId, on)
   )
 
-  // Exec bridge: run JS inside a tab's page context, structured result back.
   ipcMain.handle(IPC.BROWSER_EXEC, (_e, tabId: string, jsCode: string) =>
-    tabs.executeJavaScript(tabId, jsCode)
+    registry.tabs.executeJavaScript(tabId, jsCode)
   )
 
-  // Memory "Dreaming" — the manual-trigger background memory curator. The
-  // pipeline lives in ChatService so it can reuse its provider-agnostic
-  // complete() and the live Codex catalog without duplicating those plumbing
-  // concerns here.
   ipcMain.handle(IPC.DREAM_RUN, async (_e, req: DreamRunRequest) => {
-    const result = await chat.dreamRun(req)
-    // Manual runs reset the scheduler gates — same as if the user had let it
-    // auto-trigger. Only count successful runs so a partial failure doesn't
-    // hide future auto-runs behind the 24h gate.
-    if (result.ok) autoDream.recordManualRun(req.workspaceRoot)
+    const result = await registry.chat.dreamRun(req)
+    if (result.ok) registry.autoDream.recordManualRun(req.workspaceRoot)
     return result
   })
   ipcMain.handle(IPC.DREAM_LOAD_LAST, (_e, workspaceRoot: string) =>
-    chat.dreamLoadLast(workspaceRoot)
+    registry.chat.dreamLoadLast(workspaceRoot)
   )
   ipcMain.handle(
     IPC.DREAM_ADOPT,
@@ -444,49 +361,43 @@ function registerIpc(): void {
       _e,
       workspaceRoot: string,
       selection?: import('../../shared/types').DreamAdoptSelection
-    ) => chat.dreamAdopt(workspaceRoot, selection)
+    ) => registry.chat.dreamAdopt(workspaceRoot, selection)
   )
   ipcMain.handle(IPC.DREAM_DISCARD, (_e, workspaceRoot: string) =>
-    chat.dreamDiscard(workspaceRoot)
+    registry.chat.dreamDiscard(workspaceRoot)
   )
   ipcMain.handle(IPC.DREAM_STATUS, (_e, workspaceRoot: string) =>
-    chat.dreamStatus(workspaceRoot)
+    registry.chat.dreamStatus(workspaceRoot)
   )
 
-  // Auto-dream scheduler — config get/set/status, history listing, and a
-  // renderer-side nudge channel (kept separate from CHAT_SEND so the
-  // renderer can also signal activity from non-message UX, e.g. typing).
   ipcMain.handle(IPC.DREAM_AUTO_GET_CONFIG, (_e, workspaceRoot: string) => {
-    void autoDream.start(workspaceRoot)
-    return autoDream.getConfig(workspaceRoot)
+    void registry.autoDream.start(workspaceRoot)
+    return registry.autoDream.getConfig(workspaceRoot)
   })
   ipcMain.handle(
     IPC.DREAM_AUTO_SET_CONFIG,
     (_e, workspaceRoot: string, patch: Partial<DreamAutoConfig>) =>
-      autoDream.setConfig(workspaceRoot, patch)
+      registry.autoDream.setConfig(workspaceRoot, patch)
   )
   ipcMain.handle(IPC.DREAM_AUTO_STATUS, (_e, workspaceRoot: string) =>
-    autoDream.status(workspaceRoot)
+    registry.autoDream.status(workspaceRoot)
   )
   ipcMain.on(IPC.DREAM_AUTO_NUDGE, (_e, workspaceRoot: string) => {
-    autoDream.nudge(workspaceRoot)
+    registry.autoDream.nudge(workspaceRoot)
   })
   ipcMain.handle(IPC.DREAM_HISTORY_LIST, (_e, workspaceRoot: string) =>
     loadDreamHistory(workspaceRoot)
   )
 
-  // Real PTY terminal — the human's interactive shell, separate from any
-  // tool-loop shell access the model already has. Defaults its cwd to the
-  // user-chosen workspace folder so the three "where am I" answers
-  // (terminal, Codex shell, fs tools) all line up.
-  ptyHost = registerTerminalIpc(
-    () => workspace.get().folder,
+  const ptyHost = registerTerminalIpc(
+    () => registry.workspace.get().folder,
     (channel, payload) => sendIfLive(uiView.webContents, channel, payload)
   )
+  registry.setPtyHost(ptyHost)
 }
 
 async function promptCreateWorkspaceFolder(): Promise<void> {
-  const defaultParent = workspace?.get().folder ?? join(homedir(), 'Desktop')
+  const defaultParent = registry?.workspace.get().folder ?? join(homedir(), 'Desktop')
   const result = await dialog.showSaveDialog(win, {
     title: 'Create a new workspace folder',
     defaultPath: join(defaultParent, 'untitled-workspace'),
@@ -504,7 +415,7 @@ function sendAppCommand(command: AppCommand): void {
 }
 
 function registerApplicationMenu(): void {
-  const hasWorkspace = !!workspace.get().folder
+  const hasWorkspace = !!registry.workspace.get().folder
   const template: MenuItemConstructorOptions[] = [
     {
       label: 'File',
@@ -529,7 +440,7 @@ function registerApplicationMenu(): void {
             void dialog
               .showOpenDialog(win, {
                 title: 'Choose a folder to work from',
-                defaultPath: workspace.get().folder ?? undefined,
+                defaultPath: registry.workspace.get().folder ?? undefined,
                 properties: ['openDirectory', 'createDirectory'],
                 buttonLabel: 'Use folder'
               })
@@ -700,6 +611,5 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  // Kill every live shell so we don't orphan PTY processes when the app exits.
-  ptyHost?.disposeAll()
+  registry?.disposePtyHost()
 })

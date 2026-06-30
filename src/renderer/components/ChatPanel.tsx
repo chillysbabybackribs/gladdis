@@ -557,7 +557,11 @@ export function ChatPanel({
     <>
       <div className="chat" style={chatStyle}>
         <div className="chat-messages" ref={scrollRef}>
-          <ChatMessageList messages={messages} streaming={streaming} />
+          <ChatMessageList
+            messages={messages}
+            streaming={streaming}
+            streamingAssistantMessageId={activeAssistantMessageId.current}
+          />
         </div>
 
         {!autoScroll.isAtBottom && messages.length > 0 && (

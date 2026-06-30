@@ -1,7 +1,54 @@
+import { memo } from 'react'
 import { ChatMessageBody } from '../ChatMessageBody'
 import { CopyButton } from '../CopyButton'
 import type { Message } from '../chatTypes'
 import { openImageInTab } from '../../lib/openImageInTab'
+
+function UserMessageRow({ message }: { message: Message }) {
+  return (
+    <div className="chat-msg user">
+      {message.text}
+      {message.images && message.images.length > 0 && (
+        <div className="chat-msg-images">
+          {message.images.map((img, idx) => (
+            <img
+              key={idx}
+              src={img}
+              alt="attachment"
+              className="chat-msg-thumb"
+              onClick={() => void openImageInTab(img, 'Chat attachment')}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const MemoUserMessageRow = memo(
+  UserMessageRow,
+  (prev, next) => prev.message === next.message
+)
+
+function AssistantMessageRow({
+  message,
+  isStreaming
+}: {
+  message: Message
+  isStreaming: boolean
+}) {
+  return (
+    <div className="chat-msg assistant">
+      <ChatMessageBody message={message} />
+      {message.text && !isStreaming && <CopyButton text={message.text} />}
+    </div>
+  )
+}
+
+const MemoAssistantMessageRow = memo(
+  AssistantMessageRow,
+  (prev, next) => prev.message === next.message && prev.isStreaming === next.isStreaming
+)
 
 /**
  * Renders the assistant/user transcript stack inside the chat panel. The
@@ -11,10 +58,12 @@ import { openImageInTab } from '../../lib/openImageInTab'
  */
 export function ChatMessageList({
   messages,
-  streaming
+  streaming,
+  streamingAssistantMessageId
 }: {
   messages: Message[]
   streaming: boolean
+  streamingAssistantMessageId?: string | null
 }) {
   if (messages.length === 0) {
     return (
@@ -30,28 +79,14 @@ export function ChatMessageList({
     <>
       {messages.map((m, i) => {
         const itemKey = m.id ?? `${m.role}-${i}`
+        const isStreamingAssistant =
+          streaming &&
+          m.role === 'assistant' &&
+          (streamingAssistantMessageId ? m.id === streamingAssistantMessageId : i === messages.length - 1)
         return m.role === 'assistant' ? (
-          <div key={itemKey} className="chat-msg assistant">
-            <ChatMessageBody message={m} />
-            {m.text && !(streaming && i === messages.length - 1) && <CopyButton text={m.text} />}
-          </div>
+          <MemoAssistantMessageRow key={itemKey} message={m} isStreaming={isStreamingAssistant} />
         ) : (
-          <div key={itemKey} className="chat-msg user">
-            {m.text}
-            {m.images && m.images.length > 0 && (
-              <div className="chat-msg-images">
-                {m.images.map((img, idx) => (
-                  <img
-                    key={idx}
-                    src={img}
-                    alt="attachment"
-                    className="chat-msg-thumb"
-                    onClick={() => void openImageInTab(img, 'Chat attachment')}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+          <MemoUserMessageRow key={itemKey} message={m} />
         )
       })}
     </>

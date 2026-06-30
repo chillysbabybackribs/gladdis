@@ -35,6 +35,7 @@ export const MODELS: ModelOption[] = [
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', provider: 'anthropic', availability: 'verified' },
   { id: 'claude-code-opus', label: 'Claude Code · Opus', provider: 'claudecode', availability: 'verified' },
   { id: 'claude-code-sonnet', label: 'Claude Code · Sonnet', provider: 'claudecode', availability: 'verified' },
+  { id: 'claude-code-haiku', label: 'Claude Code · Haiku 4.5', provider: 'claudecode', availability: 'verified' },
   { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview', provider: 'google', availability: 'verified' },
   { id: 'gemini-3.1-pro-preview-customtools', label: 'Gemini 3.1 Pro Preview Custom Tools', provider: 'google', availability: 'verified' },

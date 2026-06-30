@@ -315,6 +315,8 @@ function claudeCliModel(modelId: string): string {
       return 'opus'
     case 'claude-code-sonnet':
       return 'sonnet'
+    case 'claude-code-haiku':
+      return 'haiku'
     default:
       return modelId
   }
@@ -323,7 +325,12 @@ function claudeCliModel(modelId: string): string {
 function looksAuthenticated(text: string): boolean {
   const lower = text.toLowerCase()
   return (
-    (lower.includes('logged in') || lower.includes('authenticated') || lower.includes('active')) &&
+    (
+      lower.includes('logged in') ||
+      lower.includes('authenticated') ||
+      lower.includes('active') ||
+      lower.includes('login method:')
+    ) &&
     !lower.includes('not logged in') &&
     !lower.includes('no active')
   )
@@ -331,7 +338,7 @@ function looksAuthenticated(text: string): boolean {
 
 function inferAuthMethod(text: string): string | null {
   const lower = text.toLowerCase()
-  if (lower.includes('max')) return 'claude-max'
+  if (lower.includes('claude max account') || lower.includes('max account')) return 'claude-max'
   if (lower.includes('api key')) return 'apikey'
   if (lower.includes('oauth') || lower.includes('logged in')) return 'oauth'
   return 'authenticated'

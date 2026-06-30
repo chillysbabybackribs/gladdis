@@ -69,6 +69,7 @@ export async function runReadPage(
           pageUrl: cached.pageUrl,
           focus: typeof args.focus === 'string' ? args.focus : undefined,
           viewportOnly: args.viewportOnly === true,
+          digest: cached.digest,
           cache: {
             status: 'hit',
             capturedAt: cached.capturedAt,
@@ -109,6 +110,7 @@ export async function runReadPage(
       pageUrl: resolvedUrl,
       focus: typeof args.focus === 'string' ? args.focus : undefined,
       viewportOnly: args.viewportOnly === true,
+      digest,
       cache: {
         status: 'miss',
         capturedAt: nowCaptured,

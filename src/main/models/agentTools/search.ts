@@ -111,6 +111,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
             pageUrl: { type: 'string' },
             focus: { type: 'string' },
             viewportOnly: { type: 'boolean' },
+            digest: { type: 'string' },
             timings: {
               type: 'object',
               properties: {
@@ -124,7 +125,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
               required: ['preflightMs', 'navigateCaptureMs', 'readableMs', 'extractMs', 'digestMs', 'totalMs']
             }
           },
-          required: ['requestedUrl', 'finalUrl', 'pageUrl', 'viewportOnly', 'timings']
+          required: ['requestedUrl', 'finalUrl', 'pageUrl', 'viewportOnly', 'digest', 'timings']
         }
       },
       required: ['query', 'url', 'search', 'page']
@@ -157,6 +158,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
         pageUrl: { type: 'string' },
         focus: { type: 'string' },
         viewportOnly: { type: 'boolean' },
+        digest: { type: 'string' },
         timings: {
           type: 'object',
           properties: {
@@ -170,7 +172,7 @@ export const SEARCH_TOOLS: ToolDef[] = [
           required: ['preflightMs', 'navigateCaptureMs', 'readableMs', 'extractMs', 'digestMs', 'totalMs']
         }
       },
-      required: ['requestedUrl', 'finalUrl', 'pageUrl', 'viewportOnly', 'timings']
+      required: ['requestedUrl', 'finalUrl', 'pageUrl', 'viewportOnly', 'digest', 'timings']
     }
   },
   {

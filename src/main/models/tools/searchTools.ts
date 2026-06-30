@@ -295,6 +295,7 @@ export async function runFetchPage(
     pageUrl,
     ...(typeof args.focus === 'string' ? { focus: args.focus } : {}),
     viewportOnly: args.viewportOnly === true,
+    digest,
     preNavigationNetwork: {
       totalSeen: preNavigationNetwork.totalSeen,
       capturedCount: preNavigationNetwork.captured.length,

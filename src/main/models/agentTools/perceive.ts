@@ -40,9 +40,10 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
         pageUrl: { type: 'string' },
         focus: { type: 'string' },
         viewportOnly: { type: 'boolean' },
+        digest: { type: 'string' },
         cache: READ_PAGE_CACHE_SCHEMA
       },
-      required: ['pageUrl', 'viewportOnly', 'cache']
+      required: ['pageUrl', 'viewportOnly', 'digest', 'cache']
     }
   },
   {

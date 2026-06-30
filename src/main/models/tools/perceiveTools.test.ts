@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { normalizeWatchNetworkArgs, runWatchNetwork, type PerceiveToolsDeps } from './perceiveTools'
+import { normalizeWatchNetworkArgs, runReadPage, runWatchNetwork, type PerceiveToolsDeps } from './perceiveTools'
 
 function mockPerceiveDeps(overrides: Partial<PerceiveToolsDeps> & Pick<PerceiveToolsDeps, 'tabs'>): PerceiveToolsDeps {
   return {
@@ -304,5 +304,51 @@ describe('runWatchNetwork', () => {
       ok: false,
       text: 'watch_network error: watch_network arg "window_ms" must be a finite number'
     })
+  })
+})
+
+describe('runReadPage', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  // Regression guard: the digest must ride in structuredContent, not only text.
+  // MCP clients (Claude Code / Cursor) surface structuredContent when an
+  // outputSchema is declared, so a digest left only in `text` reads as empty.
+  it('mirrors the page digest into structuredContent on a cache miss', async () => {
+    const deps = mockPerceiveDeps({
+      tabs: { getTabUrl: () => 'https://example.com/' } as any,
+      extractor: { run: vi.fn(async () => ({ url: 'https://example.com/', title: 'Example' })) } as any,
+      pageCache: new Map(),
+      pageCacheLimit: 8,
+      pageCacheTtlMs: 60_000
+    })
+
+    const outcome = await runReadPage(deps, {}, 'tab-1')
+
+    expect(outcome.ok).toBe(true)
+    const sc = outcome.structuredContent as Record<string, unknown>
+    expect(typeof sc.digest).toBe('string')
+    expect((sc.digest as string).length).toBeGreaterThan(0)
+    // and it is the same body surfaced in the text channel
+    expect(outcome.text).toContain(sc.digest as string)
+    expect((sc.cache as Record<string, unknown>).status).toBe('miss')
+  })
+
+  it('mirrors the cached digest into structuredContent on a cache hit', async () => {
+    const cache = new Map([
+      ['tab-1::false', { pageUrl: 'https://example.com/', digest: 'CACHED DIGEST BODY', capturedAt: Date.now() }]
+    ])
+    const deps = mockPerceiveDeps({
+      tabs: { getTabUrl: () => 'https://example.com/' } as any,
+      extractor: { run: vi.fn(async () => { throw new Error('should not extract on hit') }) } as any,
+      pageCache: cache,
+      pageCacheLimit: 8,
+      pageCacheTtlMs: 60_000
+    })
+
+    const outcome = await runReadPage(deps, {}, 'tab-1')
+
+    const sc = outcome.structuredContent as Record<string, unknown>
+    expect(sc.digest).toBe('CACHED DIGEST BODY')
+    expect((sc.cache as Record<string, unknown>).status).toBe('hit')
   })
 })

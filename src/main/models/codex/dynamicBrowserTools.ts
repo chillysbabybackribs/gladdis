@@ -130,6 +130,14 @@ export function codexDynamicToolResponse(outcome: ToolOutcome): {
   success: boolean
 } {
   const textPayload: Record<string, unknown> = { ok: outcome.ok, text: outcome.text }
+  // Codex only consumes the text channel, so fold the structured payload into it.
+  // Without this, structuredContent-only data (search results/digests, network
+  // telemetry, memory indices, grep matches) is invisible to Codex. Tools that
+  // also put their digest in `text` will repeat it here, but the digest is
+  // already bounded by digestPage, and Codex being blind to the data is worse.
+  if (outcome.structuredContent !== undefined) {
+    textPayload.structuredContent = outcome.structuredContent
+  }
   const contentItems: Array<{ type: 'inputText'; text: string } | { type: 'inputImage'; imageUrl: string }> = [
     { type: 'inputText', text: JSON.stringify(textPayload) }
   ]

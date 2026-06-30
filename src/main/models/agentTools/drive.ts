@@ -27,6 +27,15 @@ export const DRIVE_TOOLS: ToolDef[] = [
         }
       },
       required: ['url']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        wait: { type: 'boolean' },
+        timeoutMs: { type: 'number' }
+      },
+      required: ['url', 'wait', 'timeoutMs']
     }
   },
   {
@@ -35,6 +44,11 @@ export const DRIVE_TOOLS: ToolDef[] = [
       'Trusted mouse click at viewport coordinates (x, y). ' +
       'Get coordinates from the ACTIONS table in the last read_page digest.',
     parameters: {
+      type: 'object',
+      properties: { x: { type: 'number' }, y: { type: 'number' } },
+      required: ['x', 'y']
+    },
+    outputSchema: {
       type: 'object',
       properties: { x: { type: 'number' }, y: { type: 'number' } },
       required: ['x', 'y']
@@ -47,6 +61,14 @@ export const DRIVE_TOOLS: ToolDef[] = [
       type: 'object',
       properties: { text: { type: 'string' } },
       required: ['text']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+        charsTyped: { type: 'number' }
+      },
+      required: ['text', 'charsTyped']
     }
   },
   {
@@ -57,6 +79,11 @@ export const DRIVE_TOOLS: ToolDef[] = [
     parameters: {
       type: 'object',
       properties: { key: { type: 'string', description: 'Key name, e.g. "Enter".' } },
+      required: ['key']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: { key: { type: 'string' } },
       required: ['key']
     }
   },
@@ -71,6 +98,14 @@ export const DRIVE_TOOLS: ToolDef[] = [
         code: { type: 'string', description: 'JavaScript. Use `return` to yield a value.' }
       },
       required: ['code']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string' },
+        result: {}
+      },
+      required: ['code', 'result']
     }
   },
   {
@@ -85,6 +120,15 @@ export const DRIVE_TOOLS: ToolDef[] = [
         params: { type: 'object', description: 'CDP params.' }
       },
       required: ['method']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        method: { type: 'string' },
+        params: { type: 'object' },
+        result: {}
+      },
+      required: ['method', 'result']
     }
   },
   {
@@ -109,6 +153,31 @@ export const DRIVE_TOOLS: ToolDef[] = [
         }
       },
       required: ['query']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        type: { type: 'string' },
+        caseSensitive: { type: 'boolean' },
+        coordinates: {
+          type: 'object',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' }
+          },
+          required: ['x', 'y']
+        },
+        match: {
+          type: 'object',
+          properties: {
+            tagName: { type: 'string' },
+            selector: { type: 'string' },
+            matchedLine: { type: 'string' }
+          }
+        }
+      },
+      required: ['query', 'type', 'caseSensitive', 'coordinates', 'match']
     }
   },
   {
@@ -137,6 +206,32 @@ export const DRIVE_TOOLS: ToolDef[] = [
         }
       },
       required: ['query', 'text']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        text: { type: 'string' },
+        type: { type: 'string' },
+        caseSensitive: { type: 'boolean' },
+        coordinates: {
+          type: 'object',
+          properties: {
+            x: { type: 'number' },
+            y: { type: 'number' }
+          },
+          required: ['x', 'y']
+        },
+        match: {
+          type: 'object',
+          properties: {
+            tagName: { type: 'string' },
+            selector: { type: 'string' },
+            matchedLine: { type: 'string' }
+          }
+        }
+      },
+      required: ['query', 'text', 'type', 'caseSensitive', 'coordinates', 'match']
     }
   }
 ]

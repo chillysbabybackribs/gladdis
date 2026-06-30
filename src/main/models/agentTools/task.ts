@@ -22,6 +22,29 @@ export const TASK_TOOLS: ToolDef[] = [
         }
       },
       required: ['task']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string' },
+        site: { type: 'string' },
+        success: { type: 'boolean' },
+        tookMs: { type: 'number' },
+        llmCalls: { type: 'number' },
+        deterministicChecks: { type: 'number' },
+        finalUrl: { type: 'string' },
+        finalTitle: { type: 'string' },
+        steps: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              intent: { type: 'string' }
+            }
+          }
+        }
+      },
+      required: ['task', 'success', 'tookMs', 'llmCalls', 'deterministicChecks', 'finalUrl', 'finalTitle', 'steps']
     }
   }
 ]

@@ -394,7 +394,17 @@ export async function runGrepPage(
 
     const matches = runResult.result as any[]
     if (!Array.isArray(matches) || matches.length === 0) {
-      return { ok: true, text: `No matches found for query "${query}" on the page.` }
+      return {
+        ok: true,
+        text: `No matches found for query "${query}" on the page.`,
+        structuredContent: {
+          query,
+          type,
+          caseSensitive,
+          contextLines,
+          matches: []
+        }
+      }
     }
 
     let output = `Hybrid Grep/CDP search completed on page. Found ${matches.length} match(es):\n\n`
@@ -429,7 +439,17 @@ export async function runGrepPage(
       output += `\n`
     })
 
-    return { ok: true, text: output.trim() }
+    return {
+      ok: true,
+      text: output.trim(),
+      structuredContent: {
+        query,
+        type,
+        caseSensitive,
+        contextLines,
+        matches: matches.filter((match) => match && typeof match === 'object')
+      }
+    }
   } catch (err: any) {
     return { ok: false, text: `grep_page error: ${err.message}` }
   }

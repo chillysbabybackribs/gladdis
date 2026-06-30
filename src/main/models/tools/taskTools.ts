@@ -69,7 +69,21 @@ export async function runBrowseTask(
     finalCapture,
     llm
   })
-  return { ok: true, text: answer }
+  return {
+    ok: true,
+    text: answer,
+    structuredContent: {
+      task,
+      ...(site ? { site } : {}),
+      success: trajectory.success,
+      tookMs: trajectory.tookMs,
+      llmCalls: trajectory.llmCalls,
+      deterministicChecks: trajectory.deterministicChecks,
+      finalUrl: finalCapture.url,
+      finalTitle: finalCapture.content?.title ?? '',
+      steps: trajectory.steps.map((step) => ({ intent: step.step.intent }))
+    }
+  }
 }
 
 /**

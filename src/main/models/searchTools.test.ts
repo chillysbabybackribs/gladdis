@@ -69,6 +69,13 @@ describe('unified search tool', () => {
     expect(out.text).toContain('INDEX')
     expect(out.text).toContain('EVIDENCE')
     expect(out.text).toContain('the page body')
+    expect(out.structuredContent).toEqual(
+      expect.objectContaining({
+        query: 'electron webcontentsview',
+        results: [expect.objectContaining({ url: 'https://example.com/a' })],
+        digests: [expect.objectContaining({ url: 'https://example.com/a' })]
+      })
+    )
   })
 
   it('auto-navigates search results for browser-oriented tasks when the flag is omitted', async () => {
@@ -109,6 +116,13 @@ describe('unified search tool', () => {
     expect(extractor.run).toHaveBeenCalledWith('tab-1')
     expect(out.ok).toBe(true)
     expect(out.text).toContain('the page body')
+    expect(out.structuredContent).toEqual(
+      expect.objectContaining({
+        requestedUrl: 'https://example.com/a',
+        finalUrl: 'https://example.com/a',
+        pageUrl: 'https://example.com/a'
+      })
+    )
   })
 
   it('search_open runs web search and direct page fetch together', async () => {
@@ -130,6 +144,18 @@ describe('unified search tool', () => {
     expect(out.ok).toBe(true)
     expect(out.text).toContain('DIRECT PAGE:')
     expect(out.text).toContain('WEB SEARCH:')
+    expect(out.structuredContent).toEqual(
+      expect.objectContaining({
+        query: 'electron docs',
+        url: 'https://electronjs.org/docs/latest/',
+        search: expect.objectContaining({
+          results: [expect.objectContaining({ url: 'https://example.com/a' })]
+        }),
+        page: expect.objectContaining({
+          requestedUrl: 'https://electronjs.org/docs/latest/'
+        })
+      })
+    )
   })
 
   it('rejects empty/invalid input cleanly without throwing', async () => {

@@ -76,6 +76,47 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
         }
       },
       required: ['query']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        type: { type: 'string' },
+        caseSensitive: { type: 'boolean' },
+        contextLines: { type: 'number' },
+        matches: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string' },
+              message: { type: 'string' },
+              matchedLine: { type: 'string' },
+              lineIndex: { type: 'number' },
+              context: { type: 'string' },
+              selector: { type: 'string' },
+              visible: { type: 'boolean' },
+              tagName: { type: 'string' },
+              outerHTML: { type: 'string' },
+              innerText: { type: 'string' },
+              coordinates: {
+                type: 'object',
+                properties: {
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  width: { type: 'number' },
+                  height: { type: 'number' },
+                  top: { type: 'number' },
+                  left: { type: 'number' }
+                },
+                required: ['x', 'y', 'width', 'height', 'top', 'left']
+              }
+            },
+            required: ['type']
+          }
+        }
+      },
+      required: ['query', 'type', 'caseSensitive', 'contextLines', 'matches']
     }
   }
 ]

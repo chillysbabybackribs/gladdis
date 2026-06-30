@@ -226,7 +226,14 @@ describe('BrowserTools', () => {
 
     const result = await tools.run('execute_in_browser', { code: '"test"' }, { tabId: 'tab-1' })
 
-    expect(result).toEqual({ ok: true, text: 'undefined' })
+    expect(result).toEqual({
+      ok: true,
+      text: 'undefined',
+      structuredContent: {
+        code: '"test"',
+        result: null
+      }
+    })
   })
 
   it('returns small files whole by default instead of forcing a second range call', async () => {

@@ -48,7 +48,18 @@ export async function runSearchTool(
   )
   if (!outcome.ok) return { ok: false, text: outcome.text }
   deps.rememberDone(ctx, memKey, outcome.text)
-  return { ok: true, text: outcome.text }
+  return {
+    ok: true,
+    text: outcome.text,
+    structuredContent: {
+      query,
+      navigateVisible: resolveSearchNavigationMode(args, ctx),
+      limit: clampInt(args.limit, 1, 8, 4),
+      digestTop: clampInt(args.digest_top, 0, 3, 2),
+      results: outcome.results,
+      digests: outcome.digests
+    }
+  }
 }
 
 export async function runSearchOpenTool(
@@ -110,7 +121,26 @@ export async function runSearchOpenTool(
   ].join('\n')
 
   deps.rememberDone(ctx, memKey, summary)
-  return { ok, text: summary }
+  return {
+    ok,
+    text: summary,
+    structuredContent:
+      searchOutcome.ok && fetchOutcome.structuredContent
+        ? {
+            query,
+            url: normalizedUrl,
+            search: {
+              query,
+              navigateVisible: false,
+              limit: clampInt(args.limit, 1, 8, 4),
+              digestTop: clampInt(args.digest_top, 0, 3, 2),
+              results: searchOutcome.results,
+              digests: searchOutcome.digests
+            },
+            page: fetchOutcome.structuredContent
+          }
+        : undefined
+  }
 }
 
 function resolveSearchNavigationMode(args: Record<string, any>, ctx: ToolContext): boolean {
@@ -164,7 +194,19 @@ export async function runDeepSearchTool(
     deps.rememberDone(ctx, memKey, outcome.text)
   }
 
-  return outcome
+  return outcome.ok
+    ? {
+        ok: true,
+        text: outcome.text,
+        structuredContent: {
+          query,
+          depth,
+          maxPages,
+          queriesRun: outcome.queriesRun,
+          sourcesVisited: outcome.sourcesVisited
+        }
+      }
+    : outcome
 }
 
 /**
@@ -211,8 +253,24 @@ export async function runFetchPage(
   })
   const digestMs = Date.now() - digestStarted
   const finalUrl = typeof capData.url === 'string' ? normalizeUrl(capData.url) : null
+  const pageUrl = finalUrl ?? normalizeUrl(url)
+  const structuredContent = {
+    requestedUrl: url,
+    finalUrl: typeof capData.url === 'string' ? capData.url : url,
+    pageUrl,
+    ...(typeof args.focus === 'string' ? { focus: args.focus } : {}),
+    viewportOnly: args.viewportOnly === true,
+    timings: {
+      preflightMs: beforeNavigateMs,
+      dispatchMs: navigateDispatchMs,
+      readableMs,
+      extractMs,
+      digestMs,
+      totalMs: Date.now() - started
+    }
+  }
   const timedDigest = [
-    `FETCH TIMINGS: preflight=${beforeNavigateMs}ms dispatch=${navigateDispatchMs}ms readable=${readableMs}ms extract=${extractMs}ms digest=${digestMs}ms total=${Date.now() - started}ms`,
+    `FETCH TIMINGS: preflight=${structuredContent.timings.preflightMs}ms dispatch=${structuredContent.timings.dispatchMs}ms readable=${structuredContent.timings.readableMs}ms extract=${structuredContent.timings.extractMs}ms digest=${structuredContent.timings.digestMs}ms total=${structuredContent.timings.totalMs}ms`,
     `REQUESTED URL: ${url}`,
     finalUrl && finalUrl !== normalizeUrl(url) ? `FINAL URL: ${capData.url}` : null,
     '',
@@ -224,7 +282,7 @@ export async function runFetchPage(
   }
   // cap is exposed for symmetry with other tool outcomes if callers later
   // post-process; the digest is already bounded by digestPage internally.
-  return { ok: true, text: cap(timedDigest, 60_000) }
+  return { ok: true, text: cap(timedDigest, 60_000), structuredContent }
 }
 
 async function waitForVisibleNavigationReadable(

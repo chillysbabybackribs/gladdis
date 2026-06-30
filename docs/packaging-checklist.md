@@ -20,12 +20,17 @@ Before a user-facing launch, tie up these items:
 
 1. Choose the production `GLADDIS_PRODUCT_NAME` and `GLADDIS_APP_ID`.
 2. Replace the provisional Linux icon and desktop branding with final artwork.
-3. Decide where Linux release artifacts will live:
-   - GitHub Releases
-   - a download CDN/bucket
-   - a product website download endpoint
-4. Move the preview download page deployment from the packaging branch to the final release branch flow.
-5. Replace placeholder copy and styling with final brand assets once ready.
+3. Choose the public Linux distribution path:
+   - product download page on a final domain
+   - GitHub Releases only
+   - signed APT repository
+   - optional Flathub follow-on
+4. Choose the public domain split:
+   - primary site
+   - `download.` subdomain
+   - `apt.` subdomain if we add a package repository
+5. Move the preview download page deployment from the packaging branch to the final release branch flow.
+6. Replace placeholder copy and styling with final brand assets once ready.
 
 Deferred until after Linux:
 

@@ -38,3 +38,14 @@ Once the tag is pushed, the `Release Linux Packages` GitHub Actions workflow wil
 ## Current caveat
 
 The package metadata, icons, and download-page copy are still scaffold-grade. This flow is ready for packaging and delivery plumbing, but not yet for a polished public launch.
+
+## Next distribution step
+
+Use [docs/linux-distribution-strategy.md](/home/dp/Desktop/myworkspace/Gladdis/docs/linux-distribution-strategy.md) to choose the public Linux path before adding more packaging automation.
+
+The current recommended order is:
+
+1. final product-owned download domain
+2. GitHub-backed artifact delivery
+3. signed APT repository
+4. optional Flathub submission

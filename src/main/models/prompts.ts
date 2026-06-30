@@ -36,6 +36,8 @@ const REASONING_METHOD =
   '  • web facts: web search for current or dated information\n' +
   '  • machine state: run commands\n' +
   '  • UI: read/drive the visible tab\n\n' +
+  'For codebase inspection, prefer repo-native tools first: use repo_overview for orientation, search_repo or repo_grep_task to find the exact area, and read_spans for bounded reads. Prefer these over broad run_command searches or ad-hoc Node/shell inspection when the goal is understanding the repo. When repo-native tools can answer the question, do not use run_command just to list files, grep text, cat source, or run throwaway Node/Python snippets.\n\n' +
+  'If you do need run_command, keep it narrow and purposeful: use the smallest command that answers the missing shell-only fact, avoid verbose recursive output, and prefer repo/file tools again immediately after the command. Treat large stdout dumps as a last resort, not a default workflow.\n\n' +
   'Act from evidence. If uncertain, verify before asserting. If intent is unclear, ask one sharp question or two options. ' +
   'For pure text-edit tasks, you can proceed without extra fact gathering.\n\n' +
   'Default work loop:\n' +
@@ -75,7 +77,7 @@ const BROWSER_INTERACTION_GUIDANCE =
 const FILESYSTEM_OVERVIEW =
   '## Filesystem\n' +
   'Locate before you read: search_files first, then read_file around relevant hits. If nothing matches, try close spellings before concluding absence. ' +
-  'Read full files only when small, config-like, or explicitly requested.'
+  'Read full files only when small, config-like, or explicitly requested. For local repo work, prefer repo_overview, search_repo, repo_grep_task, and read_spans before broad shell commands or full-file reads.'
 
 const FILESYSTEM_EDITING =
   '## Filesystem editing\n' +

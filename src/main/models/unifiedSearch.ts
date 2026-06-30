@@ -16,6 +16,17 @@ import type { PageExtractor } from '../extract/PageExtractor'
 import { briefPageForSearch } from './searchBrief'
 import { runHiddenSearch, type HiddenSearchResult } from './hiddenSearch'
 
+const VISIBLE_NAVIGATION_CAPTURE = {
+  resourceTypes: ['xhr', 'fetch'],
+  statusMin: 200,
+  statusMax: 399,
+  mimeIncludes: ['json', 'javascript', 'text/plain'],
+  maxBodies: 2,
+  maxBodyChars: 3_000,
+  timeoutMs: 10_000,
+  quietWindowMs: 900
+}
+
 export interface RankedSearchResult extends HiddenSearchResult {
   originQuery: string
   relevanceScore: number
@@ -283,7 +294,11 @@ async function probeTopHits(
   if (navigateVisible) {
     const bestUrl = digests[0]?.url ?? ranked[0]?.url
     if (bestUrl) {
-      try { deps.tabs.navigate(visibleTabId, bestUrl) } catch { /* non-fatal */ }
+      try {
+        await deps.tabs.navigateWithNetworkCapture(visibleTabId, bestUrl, VISIBLE_NAVIGATION_CAPTURE)
+      } catch {
+        try { deps.tabs.navigate(visibleTabId, bestUrl) } catch { /* non-fatal */ }
+      }
     }
   }
 

@@ -8,6 +8,17 @@ import { runDeepSearch } from '../deepSearch'
 import { runUnifiedSearch } from '../unifiedSearch'
 import { cap, clampInt, normalizeUrl, sleep } from './toolUtils'
 
+const PRE_NAVIGATION_CAPTURE = {
+  resourceTypes: ['xhr', 'fetch'],
+  statusMin: 200,
+  statusMax: 399,
+  mimeIncludes: ['json', 'javascript', 'text/plain'],
+  maxBodies: 3,
+  maxBodyChars: 4_000,
+  timeoutMs: 10_000,
+  quietWindowMs: 900
+}
+
 export interface SearchToolsDeps {
   tabs: TabManager
   extractor: PageExtractor
@@ -238,8 +249,8 @@ export async function runFetchPage(
   const beforeNav = await currentPageReadiness(deps.tabs, ctx.tabId)
   const beforeNavigateMs = Date.now() - started
   const navigateStarted = Date.now()
-  deps.tabs.navigate(ctx.tabId, url)
-  const navigateDispatchMs = Date.now() - navigateStarted
+  const preNavigationNetwork = await deps.tabs.navigateWithNetworkCapture(ctx.tabId, url, PRE_NAVIGATION_CAPTURE)
+  const navigateCaptureMs = Date.now() - navigateStarted
   const readableStarted = Date.now()
   await waitForVisibleNavigationReadable(deps.tabs, ctx.tabId, url, beforeNav.url)
   const readableMs = Date.now() - readableStarted
@@ -260,9 +271,17 @@ export async function runFetchPage(
     pageUrl,
     ...(typeof args.focus === 'string' ? { focus: args.focus } : {}),
     viewportOnly: args.viewportOnly === true,
+    preNavigationNetwork: {
+      totalSeen: preNavigationNetwork.totalSeen,
+      capturedCount: preNavigationNetwork.captured.length,
+      bodyCount: preNavigationNetwork.bodies.length,
+      filter: preNavigationNetwork.filter,
+      captured: preNavigationNetwork.captured,
+      bodies: preNavigationNetwork.bodies
+    },
     timings: {
       preflightMs: beforeNavigateMs,
-      dispatchMs: navigateDispatchMs,
+      navigateCaptureMs,
       readableMs,
       extractMs,
       digestMs,
@@ -270,9 +289,10 @@ export async function runFetchPage(
     }
   }
   const timedDigest = [
-    `FETCH TIMINGS: preflight=${structuredContent.timings.preflightMs}ms dispatch=${structuredContent.timings.dispatchMs}ms readable=${structuredContent.timings.readableMs}ms extract=${structuredContent.timings.extractMs}ms digest=${structuredContent.timings.digestMs}ms total=${structuredContent.timings.totalMs}ms`,
+    `FETCH TIMINGS: preflight=${structuredContent.timings.preflightMs}ms navigateCapture=${structuredContent.timings.navigateCaptureMs}ms readable=${structuredContent.timings.readableMs}ms extract=${structuredContent.timings.extractMs}ms digest=${structuredContent.timings.digestMs}ms total=${structuredContent.timings.totalMs}ms`,
     `REQUESTED URL: ${url}`,
     finalUrl && finalUrl !== normalizeUrl(url) ? `FINAL URL: ${capData.url}` : null,
+    `PRE-NAV NETWORK: ${preNavigationNetwork.totalSeen} request(s), ${preNavigationNetwork.bodies.length} bod${preNavigationNetwork.bodies.length === 1 ? 'y' : 'ies'} captured`,
     '',
     digest
   ].filter((line): line is string => line !== null).join('\n')

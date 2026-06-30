@@ -24,6 +24,8 @@ class FakeDebugger extends EventEmitter {
 
 function createHarness(options?: {
   onGetResponseBody?: (requestId: string) => { body: string; base64Encoded?: boolean } | Promise<{ body: string; base64Encoded?: boolean }>
+  onCommand?: (method: string) => void
+  onLoadUrl?: (url: string) => void
 }) {
   const debuggerInstance = new FakeDebugger()
   const sentCommands: Array<{ method: string; params: Record<string, unknown> }> = []
@@ -31,6 +33,7 @@ function createHarness(options?: {
 
   const cdp = {
     send: async (method: string, params: Record<string, unknown> = {}) => {
+      options?.onCommand?.(method)
       sentCommands.push({ method, params })
       if (method === 'Network.getResponseBody') {
         const requestId = String(params.requestId ?? '')
@@ -54,7 +57,11 @@ function createHarness(options?: {
 
   const view = {
     webContents: {
-      debugger: debuggerInstance
+      debugger: debuggerInstance,
+      loadURL: (url: string) => {
+        options?.onLoadUrl?.(url)
+        return Promise.resolve()
+      }
     }
   }
 
@@ -155,9 +162,12 @@ describe('TabManager.watchNetwork sequencing', () => {
     expect(result.captured.map((item) => item.requestId)).toEqual(['req-1', 'req-2'])
   })
 
-  it('keeps a claimed slot consumed after an early body-capture failure', async () => {
+  it('releases a failed early body claim so fallback can backfill another finished request', async () => {
+    const getResponseBodyAttempts = new Map<string, number>()
     const { manager, debuggerInstance, getResponseBodyCalls } = createHarness({
       onGetResponseBody: async (requestId) => {
+        const attempts = (getResponseBodyAttempts.get(requestId) ?? 0) + 1
+        getResponseBodyAttempts.set(requestId, attempts)
         if (requestId === 'req-1') {
           throw new Error('body not available yet')
         }
@@ -179,13 +189,56 @@ describe('TabManager.watchNetwork sequencing', () => {
     })
     emitRequestLifecycle(debuggerInstance, {
       requestId: 'req-2',
-      url: 'https://example.com/api/cannot-backfill-after-claim'
+      url: 'https://example.com/api/fallback-backfills-after-release'
     })
 
     const result = await watchPromise
 
-    expect(getResponseBodyCalls).toEqual(['req-1'])
-    expect(result.bodies).toEqual([])
+    expect(getResponseBodyCalls).toEqual(['req-1', 'req-1', 'req-2'])
+    expect(result.bodies).toEqual([
+      expect.objectContaining({
+        requestId: 'req-2',
+        url: 'https://example.com/api/fallback-backfills-after-release',
+        body: 'body:req-2'
+      })
+    ])
     expect(result.captured.map((item) => item.requestId)).toEqual(['req-1', 'req-2'])
+  })
+
+  it('arms Network before navigation and restores the quiet posture after settling', async () => {
+    const timeline: string[] = []
+    const { manager, sentCommands } = createHarness({
+      onCommand: (method) => timeline.push(`cmd:${method}`),
+      onLoadUrl: (url) => timeline.push(`load:${url}`)
+    })
+
+    let releaseSettled!: () => void
+    const settled = new Promise<void>((resolve) => {
+      releaseSettled = resolve
+    })
+
+    ;(manager as any).waitForNavigationSettled = async () => {
+      timeline.push('wait:settled')
+      await settled
+    }
+
+    const capturePromise = manager.navigateWithNetworkCapture('tab-1', 'https://example.com/feed', {
+      resourceTypes: ['fetch'],
+      maxBodies: 1,
+      maxBodyChars: 1000,
+      quietWindowMs: 0
+    })
+
+    releaseSettled()
+
+    const result = await capturePromise
+
+    expect(timeline.slice(0, 3)).toEqual([
+      'cmd:Network.enable',
+      'load:https://example.com/feed',
+      'wait:settled'
+    ])
+    expect(sentCommands.at(-1)?.method).toBe('Network.disable')
+    expect(result.filter).toEqual(expect.objectContaining({ resourceTypes: ['fetch'] }))
   })
 })

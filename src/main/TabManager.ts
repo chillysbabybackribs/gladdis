@@ -31,6 +31,18 @@ interface Tab {
   favicon: string | null
 }
 
+type NetworkCaptureResult = {
+  captured: CapturedNetworkRequest[]
+  totalSeen: number
+  bodies: CapturedNetworkBody[]
+  filter?: NetworkFilterSpec
+}
+
+type NavigationNetworkCaptureOptions = Omit<WatchNetworkOptions, 'windowMs'> & {
+  timeoutMs?: number
+  quietWindowMs?: number
+}
+
 /**
  * A tab id is usable only if it is a non-empty string that is not the literal
  * `"null"` / `"undefined"` produced when a null id is serialized across IPC.
@@ -356,12 +368,7 @@ export class TabManager {
   async watchNetwork(
     id: string,
     opts: WatchNetworkOptions
-  ): Promise<{
-    captured: CapturedNetworkRequest[]
-    totalSeen: number
-    bodies: CapturedNetworkBody[]
-    filter?: NetworkFilterSpec
-  }> {
+  ): Promise<NetworkCaptureResult> {
     const tab = this.tabs.get(id)
     if (!tab) throw new Error(`Unknown tab ${id}`)
     const dbg = tab.view.webContents.debugger
@@ -394,6 +401,65 @@ export class TabManager {
         await tab.cdp.send('Network.disable', {})
       } catch {
         /* best effort — detach also clears it */
+      }
+    }
+  }
+
+  /**
+   * Pre-arm passive Network capture before a visible navigation so we catch the
+   * page's first XHR/fetch burst instead of attaching after it settles.
+   */
+  async navigateWithNetworkCapture(
+    id: string,
+    url: string,
+    opts: NavigationNetworkCaptureOptions
+  ): Promise<NetworkCaptureResult> {
+    const tab = this.tabs.get(id)
+    if (!tab) throw new Error(`Unknown tab ${id}`)
+    const dbg = tab.view.webContents.debugger
+    const filter = buildNetworkFilter(opts)
+    const recorder = createWatchNetworkRecorder({
+      filter,
+      maxBodies: opts.maxBodies,
+      maxBodyChars: opts.maxBodyChars,
+      getResponseBody: async (requestId) => {
+        return (await tab.cdp.send('Network.getResponseBody', { requestId })) as {
+          body: string
+          base64Encoded: boolean
+        }
+      }
+    })
+
+    const onMessage = (_e: unknown, method: string, params: any): void => {
+      recorder.onMessage(method, params)
+    }
+
+    let networkEnabled = false
+    dbg.on('message', onMessage)
+    try {
+      try {
+        await tab.cdp.send('Network.enable', {})
+        networkEnabled = true
+      } catch {
+        /* best effort — still navigate even if Network cannot be armed */
+      }
+
+      navigateTo(tab.view.webContents, url, { wait: false })
+      await this.waitForNavigationSettled(id, opts.timeoutMs ?? 10_000)
+      await new Promise((resolve) => setTimeout(resolve, opts.quietWindowMs ?? 750))
+
+      const result = networkEnabled
+        ? await recorder.finalize()
+        : { captured: [], totalSeen: 0, bodies: [] }
+      return { ...result, filter }
+    } finally {
+      dbg.removeListener('message', onMessage)
+      if (networkEnabled) {
+        try {
+          await tab.cdp.send('Network.disable', {})
+        } catch {
+          /* best effort — detach also clears it */
+        }
       }
     }
   }

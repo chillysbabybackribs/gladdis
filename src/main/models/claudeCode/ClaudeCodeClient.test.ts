@@ -60,8 +60,8 @@ describe('ClaudeCodeClient', () => {
         expect(cliArgs).toContain('--dangerously-skip-permissions')
 
         const prompt = cliArgs[cliArgs.indexOf('--append-system-prompt') + 1]
-        expect(prompt).toContain('call memory_read at the start of a task')
-        expect(prompt).toContain('use memory_write to store decisions, constraints, identifiers, and partial findings')
+        expect(prompt).toContain('call memory_read before re-asking for context that may already be known')
+        expect(prompt).toContain('use memory_write for durable decisions/constraints/identifiers')
 
         emitJsonLine(child.stdout, {
           type: 'stream_event',

@@ -14,8 +14,7 @@ const MEMORY_EVAL_SCENARIOS: MemoryEvalScenario[] = [
     request:
       'Continue the multi-step refactor from yesterday and preserve the workspace conventions we already chose.',
     requiredPhrases: [
-      'call memory_read at the start of a task',
-      'before asking for context that may already be known'
+      'call memory_read before re-asking for context that may already be known'
     ]
   },
   {
@@ -23,8 +22,7 @@ const MEMORY_EVAL_SCENARIOS: MemoryEvalScenario[] = [
     request:
       'Track the migration decisions, identifiers, and partial findings while you work through the remaining steps.',
     requiredPhrases: [
-      'use memory_write to store decisions, constraints, identifiers, and partial findings',
-      'write after meaningful decisions'
+      'use memory_write for durable decisions/constraints/identifiers'
     ]
   },
   {
@@ -32,8 +30,7 @@ const MEMORY_EVAL_SCENARIOS: MemoryEvalScenario[] = [
     request:
       'Split the release work into a dedicated subtask and keep those notes separate from the rest of the workspace.',
     requiredPhrases: [
-      'Use memory_create_task when the work naturally has its own subtask',
-      'keep task-specific notes there instead of mixing them into workspace-wide memory'
+      'use memory_create_task for task-specific notes'
     ]
   },
   {
@@ -41,8 +38,7 @@ const MEMORY_EVAL_SCENARIOS: MemoryEvalScenario[] = [
     request:
       'The earlier rollout plan is obsolete now, so update your stored notes before you continue.',
     requiredPhrases: [
-      'Use memory_forget to clear stale or superseded notes',
-      'keep memory current when the plan changes'
+      'use memory_forget to clear stale notes when plans change'
     ]
   }
 ]
@@ -65,9 +61,8 @@ describe('Claude Code memory eval', () => {
 
   it('tells Claude to store concise reusable facts instead of transcript dumps', () => {
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain(
-      'Store concise, reusable facts rather than dumping large transcripts or obvious one-off observations.'
+      'Store concise, reusable facts rather than large transcript dumps.'
     )
-    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Read before re-asking, write after meaningful decisions')
   })
 
   it('makes the unrestricted local permission posture explicit', () => {

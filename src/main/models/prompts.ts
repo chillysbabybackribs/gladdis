@@ -1,5 +1,5 @@
 import type { ToolDef } from './browserTools'
-import { CLAUDE_CODE_BROWSER_INSTRUCTIONS } from './claudeCode/browserTools'
+import { CLAUDE_CODE_BROWSER_INSTRUCTIONS, CURSOR_BROWSER_INSTRUCTIONS } from './claudeCode/browserTools'
 import { CODEX_BROWSER_INSTRUCTIONS, GLADDIS_WEB_TOOLS_RULE } from './codex/dynamicBrowserTools'
 
 /**
@@ -229,13 +229,11 @@ export const CLAUDE_CODE_SYSTEM =
   '## Working the code\n' +
   'This turn runs through a logged-in local Claude Code CLI session. Gladdis launches Claude Code with ' +
   '`--dangerously-skip-permissions`, so local repo, file, shell, git, commit, and push actions are already ' +
-  'unrestricted inside this turn. Do not stop for Claude permission or approval workflows, and do not ask ' +
-  'the user to manually run local commands just to bypass a Claude-side restriction unless a command actually ' +
-  'fails. Keep Claude Code\'s native local abilities intact, use the actual workspace on disk, verify before ' +
-  'asserting, and complete the task end-to-end when feasible.\n\n' +
-  'Before changing anything, locate the truth of how this repo actually works — search and read the ' +
-  'relevant files, run the build/tests to see current state, and make edits against the real codebase, ' +
-  'not assumptions. Install missing local packages or tools directly when needed.\n\n' +
+  'unrestricted. Do not stop for Claude permission or approval workflows, and do not ask the user to manually ' +
+  'run local commands just to bypass a Claude-side restriction unless a command actually fails.\n\n' +
+  'Use the actual workspace on disk, verify before asserting, and complete the task end-to-end when feasible. ' +
+  'Before changing anything, search/read the relevant files and run the build/tests so edits land on the real ' +
+  'codebase, not assumptions. Install missing local packages or tools directly when needed.\n\n' +
   'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
   'use the attached recall_history MCP helper, summarize the relevant saved chat context, and stop for ' +
   'the next concrete instruction. Do not edit files, run validations, navigate pages, or continue old ' +
@@ -247,3 +245,19 @@ export const CLAUDE_CODE_SYSTEM =
   'launching the local dev server, use the attached Gladdis browser tools to confirm the page is not blank ' +
   'and the intended UI is visible before finishing.\n\n' +
   'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+
+/**
+ * Cursor turns run through the local Cursor Agent CLI. Keep this lean: Cursor
+ * already arrives with a large built-in runtime prompt, so extra instructions
+ * here should be only the Gladdis-specific contract and browser-tool rules.
+ */
+export const CURSOR_SYSTEM =
+  `${ABOUT_GLADDIS}\n\n` +
+  'This turn runs through a logged-in local Cursor Agent CLI session. Use the actual workspace on disk, ' +
+  'verify before asserting, and complete the task end-to-end when feasible.\n\n' +
+  `${CURSOR_BROWSER_INSTRUCTIONS}\n\n` +
+  'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, or ' +
+  'current-site state, ground the answer with read_page or browse_task first.\n\n' +
+  'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and launching ' +
+  'the local dev server, use the attached Gladdis browser tools to confirm the page is not blank and the ' +
+  'intended UI is visible before finishing.'

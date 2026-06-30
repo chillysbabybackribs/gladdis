@@ -2,7 +2,10 @@ import type { ChatStreamEvent } from '../../shared/types'
 
 type SendFn = (event: ChatStreamEvent) => void
 
-const DEFAULT_FLUSH_MS = 16
+// The renderer already coalesces stream paints to one commit per animation
+// frame. Keep the main-process IPC window shorter than a frame so we still
+// trim token-chatter without adding another full-frame of visible lag first.
+const DEFAULT_FLUSH_MS = 8
 
 function deltaKey(event: Extract<ChatStreamEvent, { type: 'delta' }>): string {
   return `${event.requestId}:${event.assistantMessageId ?? ''}`

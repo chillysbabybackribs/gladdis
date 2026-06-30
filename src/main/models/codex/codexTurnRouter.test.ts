@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ChatStreamEvent } from '../../../../shared/types'
-import { routeNotification, type ActiveTurn } from './codexTurnRouter'
+import { routeNotification, type ActiveTurn, type NotificationContext } from './codexTurnRouter'
 
 function makeTurn(): ActiveTurn {
   return {
@@ -20,6 +20,19 @@ function makeTurn(): ActiveTurn {
     error: null,
     toolItems: new Map(),
     blockedItems: new Set()
+  }
+}
+
+function makeContext(turn: ActiveTurn, emitted: any[]): NotificationContext {
+  return {
+    emit: (event) => emitted.push(event),
+    compactor: {
+      record: vi.fn(),
+      finish: vi.fn()
+    } as any,
+    turnForThread: () => turn,
+    server: () => null,
+    lastToolEndAt: { value: 0 }
   }
 }
 
@@ -62,12 +75,73 @@ describe('Codex turn router', () => {
       callId: 'item-1'
     })
     expect(events.some((event) => event.type === 'error')).toBe(false)
-    // The turn must survive: no abort, no error, no turn/interrupt — otherwise a
-    // single steered browser command would tear down the whole chat task.
     expect(turn.aborted).toBe(false)
     expect(turn.error).toBeNull()
     expect(turn.blockedItems.has('item-1')).toBe(true)
     expect(notify).not.toHaveBeenCalled()
     expect(turn.done).not.toHaveBeenCalled()
+  })
+
+  it('streams agentMessage deltas once and does not replay them on completion', () => {
+    const turn = makeTurn()
+    const emitted: any[] = []
+    const ctx = makeContext(turn, emitted)
+
+    routeNotification(
+      {
+        method: 'item/agentMessage/delta',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'msg-1',
+          delta: 'Hello'
+        }
+      },
+      ctx
+    )
+    routeNotification(
+      {
+        method: 'item/agentMessage/delta',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          itemId: 'msg-1',
+          delta: ' world'
+        }
+      },
+      ctx
+    )
+    routeNotification(
+      {
+        method: 'item/completed',
+        params: {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          item: {
+            id: 'msg-1',
+            type: 'agentMessage',
+            text: 'Hello world'
+          }
+        }
+      },
+      ctx
+    )
+    routeNotification(
+      {
+        method: 'turn/completed',
+        params: {
+          threadId: 'thread-1',
+          turn: { id: 'turn-1', status: 'completed' }
+        }
+      },
+      ctx
+    )
+
+    expect(turn.text).toBe('Hello world')
+    expect(emitted).toEqual([
+      { requestId: 'req-1', type: 'delta', text: 'Hello' },
+      { requestId: 'req-1', type: 'delta', text: ' world' }
+    ])
+    expect(turn.done).toHaveBeenCalledOnce()
   })
 })

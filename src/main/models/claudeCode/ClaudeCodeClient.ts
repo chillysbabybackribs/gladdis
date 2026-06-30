@@ -8,7 +8,6 @@ import { CLAUDE_CODE_BROWSER_TOOL_NAMES } from './browserTools'
 const execFileAsync = promisify(execFile)
 const CLAUDE_BIN = process.env.GLADDIS_CLAUDE_CODE_BIN || 'claude'
 const PROBE_CACHE_TTL_MS = 5000
-const CLAUDE_NATIVE_WEB_TOOLS = ['WebSearch', 'WebFetch']
 
 let activeProbe: Promise<{ installed: boolean; version: string | null }> | null = null
 let cachedProbe: { installed: boolean; version: string | null } | null = null
@@ -167,9 +166,7 @@ export class ClaudeCodeClient {
       '--model',
       cliModel,
       '--append-system-prompt',
-      args.system,
-      '--disallowedTools',
-      CLAUDE_NATIVE_WEB_TOOLS.join(',')
+      args.system
     ]
     if (bridge) {
       cliArgs.push('--strict-mcp-config', '--mcp-config', bridge.mcpConfig)

@@ -298,35 +298,6 @@ export function Composer({
 
       <div className="composer-box">
         {turnControls && <div className="composer-context">{turnControls}</div>}
-        {canInterject && (
-          <div className="composer-run-actions" role="toolbar" aria-label="Send note to running task">
-            <span className="composer-run-label">send this note to</span>
-            <button
-              type="button"
-              className="composer-run-action"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onInterject?.({ text: draft.trim(), mode: 'queue' })
-                reset()
-              }}
-            >
-              next step
-            </button>
-            <button
-              type="button"
-              className="composer-run-action strong"
-              disabled={paused || !!pauseDisabledReason}
-              title={pauseDisabledReason || (paused ? 'Already paused' : 'Pause at the next boundary and apply this note')}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onInterject?.({ text: draft.trim(), mode: 'pause' })
-                reset()
-              }}
-            >
-              pause + apply
-            </button>
-          </div>
-        )}
         <textarea
           ref={taRef}
           autoFocus
@@ -363,6 +334,35 @@ export function Composer({
               </button>
             )}
           </div>
+          {canInterject && (
+            <div className="composer-run-actions" role="toolbar" aria-label="Send note to running task">
+              <span className="composer-run-label">send to running task</span>
+              <button
+                type="button"
+                className="composer-run-action"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onInterject?.({ text: draft.trim(), mode: 'queue' })
+                  reset()
+                }}
+              >
+                next step
+              </button>
+              <button
+                type="button"
+                className="composer-run-action strong"
+                disabled={paused || !!pauseDisabledReason}
+                title={pauseDisabledReason || (paused ? 'Already paused' : 'Pause at the next boundary and apply this note')}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onInterject?.({ text: draft.trim(), mode: 'pause' })
+                  reset()
+                }}
+              >
+                pause + apply
+              </button>
+            </div>
+          )}
           <div className="composer-bar-right">
             {tokenCounter}
             {onToggleAudio && (

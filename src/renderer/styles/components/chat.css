@@ -192,14 +192,12 @@
 }
 
 .composer-run-actions {
-  flex: 0 0 30px;
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   min-width: 0;
   gap: 6px;
-  padding: 5px 8px 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(255, 255, 255, 0.018);
+  padding: 0 2px;
 }
 .composer-run-label {
   min-width: 0;
@@ -211,28 +209,18 @@
 }
 .composer-run-action {
   flex: 0 0 auto;
-  height: 21px;
-  padding: 0 8px;
-  border-radius: 999px;
+  height: 24px;
+  padding: 0 2px;
+  border-radius: 4px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  background: transparent;
+  border: 0;
+  transition: color 0.12s ease, opacity 0.12s ease;
 }
 .composer-run-action:hover:not(:disabled) {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.09);
-}
-.composer-run-action.strong {
-  color: #fff;
-  background: rgba(61, 111, 214, 0.72);
-  border-color: rgba(119, 158, 255, 0.24);
-}
-.composer-run-action.strong:hover:not(:disabled) {
-  background: rgba(83, 130, 226, 0.82);
 }
 .composer-run-action:disabled {
   opacity: 0.45;
@@ -284,6 +272,7 @@
 .composer-bar-right {
   display: flex;
   align-items: center;
+  flex: 0 1 auto;
   min-width: 0;
   gap: 10px;
 }

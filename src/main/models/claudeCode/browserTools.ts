@@ -45,6 +45,44 @@ export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
     outputSchema: tool.outputSchema
   }))
 
+// Cursor already has native local repo/file/shell tools, so keep the attached
+// Gladdis MCP surface focused on web/page work plus conversation memory.
+export const CURSOR_MCP_TOOL_NAMES = new Set([
+  'recall_history',
+  'memory_write',
+  'memory_read',
+  'memory_list',
+  'memory_forget',
+  'memory_create_task',
+  'search',
+  'search_open',
+  'deep_search',
+  'fetch_page',
+  'navigate',
+  'browse_task',
+  'read_page',
+  'grep_page',
+  'watch_network',
+  'grep_click',
+  'grep_type',
+  'screenshot',
+  'screenshot_app',
+  'click_xy',
+  'type_text',
+  'press_key',
+  'execute_in_browser',
+  'cdp_command'
+])
+
+export const CURSOR_MCP_TOOLS = AGENT_TOOLS
+  .filter((tool) => CURSOR_MCP_TOOL_NAMES.has(tool.name))
+  .map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.parameters,
+    outputSchema: tool.outputSchema
+  }))
+
 export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
   'For browser work beyond search use the Gladdis MCP tools too: search_open, navigate, browse_task, read_page, grep_page, ' +
@@ -67,14 +105,21 @@ export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
   'Keep Claude Code\'s native local repo, file, and shell abilities for code work; use the Gladdis MCP tools ' +
   'for browser work and Gladdis-specific context helpers.'
 
-// Lean Codex-aligned browser contract for Cursor Agent MCP — no memory_* notebook
-// paragraphs; Cursor already carries a large built-in runtime prompt.
+// Cursor Agent MCP browser contract. Cursor's bridge registers CURSOR_MCP_TOOLS,
+// which includes the five memory_* notebook tools, so this prompt teaches that
+// workflow too — otherwise those registered tools are unprompted dead weight
+// the model never learns to call.
 export const CURSOR_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
   'For browser work beyond search use the Gladdis MCP tools too: navigate, browse_task, read_page, grep_page, ' +
   'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
-  'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
-  'recall_history, repo_overview, repo_grep_task, search_repo, read_spans, research_dossier, and verify_change. ' +
+  'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For Gladdis-native repo/context ' +
+  'helpers use recall_history, memory_write, memory_read, memory_list, memory_forget, memory_create_task, repo_overview, ' +
+  'repo_grep_task, search_repo, read_spans, research_dossier, and verify_change.\n' +
+  'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook: call memory_read before re-asking for ' +
+  'context that may already be known, use memory_write for durable decisions/constraints/identifiers, use memory_list for a ' +
+  'quick inventory, use memory_create_task for task-specific notes, and use memory_forget to clear stale notes when plans change. ' +
+  'Store concise, reusable facts rather than large transcript dumps.\n' +
   'Prefer grep_click/grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
   'NEVER reach for a browser through Cursor Agent native shell or any other path. Do not run google-chrome, chromium, ' +
   'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +

@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { ClaudeCodeBridgeServer } from './ClaudeCodeBridgeServer'
-import { CLAUDE_CODE_BROWSER_INSTRUCTIONS, CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME } from './browserTools'
+import {
+  CLAUDE_CODE_BROWSER_INSTRUCTIONS,
+  CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME,
+  CURSOR_MCP_TOOL_NAMES
+} from './browserTools'
 
 describe('ClaudeCodeBridgeServer', () => {
   const servers = new Set<ClaudeCodeBridgeServer>()
@@ -13,11 +17,11 @@ describe('ClaudeCodeBridgeServer', () => {
   })
 
   it('teaches Claude Code to use memory tools as a working notebook', () => {
-    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('treat the memory_* tools as your working notebook')
-    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('call memory_read at the start of a task')
-    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_write to store decisions, constraints, identifiers, and partial findings')
-    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Use memory_create_task when the work naturally has its own subtask')
-    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Store concise, reusable facts rather than dumping large transcripts')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use the memory_* tools as a lightweight notebook')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('call memory_read before re-asking for context that may already be known')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_write for durable decisions/constraints/identifiers')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_create_task for task-specific notes')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Store concise, reusable facts rather than large transcript dumps')
   })
 
   it('exposes Claude browser tools over direct HTTP MCP', async () => {
@@ -182,6 +186,133 @@ describe('ClaudeCodeBridgeServer', () => {
         theme: { accent: 'orange' }
       }
     })
+
+    await transport.close()
+    registration.dispose()
+  })
+
+  // Regression: MCP clients (Cursor's `agent` CLI, Claude Code CLI) probe
+  // resources/list and prompts/list right after initialize. The server must
+  // answer with empty lists, not `-32601 Method not found` ("Failed to list MCP
+  // resources").
+  it('answers resources/list and prompts/list with empty lists, not -32601', async () => {
+    const bridge = new ClaudeCodeBridgeServer(
+      {
+        run: vi.fn(),
+        tabs: { activeTabId: 'tab-1', create: () => ({ id: 'tab-created' }) },
+        getWorkspaceRoot: () => '/tmp/workspace'
+      } as any,
+      vi.fn()
+    )
+    servers.add(bridge)
+
+    const registration = await bridge.registerSession({
+      conversationId: 'conv-1',
+      modelId: 'cursor',
+      requestId: 'req-1',
+      browserLlm: vi.fn()
+    })
+    const server = JSON.parse(registration.mcpConfig).mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]
+
+    const client = new Client({ name: 'vitest-client', version: '1.0.0' })
+    const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: { headers: server.headers }
+    })
+    await client.connect(transport)
+
+    await expect(client.listResources()).resolves.toEqual(
+      expect.objectContaining({ resources: [] })
+    )
+    await expect(client.listResourceTemplates()).resolves.toEqual(
+      expect.objectContaining({ resourceTemplates: [] })
+    )
+    await expect(client.listPrompts()).resolves.toEqual(
+      expect.objectContaining({ prompts: [] })
+    )
+
+    await transport.close()
+    registration.dispose()
+  })
+
+  it('reuses a stable bearer token when persistTokenKey is set', async () => {
+    const bridge = new ClaudeCodeBridgeServer(
+      {
+        run: vi.fn(),
+        tabs: { activeTabId: 'tab-1', create: () => ({ id: 'tab-created' }) },
+        getWorkspaceRoot: () => '/tmp/workspace'
+      } as any,
+      vi.fn()
+    )
+    servers.add(bridge)
+
+    const session = {
+      conversationId: 'conv-1',
+      modelId: 'composer-2.5',
+      requestId: 'req-1',
+      browserLlm: vi.fn()
+    }
+
+    const first = await bridge.registerSession(session, { persistTokenKey: '/tmp/workspace' })
+    const second = await bridge.registerSession(
+      { ...session, requestId: 'req-2' },
+      { persistTokenKey: '/tmp/workspace' }
+    )
+
+    const firstAuth =
+      JSON.parse(first.mcpConfig).mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME].headers.Authorization
+    const secondAuth =
+      JSON.parse(second.mcpConfig).mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME].headers.Authorization
+
+    expect(firstAuth).toBe(secondAuth)
+    first.dispose()
+    second.dispose()
+  })
+
+  it('can scope a session to the reduced Cursor MCP tool surface', async () => {
+    const run = vi.fn(async () => ({
+      ok: true,
+      text: 'tool ok',
+      imageBase64: null
+    }))
+    const bridge = new ClaudeCodeBridgeServer(
+      {
+        run,
+        tabs: { activeTabId: 'tab-1', create: () => ({ id: 'tab-created' }) },
+        getWorkspaceRoot: () => '/tmp/workspace'
+      } as any,
+      vi.fn()
+    )
+    servers.add(bridge)
+
+    const registration = await bridge.registerSession({
+      conversationId: 'conv-1',
+      modelId: 'cursor',
+      requestId: 'req-1',
+      allowedToolNames: CURSOR_MCP_TOOL_NAMES,
+      browserLlm: vi.fn()
+    })
+
+    const server = JSON.parse(registration.mcpConfig).mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]
+    const client = new Client({ name: 'vitest-client', version: '1.0.0' })
+    const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: { headers: server.headers }
+    })
+    await client.connect(transport)
+
+    const tools = await client.listTools()
+    const names = tools.tools.map((tool) => tool.name)
+    expect(names).toContain('read_page')
+    expect(names).toContain('memory_read')
+    expect(names).not.toContain('repo_overview')
+    expect(names).not.toContain('search_repo')
+    expect(names).not.toContain('verify_change')
+
+    const result = await client.callTool({
+      name: 'repo_overview',
+      arguments: { focus: 'should fail' }
+    })
+    expect(result.isError).toBe(true)
+    expect(run).not.toHaveBeenCalled()
 
     await transport.close()
     registration.dispose()

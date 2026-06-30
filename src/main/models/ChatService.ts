@@ -32,6 +32,7 @@ import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
 import { ClaudeCodeBridgeServer } from './claudeCode/ClaudeCodeBridgeServer'
 import { ClaudeCodeClient } from './claudeCode/ClaudeCodeClient'
+import { CURSOR_MCP_TOOL_NAMES } from './claudeCode/browserTools'
 import { CursorClient } from './cursor/CursorClient'
 import { CapabilityBroker } from './capabilities/CapabilityBroker'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
@@ -390,6 +391,7 @@ export class ChatService {
               conversationId: args.conversationId,
               modelId: args.modelId,
               requestId: args.requestId,
+              allowedToolNames: CURSOR_MCP_TOOL_NAMES,
               browserLlm: (system, user, options) =>
                 this.embeddedBrowserLlm(system, user, {
                   ...options,

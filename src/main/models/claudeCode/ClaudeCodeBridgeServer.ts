@@ -2,7 +2,13 @@ import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import {
+  CallToolRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema
+} from '@modelcontextprotocol/sdk/types.js'
 import type { BrowserTools, ToolContext, ToolOutcome } from '../browserTools'
 import type { LlmComplete } from '../../pipeline/Planner'
 import type { ChatStreamEvent } from '../../../../shared/types'
@@ -12,17 +18,23 @@ import {
   CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME
 } from './browserTools'
 
-interface BridgeSession {
+export interface BridgeSession {
   conversationId: string | null
   modelId: string
   requestId: string | null
   browserLlm: LlmComplete
+  allowedToolNames?: ReadonlySet<string>
 }
 
-interface BridgeRegistration {
+export interface BridgeRegistration {
   dispose: () => void
   env: Record<string, string>
   mcpConfig: string
+}
+
+export interface RegisterBridgeSessionOptions {
+  /** Reuse one bearer token per key so workspace mcp.json stays stable across turns. */
+  persistTokenKey?: string
 }
 
 interface ActiveTransport {
@@ -41,6 +53,7 @@ export class ClaudeCodeBridgeServer {
   private server = createServer((req, res) => void this.handle(req, res))
   private sessions = new Map<string, BridgeSession>()
   private sessionIdsByToken = new Map<string, Set<string>>()
+  private persistentTokens = new Map<string, string>()
   private transports = new Map<string, ActiveTransport>()
   private ready: Promise<void> | null = null
   private port: number | null = null
@@ -50,10 +63,24 @@ export class ClaudeCodeBridgeServer {
     private readonly emit: (event: ChatStreamEvent) => void
   ) {}
 
-  async registerSession(session: BridgeSession): Promise<BridgeRegistration> {
+  async registerSession(
+    session: BridgeSession,
+    options: RegisterBridgeSessionOptions = {}
+  ): Promise<BridgeRegistration> {
     await this.ensureStarted()
-    const token = randomUUID()
+    const token = this.resolveBridgeToken(options.persistTokenKey)
     this.sessions.set(token, session)
+    const mcpConfig = JSON.stringify({
+      mcpServers: {
+        [CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]: {
+          type: 'http',
+          url: `http://127.0.0.1:${this.port}${MCP_PATH}`,
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      }
+    })
     return {
       dispose: () => {
         this.sessions.delete(token)
@@ -66,18 +93,17 @@ export class ClaudeCodeBridgeServer {
         }
       },
       env: {},
-      mcpConfig: JSON.stringify({
-        mcpServers: {
-          [CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]: {
-            type: 'http',
-            url: `http://127.0.0.1:${this.port}${MCP_PATH}`,
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        }
-      })
+      mcpConfig
     }
+  }
+
+  private resolveBridgeToken(persistTokenKey?: string): string {
+    if (!persistTokenKey) return randomUUID()
+    const existing = this.persistentTokens.get(persistTokenKey)
+    if (existing) return existing
+    const token = randomUUID()
+    this.persistentTokens.set(persistTokenKey, token)
+    return token
   }
 
   async close(): Promise<void> {
@@ -247,13 +273,31 @@ export class ClaudeCodeBridgeServer {
   }
 
   private createMcpServer(session: BridgeSession): Server {
+    const sessionTools = this.sessionTools(session)
     const server = new Server(
       { name: 'gladdis-browser-tools', version: '1.0.0' },
-      { capabilities: { tools: { listChanged: false } } }
+      // Declare resources/prompts (empty) alongside tools. Many MCP clients —
+      // Cursor's `agent` CLI and the Claude Code CLI among them — probe
+      // resources/list and prompts/list right after `initialize`. Without these
+      // capabilities + handlers the SDK answers those probes with
+      // `-32601 Method not found` ("Failed to list MCP resources"), which some
+      // clients treat as a connection-health red flag. This server is
+      // tools-only, so the handlers below just return empty lists.
+      {
+        capabilities: {
+          tools: { listChanged: false },
+          resources: { listChanged: false },
+          prompts: { listChanged: false }
+        }
+      }
     )
 
+    server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }))
+    server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({ resourceTemplates: [] }))
+    server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }))
+
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: CLAUDE_CODE_BROWSER_TOOLS.map((tool) => ({
+      tools: sessionTools.map((tool) => ({
         name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema,
@@ -263,7 +307,7 @@ export class ClaudeCodeBridgeServer {
 
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const toolName = request.params.name
-      if (!CLAUDE_CODE_BROWSER_TOOL_NAMES.has(toolName)) {
+      if (!this.sessionAllowsTool(session, toolName)) {
         return {
           content: [{ type: 'text' as const, text: `Unknown Gladdis tool "${toolName}". ${GUARDRAIL_GUIDANCE}` }],
           isError: true
@@ -288,6 +332,18 @@ export class ClaudeCodeBridgeServer {
     })
 
     return server
+  }
+
+  private sessionTools(session: BridgeSession): typeof CLAUDE_CODE_BROWSER_TOOLS {
+    const allow = session.allowedToolNames
+    if (!allow || allow.size === 0) return CLAUDE_CODE_BROWSER_TOOLS
+    return CLAUDE_CODE_BROWSER_TOOLS.filter((tool) => allow.has(tool.name))
+  }
+
+  private sessionAllowsTool(session: BridgeSession, toolName: string): boolean {
+    const allow = session.allowedToolNames
+    if (allow) return allow.has(toolName)
+    return CLAUDE_CODE_BROWSER_TOOL_NAMES.has(toolName)
   }
 }
 

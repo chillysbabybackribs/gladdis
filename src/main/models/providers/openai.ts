@@ -14,6 +14,7 @@ import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
 import { approxInputChars } from '../ModelCallLedger'
 import { renderTrimmedToolResultStub } from './toolResultSummary'
+import { toOpenAiFunctionTools } from './toolPromptCache'
 
 type FinishUsage = {
   inputTokens?: number
@@ -631,11 +632,7 @@ export async function runOpenAiToolLoop(args: {
   /** Returns one queued user note to apply before the next model step. */
   getQueuedContext?: () => string | null
 }): Promise<void> {
-  const buildTools = () =>
-    resolveTurnTools(args.toolDefs, args.ctx.grantedTools).map((t) => ({
-      type: 'function' as const,
-      function: { name: t.name, description: t.description, parameters: t.parameters }
-    }))
+  const buildTools = () => toOpenAiFunctionTools(resolveTurnTools(args.toolDefs, args.ctx.grantedTools))
   let tools = buildTools()
 
   const systemText = args.workspaceBlock

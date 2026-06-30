@@ -11,6 +11,7 @@ import {
 import { executeProviderToolCall, handleProviderTurnWithoutToolCalls } from './loopCore'
 import { withDateContext } from './dateContext'
 import { approxInputChars } from '../ModelCallLedger'
+import { toAnthropicTools } from './toolPromptCache'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
 type ActiveAuditCall = {
@@ -237,15 +238,8 @@ export async function runAnthropicToolLoop(args: {
   // Rebuilt each step because request_tools can grow the granted set mid-turn.
   // The cache_control marker sits on the last tool, so the prompt cache naturally
   // invalidates exactly when (and only when) the tool list actually changes.
-  const buildTools = () => {
-    const defs = resolveTurnTools(args.toolDefs, args.ctx.grantedTools)
-    return defs.map((t, i) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.parameters as Anthropic.Tool.InputSchema,
-      ...(i === defs.length - 1 ? { cache_control: { type: 'ephemeral' as const } } : {})
-    }))
-  }
+  const buildTools = () =>
+    toAnthropicTools(resolveTurnTools(args.toolDefs, args.ctx.grantedTools)) as Anthropic.MessageCreateParams['tools']
   let anthropicTools = buildTools()
 
   const messages = toAnthropicMessages(args.req)

@@ -13,6 +13,7 @@ import { withDateContext } from './dateContext'
 import { fetchWithRetry } from './retry'
 import { approxInputChars } from '../ModelCallLedger'
 import { renderTrimmedToolResultStub } from './toolResultSummary'
+import { toOpenAiFunctionTools } from './toolPromptCache'
 
 // xAI exposes an OpenAI-compatible Chat Completions API. We talk to it with
 // plain fetch + SSE — no SDK — matching the repo's existing OpenAI-compatible
@@ -421,11 +422,7 @@ export async function runGrokToolLoop(args: {
   // OpenAI tools take a JSON Schema directly, which is exactly what ToolDef.parameters
   // already is — no per-field type mapping needed (unlike the Gemini adapter).
   // Rebuilt each step because request_tools can grow the granted set mid-turn.
-  const buildTools = () =>
-    resolveTurnTools(args.toolDefs, args.ctx.grantedTools).map((t) => ({
-      type: 'function' as const,
-      function: { name: t.name, description: t.description, parameters: t.parameters }
-    }))
+  const buildTools = () => toOpenAiFunctionTools(resolveTurnTools(args.toolDefs, args.ctx.grantedTools))
   let tools = buildTools()
 
   const systemText = args.workspaceBlock

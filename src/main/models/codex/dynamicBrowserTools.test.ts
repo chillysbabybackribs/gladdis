@@ -13,6 +13,11 @@ describe('Codex Gladdis dynamic tools', () => {
           name: 'recall_history',
           description: expect.stringContaining('bare resume request')
         }),
+        expect.objectContaining({
+          namespace: 'gladdis',
+          name: 'watch_network',
+          description: expect.stringContaining('Read the structured data a page is built from')
+        }),
         expect.objectContaining({ namespace: 'gladdis', name: 'grep_click' }),
         expect.objectContaining({ namespace: 'gladdis', name: 'grep_type' }),
         expect.objectContaining({ namespace: 'gladdis', name: 'click_xy' }),

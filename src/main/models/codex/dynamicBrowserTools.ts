@@ -20,6 +20,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'browse_task',
   'read_page',
   'grep_page',
+  'watch_network',
   'grep_click',
   'grep_type',
   'screenshot',
@@ -66,6 +67,7 @@ export const GLADDIS_WEB_TOOLS_RULE =
 export const CODEX_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
   'For browser work beyond search use the gladdis.* tools too: navigate, browse_task, read_page, grep_page, ' +
+  'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
   'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
   'recall_history, repo_overview, repo_grep_task, search_repo, read_spans, research_dossier, and verify_change. ' +
   'Prefer grep_click/grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +

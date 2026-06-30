@@ -151,6 +151,7 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_BROWSER_TOOL_NAMES.has('search')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('navigate')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('fetch_page')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('watch_network')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_click')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_type')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('click_xy')).toBe(true)

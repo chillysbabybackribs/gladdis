@@ -178,9 +178,20 @@ function createWindow(): void {
     void uiView.webContents.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
+  // A single navigation fires a burst of WebContents events (did-start-navigation,
+  // did-start-loading, page-title-updated, did-navigate, did-stop-loading, …),
+  // each calling onChange. Coalesce that burst into one trailing send per tick so
+  // we rebuild the snapshot (native getters per tab) and serialize over IPC once,
+  // not ~6×. A microtask flushes before any I/O, so the tabstrip stays in sync.
+  let pushQueued = false
   const pushTabs = () => {
-    if (uiView.webContents.isDestroyed()) return
-    uiView.webContents.send(IPC.TABS_UPDATED, registry.tabs.snapshot())
+    if (pushQueued) return
+    pushQueued = true
+    queueMicrotask(() => {
+      pushQueued = false
+      if (uiView.webContents.isDestroyed()) return
+      uiView.webContents.send(IPC.TABS_UPDATED, registry.tabs.snapshot())
+    })
   }
 
   registry = new ServiceRegistry(

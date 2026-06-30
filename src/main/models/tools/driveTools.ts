@@ -71,14 +71,12 @@ export async function runNavigate(
   if (armed) {
     network = await deps.tabs.navigateWithNetworkCapture(ctx.tabId, rawUrl, {
       ...armed,
-      timeoutMs: shouldWait ? timeoutMs : undefined,
-      quietWindowMs: armed.windowMs
+      waitForNavigation: shouldWait,
+      timeoutMs,
+      quietWindowMs: shouldWait ? undefined : 250
     })
   } else {
-    deps.tabs.navigate(ctx.tabId, rawUrl)
-    if (shouldWait) {
-      await deps.tabs.waitForNavigationSettled(ctx.tabId, timeoutMs)
-    }
+    await deps.tabs.navigate(ctx.tabId, rawUrl, { wait: shouldWait, timeoutMs })
   }
 
   // Free calibration signal for the model's next read: how text-heavy this page

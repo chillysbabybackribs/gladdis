@@ -64,15 +64,19 @@ function createHarness(options?: {
     }
   }
 
-  const view = {
-    webContents: {
-      debugger: debuggerInstance,
-      loadURL: (url: string) => {
-        options?.onLoadUrl?.(url)
-        return Promise.resolve()
-      }
+  const webContents = Object.assign(new EventEmitter(), {
+    debugger: debuggerInstance,
+    isLoading: () => false,
+    loadURL: (url: string) => {
+      options?.onLoadUrl?.(url)
+      webContents.emit('did-start-loading')
+      webContents.emit('dom-ready')
+      webContents.emit('did-stop-loading')
+      return Promise.resolve()
     }
-  }
+  })
+
+  const view = { webContents }
 
   const manager = new TabManager({} as any, () => {}, () => {})
   ;(manager as any).tabs.set('tab-1', {
@@ -226,16 +230,6 @@ describe('TabManager.watchNetwork sequencing', () => {
       onLoadUrl: (url) => timeline.push(`load:${url}`)
     })
 
-    let releaseSettled!: () => void
-    const settled = new Promise<void>((resolve) => {
-      releaseSettled = resolve
-    })
-
-    ;(manager as any).waitForNavigationSettled = async () => {
-      timeline.push('wait:settled')
-      await settled
-    }
-
     const capturePromise = manager.navigateWithNetworkCapture('tab-1', 'https://example.com/feed', {
       resourceTypes: ['fetch'],
       maxBodies: 1,
@@ -243,15 +237,9 @@ describe('TabManager.watchNetwork sequencing', () => {
       quietWindowMs: 0
     })
 
-    releaseSettled()
-
     const result = await capturePromise
 
-    expect(timeline.slice(0, 3)).toEqual([
-      'cmd:Network.enable',
-      'load:https://example.com/feed',
-      'wait:settled'
-    ])
+    expect(timeline.slice(0, 2)).toEqual(['cmd:Network.enable', 'load:https://example.com/feed'])
     expect(sentCommands.at(-1)?.method).toBe('Network.disable')
     expect(result.filter).toEqual(expect.objectContaining({ resourceTypes: ['fetch'] }))
   })

@@ -41,6 +41,7 @@ type NetworkCaptureResult = {
 type NavigationNetworkCaptureOptions = Omit<WatchNetworkOptions, 'windowMs'> & {
   timeoutMs?: number
   quietWindowMs?: number
+  waitForNavigation?: boolean
 }
 
 type PendingNetworkCaptureArm = WatchNetworkOptions
@@ -275,10 +276,10 @@ export class TabManager {
     this.onChange()
   }
 
-  navigate(id: string, url: string, opts?: { wait?: boolean }): void {
+  navigate(id: string, url: string, opts?: { wait?: boolean; timeoutMs?: number }): Promise<void> {
     const tab = this.tabs.get(id)
-    if (!tab) return
-    navigateTo(tab.view.webContents, url, opts)
+    if (!tab) return Promise.resolve()
+    return navigateTo(tab.view.webContents, url, opts)
   }
 
   waitForNavigationSettled(id: string, timeoutMs = 10_000): Promise<void> {
@@ -542,9 +543,14 @@ export class TabManager {
         /* best effort — still navigate even if Network cannot be armed */
       }
 
-      navigateTo(tab.view.webContents, url, { wait: false })
-      await this.waitForNavigationSettled(id, opts.timeoutMs ?? 10_000)
-      await new Promise((resolve) => setTimeout(resolve, opts.quietWindowMs ?? 750))
+      const shouldWaitForNavigation = opts.waitForNavigation !== false
+      await navigateTo(tab.view.webContents, url, {
+        wait: shouldWaitForNavigation,
+        timeoutMs: opts.timeoutMs ?? 10_000
+      })
+      await new Promise((resolve) =>
+        setTimeout(resolve, opts.quietWindowMs ?? (shouldWaitForNavigation ? 750 : 250))
+      )
 
       const result = networkEnabled
         ? await recorder.finalize()

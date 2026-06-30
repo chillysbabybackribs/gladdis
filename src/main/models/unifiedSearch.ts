@@ -206,24 +206,6 @@ async function detectPageWall(tabs: TabManager, tabId: string): Promise<string |
   }
 }
 
-// ── Network-quiet wait for SPAs ───────────────────────────────────────────────
-
-/**
- * Wait for the page's network activity to settle after navigation.
- * Enables Network domain briefly, waits for did-stop-loading, then adds
- * a short quiet window to allow XHR/fetch-driven SPA content to mount.
- */
-async function waitForPageReady(tabs: TabManager, tabId: string, timeoutMs = 12_000): Promise<void> {
-  try {
-    await tabs.cdpSend(tabId, 'Network.enable', { maxPostDataSize: 0, maxResourceBufferSize: 0 })
-  } catch { /* non-fatal */ }
-
-  await tabs.waitForNavigationSettled(tabId, timeoutMs)
-
-  // Extra grace period for SPA content mounting after initial load event
-  await sleep(600)
-}
-
 // ── Parallel background tab probing ──────────────────────────────────────────
 
 /**
@@ -240,8 +222,8 @@ async function probeInBackground(
 ): Promise<LivePageDigest | null> {
   const tabId = deps.tabs.create('about:blank', { background: true }).id
   try {
-    deps.tabs.navigate(tabId, hit.url)
-    await waitForPageReady(deps.tabs, tabId, 12_000)
+    await deps.tabs.navigate(tabId, hit.url, { wait: true, timeoutMs: 12_000 })
+    await sleep(600)
 
     const wall = await detectPageWall(deps.tabs, tabId)
     if (wall) {
@@ -325,10 +307,10 @@ async function probeTopHits(
       try {
         visibleNavigationNetwork = await deps.tabs.navigateWithNetworkCapture(visibleTabId, bestUrl, {
           ...(visibleNavigationCapture ?? VISIBLE_NAVIGATION_CAPTURE),
-          quietWindowMs: visibleNavigationCapture?.windowMs ?? VISIBLE_NAVIGATION_CAPTURE.quietWindowMs
+          quietWindowMs: VISIBLE_NAVIGATION_CAPTURE.quietWindowMs
         })
       } catch {
-        try { deps.tabs.navigate(visibleTabId, bestUrl) } catch { /* non-fatal */ }
+        try { await deps.tabs.navigate(visibleTabId, bestUrl) } catch { /* non-fatal */ }
       }
     }
   }

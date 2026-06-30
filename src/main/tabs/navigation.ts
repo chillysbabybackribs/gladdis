@@ -83,10 +83,16 @@ export function waitForNavigationSettled(
   })
 }
 
-export function navigateTo(wc: WebContents, url: string, opts?: { wait?: boolean }): void {
+export async function navigateTo(
+  wc: WebContents,
+  url: string,
+  opts?: { wait?: boolean; timeoutMs?: number }
+): Promise<void> {
   const normalized = normalizeAddress(url)
+  const settlePromise =
+    opts?.wait === false ? Promise.resolve() : waitForNavigationSettled(wc, opts?.timeoutMs)
   wc.loadURL(normalized)
-  if (opts?.wait !== false) void waitForNavigationSettled(wc)
+  await settlePromise
 }
 
 export function goBack(wc: WebContents): void {

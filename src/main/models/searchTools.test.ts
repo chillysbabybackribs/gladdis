@@ -35,11 +35,19 @@ function makeTools() {
   let currentUrl = 'https://start.test/'
   const navigate = vi.fn((_id: string, url: string) => {
     currentUrl = url
+    return Promise.resolve()
+  })
+  const navigateWithNetworkCapture = vi.fn(async (_id: string, url: string) => {
+    currentUrl = url
+    return { totalSeen: 0, captured: [], bodies: [], filter: undefined }
   })
   const tabs = {
     activeTabId: 'tab-1',
     navigate,
+    navigateWithNetworkCapture,
     waitForNavigationSettled: vi.fn(async () => undefined),
+    takeArmedNetworkCapture: vi.fn(() => null),
+    cdpSend: vi.fn(async () => ({ result: { value: { url: currentUrl, readyState: 'complete' } } })),
     list: () => [{ id: 'tab-1', url: currentUrl, loading: false }],
     create: vi.fn(() => ({ id: 'tab-new' }))
   }
@@ -56,7 +64,7 @@ function makeTools() {
     }))
   }
   const tools = new BrowserTools(tabs as any, extractor as any, {} as any)
-  return { tools, tabs, extractor, navigate }
+  return { tools, tabs, extractor, navigate, navigateWithNetworkCapture }
 }
 
 describe('unified search tool', () => {
@@ -109,10 +117,14 @@ describe('unified search tool', () => {
   })
 
   it('fetch_page opens the URL in the visible tab and returns a digest', async () => {
-    const { tools, navigate, extractor, tabs } = makeTools()
+    const { tools, navigateWithNetworkCapture, extractor } = makeTools()
     const out = await tools.run('fetch_page', { url: 'https://example.com/a' }, { tabId: 'tab-1' })
 
-    expect(navigate).toHaveBeenCalledWith('tab-1', 'https://example.com/a')
+    expect(navigateWithNetworkCapture).toHaveBeenCalledWith(
+      'tab-1',
+      'https://example.com/a',
+      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 900 })
+    )
     expect(extractor.run).toHaveBeenCalledWith('tab-1')
     expect(out.ok).toBe(true)
     expect(out.text).toContain('the page body')
@@ -126,7 +138,7 @@ describe('unified search tool', () => {
   })
 
   it('search_open runs web search and direct page fetch together', async () => {
-    const { tools, navigate, extractor } = makeTools()
+    const { tools, navigateWithNetworkCapture, extractor } = makeTools()
     vi.mocked(runUnifiedSearch).mockClear()
 
     const out = await tools.run(
@@ -139,7 +151,11 @@ describe('unified search tool', () => {
       query: 'electron docs',
       navigateVisible: false
     })
-    expect(navigate).toHaveBeenCalledWith('tab-1', 'https://electronjs.org/docs/latest/')
+    expect(navigateWithNetworkCapture).toHaveBeenCalledWith(
+      'tab-1',
+      'https://electronjs.org/docs/latest/',
+      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 900 })
+    )
     expect(extractor.run).toHaveBeenCalledWith('tab-1')
     expect(out.ok).toBe(true)
     expect(out.text).toContain('DIRECT PAGE:')
@@ -179,13 +195,13 @@ describe('unified search tool', () => {
   })
 
   it('does not re-navigate/re-extract a URL already opened this task', async () => {
-    const { tools, navigate, extractor } = makeTools()
+    const { tools, navigateWithNetworkCapture, extractor } = makeTools()
     const ctx = { tabId: 'tab-1', conversationId: 'conv-1' }
 
     await tools.run('fetch_page', { url: 'https://example.com/a' }, ctx)
     await tools.run('fetch_page', { url: 'https://example.com/a/' }, ctx)
 
-    expect(navigate).toHaveBeenCalledTimes(1)
+    expect(navigateWithNetworkCapture).toHaveBeenCalledTimes(1)
     expect(extractor.run).toHaveBeenCalledTimes(1)
   })
 

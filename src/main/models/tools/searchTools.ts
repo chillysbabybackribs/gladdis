@@ -263,7 +263,7 @@ export async function runFetchPage(
     quietWindowMs:
       'quietWindowMs' in navigationCapture
         ? navigationCapture.quietWindowMs
-        : ('windowMs' in navigationCapture ? navigationCapture.windowMs : PRE_NAVIGATION_CAPTURE.quietWindowMs)
+        : PRE_NAVIGATION_CAPTURE.quietWindowMs
   })
   const navigateCaptureMs = Date.now() - navigateStarted
   const readableStarted = Date.now()

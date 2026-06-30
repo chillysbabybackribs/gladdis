@@ -286,8 +286,8 @@ Follow this exact reasoning process to complete the plan:
     const bgTab = deps.tabs.create('about:blank', { background: true })
     const bgTabId = bgTab.id
     try {
-      deps.tabs.navigate(bgTabId, url)
-      await waitForPageReady(deps.tabs, bgTabId)
+      await deps.tabs.navigate(bgTabId, url, { wait: true, timeoutMs: 12_000 })
+      await sleep(600)
 
       const capture = await deps.extractor.run(bgTabId)
       const md = capture.content?.markdown || ''
@@ -430,17 +430,6 @@ Follow this exact reasoning process to complete the plan:
 }
 
 // Private Helpers
-
-async function waitForPageReady(tabs: TabManager, tabId: string, timeoutMs = 12_000): Promise<void> {
-  try {
-    await tabs.cdpSend(tabId, 'Network.enable', { maxPostDataSize: 0, maxResourceBufferSize: 0 })
-  } catch { /* non-fatal */ }
-
-  await tabs.waitForNavigationSettled(tabId, timeoutMs)
-
-  // Extra grace period for SPA content mounting after initial load event
-  await sleep(600)
-}
 
 function detectPageWall(markdown: string): string | undefined {
   const md = markdown.toLowerCase()

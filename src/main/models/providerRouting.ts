@@ -10,6 +10,7 @@ import type { AgentConfigurationService } from './AgentConfigurationService'
 import type { ModelCallLedger } from './ModelCallLedger'
 import type { ChatStreamEvent } from '../../../shared/types'
 import type { LlmComplete } from './llm'
+import type { AgentToolSurface } from './AgentConfigurationService'
 
 export const VERBATIM_TOOL_RESULTS = 4
 
@@ -90,11 +91,12 @@ export async function dispatchAgenticTurn(args: {
   client: any
   browserLlm?: LlmComplete
   maxOutputTokens: number
+  profile?: AgentToolSurface
   deps: DispatchDeps
 }): Promise<void> {
   const { req, model, signal, client, browserLlm, maxOutputTokens, deps } = args
   const provider = model.provider
-  const profile = deps.agentConfig.agentToolProfile(req, provider)
+  const profile = args.profile ?? await deps.agentConfig.agentToolProfile(req, provider)
   const agentSystem = await deps.agentConfig.buildTurnAgentSystem(req, profile.tools, provider)
   const workspaceBlock = deps.agentConfig.workspaceSystemBlock(profile)
   const ctx = deps.buildToolContext(req, browserLlm)

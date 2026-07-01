@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AgentConfigurationService } from './AgentConfigurationService'
-import { selectAgentToolProfile } from './agentTools'
+import { AgentConfigurationService, type AgentToolSurface } from './AgentConfigurationService'
 
 function makeConfigService(workspaceRoot: string | null = null) {
   const tools = {
@@ -14,25 +13,58 @@ function makeConfigService(workspaceRoot: string | null = null) {
 }
 
 describe('AgentConfigurationService', () => {
-  it('applies saved preferred/disallowed tool constraints to the active profile', () => {
+  it('routes mixed browser + code work onto a compact shared surface', async () => {
+    const { service } = makeConfigService('/home/user/project')
+    const req = {
+      messages: [{ role: 'user', content: 'check the current docs site and then update the parser code' }]
+    } as any
+
+    const anthropic = await service.agentToolProfile(req)
+    const openai = await service.agentToolProfile(req, 'openai')
+
+    expect(anthropic.name).toContain('browser-core')
+    expect(anthropic.name).toContain('filesystem-core')
+    expect(openai.name).toBe(anthropic.name)
+
+    const anthropicNames = anthropic.tools.map((tool: { name: string }) => tool.name)
+    const openaiNames = openai.tools.map((tool: { name: string }) => tool.name)
+
+    expect(openaiNames).toEqual(anthropicNames)
+    expect(openaiNames).toEqual(expect.arrayContaining([
+      'search',
+      'navigate',
+      'grep_page',
+      'act',
+      'search_files',
+      'read_file',
+      'edit_file'
+    ]))
+    expect(openaiNames).not.toContain('memory_write')
+  })
+
+  it('applies saved preferred/disallowed tool constraints to the routed surface', async () => {
     const { service } = makeConfigService()
-    const baseProfile = selectAgentToolProfile('read src/main/models/ChatService.ts and suggest fixes')
+    const baseSurface = await service.agentToolProfile({
+      messages: [{ role: 'user', content: 'read src/main/models/ChatService.ts and suggest fixes' }]
+    } as any)
     const constrained = (service as any).applyAgentToolPolicy(
       {
         agent: {
-          preferredTools: ['read_page', 'run_command'],
-          disallowedTools: ['run_validation']
+          preferredTools: ['grep_page', 'run_command'],
+          disallowedTools: ['search_files']
         }
       },
-      baseProfile
-    )
+      baseSurface
+    ) as AgentToolSurface
     const names = constrained.tools.map((tool: { name: string }) => tool.name)
 
-    expect(names).toContain('read_page')
-    expect(names).not.toContain('run_validation')
+    expect(constrained.name).toBe('filesystem-core')
+    expect(names).toContain('grep_page')
+    expect(names).toContain('run_command')
+    expect(names).not.toContain('search_files')
   })
 
-  it('keeps tools on a bare "yes"/"do it" that continues the previous turn', () => {
+  it('keeps browser essentials on a bare continuation', async () => {
     const { service } = makeConfigService()
     const req = {
       messages: [
@@ -41,39 +73,15 @@ describe('AgentConfigurationService', () => {
         { role: 'user', content: 'do it' }
       ]
     } as any
-    const profile = service.agentToolProfile(req)
-    expect(profile.name).toBe('browser')
-  })
-
-  it('upgrades OpenAI browser turns with a workspace into a full workshop surface', () => {
-    const { service } = makeConfigService('/home/user/project')
-    const req = {
-      messages: [{ role: 'user', content: 'check the current docs site and then update the parser code' }]
-    } as any
-
-    const profile = service.agentToolProfile(req, 'openai')
+    const profile = await service.agentToolProfile(req)
     const names = profile.tools.map((tool: { name: string }) => tool.name)
-
-    expect(profile.name).toBe('full')
-    expect(names).toEqual(expect.arrayContaining([
-      'search',
-      'read_page',
-      'search_repo',
-      'read_spans',
-      'read_file',
-      'edit_file',
-      'run_command',
-      'verify_change'
-    ]))
+    expect(profile.name).toContain('browser-core')
+    expect(names).toEqual(expect.arrayContaining(['search', 'navigate', 'grep_page', 'act']))
   })
 
-  it('gives filesystem turns the full path block and lean turns an escalation hint', () => {
+  it('attaches the workspace block when a folder is selected', () => {
     const { service } = makeConfigService('/home/user/project')
-    const fsProfile = { name: 'filesystem' } as any
-    const leanProfile = { name: 'conversation' } as any
-
-    expect(service.workspaceSystemBlock(fsProfile)).toBe('Workspace: /home/user/project')
-    expect(service.workspaceSystemBlock(leanProfile)).toContain('Use request_tools("filesystem")')
+    expect(service.workspaceSystemBlock()).toBe('Workspace: /home/user/project')
   })
 
   it('attaches no working-folder block when no folder is selected', () => {
@@ -81,26 +89,19 @@ describe('AgentConfigurationService', () => {
     expect(service.workspaceSystemBlock()).toBeNull()
   })
 
-  it('explains when a selected folder is ignored for unrelated turns', () => {
+  it('adds direct-API local-work guidance to the turn system prompt for OpenAI', async () => {
     const { service } = makeConfigService('/home/user/project')
-    const profile = { name: 'conversation' } as any
-    const block = service.workspaceSystemBlock(profile)
-    expect(block).toContain('Use request_tools("filesystem")')
-  })
-
-  it('adds OpenAI-specific surgical local-work guidance to the turn system prompt', async () => {
-    const { service } = makeConfigService('/home/user/project')
+    const req = { messages: [{ role: 'user', content: 'inspect the repo and fix the UI' }] } as any
     const system = await service.buildTurnAgentSystem(
-      { messages: [{ role: 'user', content: 'inspect the repo and fix the UI' }] } as any,
-      selectAgentToolProfile('inspect the repo and fix the UI', { hasWorkspaceFolder: true }).tools,
+      req,
+      (await service.agentToolProfile(req, 'openai')).tools,
       'openai'
     )
 
     expect(system).toContain('## Direct API local-work contract')
-    expect(system).toContain('prefer repo_overview for orientation, then search_repo or repo_grep_task')
-    expect(system).toContain('Use read_spans only as the follow-up bounded read once search has identified the relevant windows')
-    expect(system).toContain('Batch related file windows into one read_spans({items:[...]}) call')
-    expect(system).toContain('avoid full:true unless the file is small')
+    expect(system).toContain('use search_files to locate the exact area before any raw reads')
+    expect(system).toContain('read_file with explicit start_line/end_line windows')
+    expect(system).toContain('Avoid full:true unless the file is small')
     expect(system).toContain('Keep Gladdis browser tools first-class for web search')
   })
 })

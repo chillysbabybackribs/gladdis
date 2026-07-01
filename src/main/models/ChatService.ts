@@ -23,11 +23,6 @@ import {
 } from '../../../shared/types'
 import { Dreamer } from './memory/Dreamer'
 import { BrowserTools, type ToolContext } from './browserTools'
-import {
-  knownToolByName,
-  normalizeToolName,
-  selectAgentToolProfile
-} from './agentTools'
 import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
 import { ClaudeCodeBridgeServer } from './claudeCode/ClaudeCodeBridgeServer'
@@ -107,6 +102,16 @@ const EMBEDDED_BROWSER_LLM_MODEL_ORDER = [
   'grok-build-0.1',
   'claude-haiku-4-5',
   'claude-sonnet-4-6'
+] as const
+
+const TOOL_ROUTER_MODEL_ORDER = [
+  'gemini-2.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-2.5-flash',
+  'openai-gpt-4o-mini',
+  'openai-gpt-4-1-mini',
+  'grok-build-0.1',
+  'claude-haiku-4-5'
 ] as const
 
 // The agent loop is NOT capped by a turn count — it runs until the model stops
@@ -246,7 +251,6 @@ export class ChatService {
           summary
         })
     )
-    this.tools.setCapabilityBroker(this.capabilityBroker)
     this.agentOptimizer = new AgentOptimizerService(
       this.keys,
       () => this.codex(),
@@ -256,7 +260,12 @@ export class ChatService {
       (id) => this.model(id),
       (modelId, system, user, options) => this.complete(modelId, system, user, options)
     )
-    this.agentConfig = new AgentConfigurationService(this.tools, this.repoIntelligence, (e) => this.emit(e))
+    this.agentConfig = new AgentConfigurationService(
+      this.tools,
+      this.repoIntelligence,
+      (e) => this.emit(e),
+      (system, user, options) => this.toolRouterLlm(system, user, options)
+    )
   }
 
   private emit = (event: ChatStreamEvent): void => {
@@ -940,25 +949,30 @@ export class ChatService {
         hasWorkspaceFolder: !!this.tools.getWorkspaceRoot()
       })
       stripStaleActivePageContext(req, policy)
-      this.emitContractTrace(req, policy, model.provider)
-      const { profile: initialProfile } = policy
       // Apply date context to local CLI agents (Cursor, Claude Code, Codex) like API providers get via withDateContext
       const actionableText = prependDateContextToText(policy.actionableText)
 
-      // Run the agentic loop (which carries request_tools) for any real task. Pure
-      // chat with no folder open stays plain; a workspace folder being open means
-      // the user is working on a project, so even a "conversation"-classified turn
-      // can escalate into tools instead of dead-ending.
+      // Run the agentic loop for any real task. Pure chat with no folder open and
+      // no tool intent stays plain; a workspace folder being open means the user is
+      // working on a project, so even a low-intent turn can use tools instead of
+      // dead-ending. (Profiles were retired, so this gates on the turn's actual
+      // tool intent rather than a profile name.)
       const hasSelectedFolder = !!this.tools.getWorkspaceRoot()
+      const hasToolIntent =
+        policy.workspaceIntent || policy.browserIntent || policy.activePageIntent
       const agentic =
-        req.mode === 'agent' && (!!req.agent || initialProfile.name !== 'conversation' || hasSelectedFolder)
+        req.mode === 'agent' && (!!req.agent || hasToolIntent || hasSelectedFolder)
+      const profile = agentic
+        ? await this.agentConfig.agentToolProfile(req, model.provider)
+        : policy.profile
+      this.emitContractTrace(req, { ...policy, profile }, model.provider)
 
       if (model.provider === 'codex') {
         await runCodexHandoff(
           req,
           model,
           actionableText,
-          initialProfile,
+          profile,
           controller,
           this.codex(),
           this.audit,
@@ -984,7 +998,7 @@ export class ChatService {
           input: req.messages
         })
         try {
-          const wsBlock = this.agentConfig.workspaceSystemBlock(initialProfile)
+          const wsBlock = this.agentConfig.workspaceSystemBlock(profile)
           const repoBlock = await this.agentConfig.codexRepoOverviewBlock(req, actionableText)
           const claudeSystem = [
             CLAUDE_CODE_SYSTEM,
@@ -1023,7 +1037,7 @@ export class ChatService {
           const enableCursorMcp = shouldEnableCursorMcpBridge(policy)
           const cursorMode: 'ask' | 'agent' = agentic ? 'agent' : 'ask'
           this.cursorValidationStates.set(req.requestId, createToolValidationState())
-          const wsBlock = this.agentConfig.workspaceSystemBlock(initialProfile)
+          const wsBlock = this.agentConfig.workspaceSystemBlock(profile)
           const cursorSystem = [
             buildCursorSystem({ enableBrowserTools: enableCursorMcp }),
             this.agentConfig.customAgentSystemBlock(req),
@@ -1083,6 +1097,7 @@ export class ChatService {
             client,
             browserLlm,
             maxOutputTokens: model.provider === 'google' ? MAX_OUTPUT_TOKENS : ANTHROPIC_MAX_TOKENS,
+            profile,
             deps: dispatchDeps
           })
         } else {
@@ -1160,6 +1175,28 @@ export class ChatService {
     throw new Error('No API-backed browser helper model is available for embedded MCP tool work')
   }
 
+  private toolRouterLlm(
+    system: string,
+    user: string,
+    options?: LlmCompleteOptions
+  ): Promise<string> {
+    const model = this.preferredToolRouterModel()
+    return this.complete(model.id, system, user, options)
+  }
+
+  private preferredToolRouterModel(): ModelOption {
+    const keyStatus = this.keys.status()
+    for (const modelId of TOOL_ROUTER_MODEL_ORDER) {
+      const model = this.model(modelId)
+      if (!model) continue
+      if (model.provider === 'google' && keyStatus.google) return model
+      if (model.provider === 'openai' && keyStatus.openai) return model
+      if (model.provider === 'grok' && keyStatus.grok) return model
+      if (model.provider === 'anthropic' && keyStatus.anthropic) return model
+    }
+    throw new Error('No fast helper model is available for tool routing')
+  }
+
   /* ============================ ASK MODE ============================ */
 
   /**
@@ -1190,7 +1227,7 @@ export class ChatService {
 
   /* ============================ TEST DELEGATES ============================ */
 
-  private agentToolProfile(req: ChatRequest) {
+  private async agentToolProfile(req: ChatRequest) {
     return this.agentConfig.agentToolProfile(req)
   }
 
@@ -1200,10 +1237,6 @@ export class ChatService {
 
   private latestSubstantiveUserText(req: ChatRequest) {
     return this.agentConfig.latestSubstantiveUserText(req)
-  }
-
-  private workspaceSystemBlock(profile?: ReturnType<typeof selectAgentToolProfile>) {
-    return this.agentConfig.workspaceSystemBlock(profile)
   }
 
   private emitContractTrace(req: Pick<ChatRequest, 'requestId'>, policy: TurnContextPolicy, provider: ModelOption['provider']): void {

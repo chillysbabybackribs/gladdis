@@ -11,7 +11,8 @@ import {
   shouldUseBrowserTools,
   shouldUseWorkspaceContext
 } from '../../../shared/types'
-import { selectAgentToolProfile, type AgentToolProfile } from './agentTools'
+import { AGENT_TOOLS } from './agentTools'
+import type { AgentToolSurface } from './AgentConfigurationService'
 import { stripActivePagePreamble } from './routing'
 
 export interface TurnContextPolicy {
@@ -22,12 +23,12 @@ export interface TurnContextPolicy {
   activePageFollowup: boolean
   browserIntent: boolean
   workspaceIntent: boolean
-  profile: AgentToolProfile
+  profile: AgentToolSurface
 }
 
 export interface BuildTraceOptions {
   provider: ModelOption['provider']
-  profile: AgentToolProfile
+  profile: AgentToolSurface
   actionableText: string
   selectedFolder: string | null
   attachedActivePageContext: boolean
@@ -56,9 +57,9 @@ export function resolveTurnContextPolicy(
     activePageFollowup,
     browserIntent,
     workspaceIntent: shouldUseWorkspaceContext(actionableText),
-    profile: selectAgentToolProfile(actionableText, {
-      hasWorkspaceFolder: options?.hasWorkspaceFolder
-    })
+    // This is only the initial policy placeholder. The real routed surface is
+    // chosen later in AgentConfigurationService.agentToolProfile.
+    profile: { name: 'full', tools: [...AGENT_TOOLS] }
   }
 }
 
@@ -84,9 +85,12 @@ export function buildContractTrace(options: BuildTraceOptions): ContractTrace {
   const workspace = explainWorkspaceContext(options.actionableText, Boolean(options.selectedFolder))
   if (workspace.included && options.selectedFolder) workspace.detail = options.selectedFolder
   const codexCwd = buildCodexCwdDecision(options.provider, workspace, options.selectedFolder)
+  const traceProfile = options.provider === 'codex'
+    ? 'codex'
+    : traceProfileForTools(options.profile.tools.map((tool) => tool.name))
 
   return {
-    profile: options.provider === 'codex' ? 'codex' : options.profile.name,
+    profile: traceProfile,
     tools: options.profile.tools.map((tool) => tool.name),
     activePage: explainActivePageContext(
       options.actionableText,
@@ -103,6 +107,28 @@ export function buildContractTrace(options: BuildTraceOptions): ContractTrace {
       codexCwd: codexCwd?.detail
     }
   }
+}
+
+function traceProfileForTools(toolNames: string[]): ContractTrace['profile'] {
+  const names = new Set(toolNames)
+  const browser =
+    names.has('search') ||
+    names.has('navigate') ||
+    names.has('grep_page') ||
+    names.has('read_page') ||
+    names.has('read_a11y') ||
+    names.has('act')
+  const filesystem =
+    names.has('search_files') ||
+    names.has('read_file') ||
+    names.has('edit_file') ||
+    names.has('write_file') ||
+    names.has('run_command')
+
+  if (browser && filesystem) return 'full'
+  if (browser) return 'browser'
+  if (filesystem) return 'filesystem'
+  return 'conversation'
 }
 
 function extractActivePageContextLabel(text: string): string | null {

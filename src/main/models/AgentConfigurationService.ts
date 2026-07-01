@@ -6,15 +6,14 @@ import {
 } from '../../../shared/types'
 import { BrowserTools, type ToolContext } from './browserTools'
 import {
-  AGENT_TOOLS,
   knownToolByName,
   normalizeToolName
 } from './agentTools'
 import type { ToolDef } from './browserTools'
 
-/** A turn's tool surface: the full primitive set, after per-agent user policy. */
+/** A turn's tool surface after routing + any per-agent user policy. */
 export interface AgentToolSurface {
-  name: 'full'
+  name: string
   tools: ToolDef[]
 }
 import { stripActivePagePreamble } from './routing'
@@ -24,12 +23,14 @@ import { isBareContinuation } from '../../../shared/types'
 import type { Provider } from '../../../shared/types'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 import type { LlmComplete } from './llm'
+import { routeAgentTools } from './toolRouter'
 
 export class AgentConfigurationService {
   constructor(
     private tools: BrowserTools,
     private repoIntelligence: RepoIntelligenceService,
-    private emit: (e: ChatStreamEvent) => void
+    private emit: (e: ChatStreamEvent) => void,
+    private routeWithModel?: LlmComplete
   ) {}
 
   public async codexRepoOverviewBlock(req: ChatRequest, userText: string): Promise<string | null> {
@@ -78,17 +79,21 @@ export class AgentConfigurationService {
   }
 
   /**
-   * The tool surface for a turn. The full primitive surface is offered every
-   * turn (profiles + request_tools were retired — the surface is small enough
-   * not to ration), then per-agent user policy (preferred/disallowed tools)
-   * narrows or extends it. `provider` is unused now that no provider gets a
-   * special promotion, but kept for call-site compatibility.
+   * Route the turn onto a compact tool surface, then apply any saved
+   * preferred/disallowed-tool policy from the selected agent.
    */
-  public agentToolProfile(
+  public async agentToolProfile(
     req: ChatRequest,
     _provider?: Provider
-  ): AgentToolSurface {
-    return this.applyAgentToolPolicy(req, { name: 'full', tools: [...AGENT_TOOLS] })
+  ): Promise<AgentToolSurface> {
+    const routed = await routeAgentTools({
+      req,
+      provider: _provider,
+      latestUserText: this.latestSubstantiveUserText(req),
+      hasWorkspaceRoot: Boolean(this.tools.getWorkspaceRoot()),
+      llm: this.routeWithModel
+    })
+    return this.applyAgentToolPolicy(req, { name: routed.name, tools: routed.tools })
   }
 
   private applyAgentToolPolicy(

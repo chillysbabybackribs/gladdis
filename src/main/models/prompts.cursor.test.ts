@@ -56,19 +56,18 @@ describe('buildCursorSystem', () => {
 })
 
 describe('CURSOR_BROWSER_INSTRUCTIONS', () => {
-  it('forbids native web search/fetch tools even if Cursor exposes them', () => {
-    for (const nativeTool of [
-      'WebSearch',
-      'WebFetch',
-      'web_search',
-      'web_fetch',
-      'browser_search',
-      'browser_fetch'
-    ]) {
-      expect(CURSOR_BROWSER_INSTRUCTIONS).toContain(nativeTool)
-    }
-    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('outside the Gladdis contract')
-    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('call search instead')
+  it('allows shell as a background web helper but keeps the visible tab primary', () => {
+    // Shell/native web fetching is now a first-class background path...
+    expect(CURSOR_BROWSER_INSTRUCTIONS.toLowerCase()).toContain('background')
+    // ...but it must never supersede live browser navigation the user is watching.
+    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('never')
+    expect(CURSOR_BROWSER_INSTRUCTIONS.toLowerCase()).toContain('visible tab')
+    // The reversed policy must be gone: no more "forbidden native tool" framing.
+    expect(CURSOR_BROWSER_INSTRUCTIONS).not.toContain('outside the Gladdis contract')
+    expect(CURSOR_BROWSER_INSTRUCTIONS).not.toContain('only web search that exists')
+    // Live-tab web tools are still taught as the primary, watched surface.
+    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('search')
+    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('navigate_visible')
   })
 
   // Cursor's MCP bridge registers the memory_* tools, so the prompt must teach

@@ -61,6 +61,33 @@ describe('embedded prompt tool routing', () => {
     expect(prompt).not.toContain('`act` is the primary action verb')
   })
 
+  it('teaches tab grounding across all three assembly paths when a browser tool is attached', async () => {
+    const agentPrompt = await buildAgentSystem([
+      knownToolByName('navigate')!,
+      knownToolByName('grep_page')!
+    ])
+    const codexPrompt = buildCodexSystem({ gladdisToolNames: ['navigate', 'grep_page'] })
+    const claudePrompt = buildClaudeCodeSystem({ browserToolNames: ['navigate', 'grep_page'] })
+
+    for (const prompt of [agentPrompt, codexPrompt, claudePrompt]) {
+      expect(prompt).toContain('TAB GROUNDING')
+      expect(prompt).toContain('[tab N/M]')
+      expect(prompt).toContain('slowLoad')
+      expect(prompt).toContain('LOADING LONGER THAN NORMAL')
+    }
+  })
+
+  it('does not teach tab grounding when only non-browser tools are attached', async () => {
+    const agentPrompt = await buildAgentSystem([
+      knownToolByName('search_files')!,
+      knownToolByName('read_file')!
+    ])
+    const claudePrompt = buildClaudeCodeSystem({ browserToolNames: ['memory_read'] })
+
+    expect(agentPrompt).not.toContain('TAB GROUNDING')
+    expect(claudePrompt).not.toContain('TAB GROUNDING')
+  })
+
   it('teaches extract_structured when that tool is attached', () => {
     const prompt = buildCodexSystem({ gladdisToolNames: ['extract_structured'] })
 

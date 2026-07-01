@@ -102,6 +102,15 @@ export async function dispatchAgenticTurn(args: {
   const workspaceBlock = deps.agentConfig.workspaceSystemBlock(profile)
 
   // Shared across every provider loop; only the client field + token field name differ.
+  deps.emit({
+    requestId: req.requestId,
+    type: 'contract_trace',
+    provider,
+    profile: 'full',
+    tools: profile.tools.map((tool) => tool.name),
+    toolCount: profile.tools.length
+  })
+
   const common = {
     audit: deps.audit,
     emit: deps.emit,

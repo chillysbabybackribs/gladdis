@@ -753,13 +753,15 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_SYSTEM).toContain('Resume process:')
     expect(CODEX_SYSTEM).toContain('Do not edit files, run validations, navigate pages, or continue old work')
     // The browser instruction must be part of the prompt Codex actually receives,
-    // not a dead constant — this is what steers it to the gladdis.* tools and
-    // away from shelling out to a native browser.
+    // not a dead constant — this is what keeps watched browser work on the visible
+    // tab while allowing shell as a background helper for web data.
     expect(CODEX_SYSTEM).toContain(CODEX_BROWSER_INSTRUCTIONS)
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('NEVER reach for a browser through your native shell')
+    // Shell is a background tool, never a replacement for live navigation.
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('background')
+    expect(CODEX_BROWSER_INSTRUCTIONS.toLowerCase()).toContain('visible tab')
+    // The old absolute ban on native browsing is gone.
+    expect(CODEX_BROWSER_INSTRUCTIONS).not.toContain('NEVER reach for a browser through your native shell')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('Do not launch a second Gladdis/dev')
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('playwright (screenshot/open/codegen/test/show-report)')
-    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('localhost:9222 DevTools')
     expect(CODEX_BROWSER_INSTRUCTIONS).not.toContain('repo_overview')
     expect(CODEX_BROWSER_INSTRUCTIONS).not.toContain('search_repo')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('native shell and file tools')
@@ -809,6 +811,7 @@ describe('ChatService provider hardening', () => {
     const agentReq = agent.mock.calls[0][0].req as any
     expect(agentReq.messages.at(-1)?.content).toContain('[Active page:')
   })
+
 
   it('keeps Cursor plain chat in ask mode without browser MCP', async () => {
     const { service } = makeService()

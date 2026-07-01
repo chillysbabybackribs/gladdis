@@ -37,6 +37,38 @@ interface Tab {
   view: WebContentsView
   cdp: CDPSession
   favicon: string | null
+  /**
+   * Epoch ms when the current load started (did-start-loading), or null when the
+   * tab is idle. Lets the model see HOW LONG a tab has been loading, not just a
+   * bare loading boolean — the "loading longer than normal" signal.
+   */
+  loadingStartedAt: number | null
+}
+
+/**
+ * A load running past this many ms is flagged `slowLoad` in the tab brief, so a
+ * model driving the browser knows a page is taking longer than a healthy load
+ * would and can decide to wait_for_load, re-navigate, or report the stall
+ * instead of acting on a half-rendered page.
+ */
+export const SLOW_LOAD_THRESHOLD_MS = 5000
+
+/**
+ * A compact, page-script-free snapshot of WHERE the model is in the browser:
+ * which tab (id + 1-based index + total count), its url/title, and live load
+ * state including how long the current load has run. Sourced entirely from
+ * TabManager (no CDP round-trip), so every tool result can carry it cheaply to
+ * keep the model grounded on tab identity and load health between actions.
+ */
+export interface TabBrief {
+  id: string
+  index: number
+  count: number
+  url: string
+  title: string
+  loading: boolean
+  loadingMs: number | null
+  slowLoad: boolean
 }
 
 type NetworkCaptureResult = {
@@ -152,7 +184,7 @@ export class TabManager {
     // page script — no race, and one seam instead of a separate inject call.
     const cdp = new CDPSession(wc, id, this.onCdpEvent, [STEALTH_INIT_SCRIPT])
 
-    const tab: Tab = { id, view, cdp, favicon: null }
+    const tab: Tab = { id, view, cdp, favicon: null, loadingStartedAt: null }
     view.setVisible(false)
 
     // Push UI updates on any navigation / title / favicon / load change.
@@ -175,8 +207,16 @@ export class TabManager {
     wc.on('did-navigate-in-page', () => {
       this.notifyPageNavigation(id)
     })
-    wc.on('did-start-loading', emit)
-    wc.on('did-stop-loading', emit)
+    // Stamp/clear the load clock so the tab brief can report how long a load has
+    // been running (the "loading longer than normal" signal), then emit as before.
+    wc.on('did-start-loading', () => {
+      tab.loadingStartedAt = Date.now()
+      emit()
+    })
+    wc.on('did-stop-loading', () => {
+      tab.loadingStartedAt = null
+      emit()
+    })
     wc.on('did-navigate', emit)
     wc.on('did-navigate-in-page', emit)
     // Re-apply the workspace browser zoom on every commit so Chromium's
@@ -704,6 +744,37 @@ export class TabManager {
     return { tabs: this.list(), activeTabId: this.activeTabId }
   }
 
+  /**
+   * Build the compact tab-grounding brief for a tab (defaults to the active
+   * tab). Pure TabManager reads — no page script — so every browser tool result
+   * can carry it to keep the model oriented on which tab it is on and whether
+   * that tab is still (or slowly) loading. Returns null only when there is no
+   * usable tab id at all.
+   */
+  tabBrief(tabId?: string | null): TabBrief | null {
+    const id = isUsableTabId(tabId) && this.tabs.has(tabId) ? tabId : this.activeTabId
+    if (!isUsableTabId(id)) return null
+    const tab = this.tabs.get(id)
+    if (!tab) return null
+
+    const wc = tab.view.webContents
+    const index = this.order.indexOf(id)
+    const loading = wc.isLoading()
+    const loadingMs =
+      loading && tab.loadingStartedAt !== null ? Math.max(0, Date.now() - tab.loadingStartedAt) : null
+
+    return {
+      id,
+      index: index >= 0 ? index + 1 : 1,
+      count: this.order.length,
+      url: wc.getURL(),
+      title: wc.getTitle() || wc.getURL(),
+      loading,
+      loadingMs,
+      slowLoad: loadingMs !== null && loadingMs >= SLOW_LOAD_THRESHOLD_MS
+    }
+  }
+
   private recordNetworkAwareness(
     tabId: string,
     capture: NetworkCaptureResult,
@@ -722,12 +793,17 @@ export class TabManager {
 
   private info(tab: Tab): TabInfo {
     const wc = tab.view.webContents
+    const loading = wc.isLoading()
+    const loadingMs =
+      loading && tab.loadingStartedAt !== null ? Math.max(0, Date.now() - tab.loadingStartedAt) : null
     return {
       id: tab.id,
       url: wc.getURL(),
       title: wc.getTitle() || wc.getURL(),
       favicon: tab.favicon,
-      loading: wc.isLoading(),
+      loading,
+      loadingMs,
+      slowLoad: loadingMs !== null && loadingMs >= SLOW_LOAD_THRESHOLD_MS,
       canGoBack: wc.navigationHistory.canGoBack(),
       canGoForward: wc.navigationHistory.canGoForward()
     }

@@ -38,6 +38,21 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'cdp_command'
 ])
 
+/**
+ * The perception + drive verbs whose result carries the tab-grounding brief
+ * (current tab id/index/count + live load state). Narrower than
+ * CODEX_BROWSER_TOOL_NAMES: excludes memory, `search` (background web lookup
+ * that leaves the visible tab unchanged), and `screenshot_app` (app self-image,
+ * not a tab op). Single source of truth for both the runtime brief injection
+ * (browserTools.ts) and the prompt gate below.
+ */
+export const TAB_BRIEF_CARRYING_TOOLS = [
+  'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured',
+  'watch_network', 'discover_data_sources', 'screenshot',
+  'act', 'set_field', 'submit', 'open_result', 'execute_in_browser', 'navigate',
+  'cdp_command', 'grep_click', 'grep_type'
+] as const
+
 export function selectCodexDynamicToolNames(toolNames: Iterable<string>): ReadonlySet<string> {
   const allowed = new Set<string>()
   for (const name of toolNames) {
@@ -68,16 +83,20 @@ export const CODEX_BROWSER_TOOLS = buildCodexBrowserTools(CODEX_BROWSER_TOOL_NAM
 // with its own shell-specific lines below. Worded as a binding rule because a
 // soft "prefer" nudge let Gemini fall back to its native search.
 export const GLADDIS_WEB_TOOLS_RULE =
-  'WEB SEARCH RULE — binding, not a preference: every web/search action goes through Gladdis\'s own ' +
-  'tools, which drive the visible Chromium tab the user is watching. Use search for web ' +
-  'search (the user sees the results in-tab; pass navigate_visible: true to also open the best hit), and use navigate to load a known URL then grep_page to read it. ' +
-  'You do NOT have a working built-in/native web search or grounding here: it is disabled and its results ' +
-  'do not reach the user. If your runtime exposes a native search/fetch tool anyway, such as WebSearch, ' +
-  'WebFetch, web_search, web_fetch, browser_search, or browser_fetch, do not call it; it is outside the ' +
-  'Gladdis contract for this turn. Treat any urge to "search the web" or answer a current/dated/online question ' +
-  'from your own knowledge as a signal to call search instead. Never answer a question that needs live web ' +
-  'facts from memory, and never claim you cannot search — the search tool is always available for that. ' +
-  'Gladdis\'s search is the only web search that exists for this turn.'
+  'WEB WORK — live tab is primary, shell is a background helper: the visible Chromium tab is the UX-mandatory ' +
+  'surface for anything the user is meant to watch happen — live navigation, opening a result, filling and ' +
+  'submitting a form, on-screen verification. Drive it with search (the user sees results in-tab; pass ' +
+  'navigate_visible: true to open the best hit), navigate to load a known URL, then grep_page/read_a11y to read ' +
+  'it. Shell/native commands are ALSO available for web work and are a first-class path for fetching data the ' +
+  'user does not need to watch render — curl or a CLI hitting a page or JSON/GraphQL endpoint directly is fine, ' +
+  'and often better than driving a flaky page. The one hard rule: shell must never SUPERSEDE live browser ' +
+  'navigation. When the task is show/drive/verify-in-the-browser, the visible tab is required and shell runs ' +
+  'alongside it in the background, never instead of it; when the task is just get-this-data, shell is free to ' +
+  'fetch it directly. Never answer a question that needs live web facts from memory — search or fetch it. ' +
+  'The attached browser tools ARE interactive control of that visible tab, usable right now: if your next step ' +
+  'is a browser interaction (click a date grid, open a result, expand a filter, click through to another site), ' +
+  'that interaction is the next action — do it this turn. Do not defer it to a hypothetical future turn or ask ' +
+  'whether an interactive browser surface will be available later; if these tools are attached, it already is.'
 
 export const BROWSER_SEMANTIC_VERBS_GUIDANCE = 'Prefer the semantic browser verbs when they fit'
 
@@ -102,9 +121,25 @@ export const ACT_REORIENT_GUIDANCE =
   'When `act` returns ok:false with "no visible element matched …", treat that as a re-orient signal: use one of the attached read tools ' +
   'such as `read_a11y` or `grep_page`, then target a fresh @ref or query instead of retrying the same action.'
 
+export const TAB_GROUNDING_GUIDANCE =
+  'TAB GROUNDING — every browser tool result ends with a "[tab N/M] <url>" line and carries a structured `tab` ' +
+  '{id, index, count, url, title, loading, loadingMs, slowLoad}. Read it to know WHICH tab you are on (index of ' +
+  'count) and whether it is still loading. If `loading` is true the page is not settled — its text/wireframe may ' +
+  'be a half-rendered shell, so do not conclude "empty" or act on missing content yet. If `slowLoad` is true (or ' +
+  'the line says LOADING LONGER THAN NORMAL) the tab has been loading past the healthy threshold: call ' +
+  'wait_for_load, or re-navigate/report the stall, instead of retrying blindly. When `count` > 1 or the tab ' +
+  'index/url changes unexpectedly (a click or window.open spawned or switched tabs), re-orient on the tab you are ' +
+  'actually on before targeting anything.'
+
 export const NATIVE_BROWSER_PROHIBITION =
-  'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), ' +
-  'puppeteer scripts, or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. These bypass Gladdis, hide the page from the user, and skip Gladdis\'s superior search. The attached gladdis.* tools are always the right tool; a native browser command is always wrong here.'
+  'Shell is a background tool, not a replacement for the visible tab. Do NOT drive a SEPARATE browser through the ' +
+  'shell for work the user should watch — spinning up google-chrome/chromium, playwright/puppeteer sessions, or ' +
+  'headless navigation runs the page where the user cannot see it, which defeats the point of the visible panel. ' +
+  'For anything the user is meant to see (navigating, clicking, filling forms, on-screen checks) use the attached ' +
+  'browser tools that act on the visible tab. Shell is still fully welcome in the background for fetching data ' +
+  '(curl/CLI against a URL or API), scraping response bodies, or any web work whose result — not its rendering — ' +
+  'is what matters. Rule of thumb: if the user should watch it happen, drive the visible tab; if you just need the ' +
+  'bytes, shell is free to fetch them.'
 
 export const GLADDIS_DEBUGGING_GUIDANCE =
   'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev app. Launch a separate instance only for startup/cold-boot/fresh-process validation, and say why first.'
@@ -252,7 +287,7 @@ const BROWSER_TOOL_CATEGORY_BY_NAME: Record<string, BrowserToolCategory> = Objec
   )
 )
 
-export const BROWSER_TOOL_REGISTRY: BrowserToolRegistryEntry[] = CODEX_BROWSER_TOOL_NAMES.map((name) => {
+export const BROWSER_TOOL_REGISTRY: BrowserToolRegistryEntry[] = [...CODEX_BROWSER_TOOL_NAMES].map((name) => {
   const category = BROWSER_TOOL_CATEGORY_BY_NAME[name] ?? 'advanced-actions'
   return {
     name,
@@ -453,6 +488,12 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
     lines.push(ACT_REORIENT_GUIDANCE)
   }
 
+  // Any perception/drive verb carries the tab-grounding brief, so teach the
+  // model to read it whenever it has at least one such tool.
+  if (TAB_BRIEF_CARRYING_TOOLS.some((name) => allowed.has(name))) {
+    lines.push(TAB_GROUNDING_GUIDANCE)
+  }
+
   const hasMemoryTools = CODEX_MEMORY_TOOL_NAMES.some((name) => allowed.has(name))
   if (hasMemoryTools) {
     const notebookLine = buildMemoryNotebookLine(allowed)
@@ -461,7 +502,7 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
 
   lines.push(NATIVE_BROWSER_PROHIBITION)
   lines.push(GLADDIS_DEBUGGING_GUIDANCE)
-  lines.push('Use Codex-native shell and file tools for local code, package, and command work — just never for browsing.')
+  lines.push('Use Codex-native shell and file tools for local code, package, and command work, and for background web fetching (curl/CLI/API) — just never to drive a separate browser for work the user should watch happen in the visible tab.')
 
   return lines.join('\n')
 }
@@ -474,7 +515,7 @@ export const CODEX_DISABLED_NATIVE_CONFIG = {
     standalone_web_search: false,
     web_search_request: false,
     web_search_cached: false,
-    search_tool: false,
+    search_tool: true,
     in_app_browser: false,
     browser_use: false,
     browser_use_external: false,

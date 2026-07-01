@@ -1,4 +1,5 @@
-import type { TabManager } from '../TabManager'
+import type { TabManager, TabBrief } from '../TabManager'
+import { TAB_BRIEF_CARRYING_TOOLS } from './codex/dynamicBrowserTools'
 import type { PageExtractor } from '../extract/PageExtractor'
 import type { ChatStore } from './ChatStore'
 import { FileTools } from '../fs/FileTools'
@@ -99,6 +100,56 @@ export interface ToolContext {
    * scoping is per-workspace, so this is the single source of truth.
    */
   workspaceRoot?: string
+}
+
+/**
+ * Browser tools whose result should carry the tab-grounding brief. Sourced from
+ * the single canonical list in dynamicBrowserTools so the runtime injection and
+ * the prompt guidance can never drift apart.
+ */
+const TAB_BRIEF_TOOLS = new Set<string>(TAB_BRIEF_CARRYING_TOOLS)
+
+/**
+ * One-line, human-readable summary of the tab brief, appended to a tool's text
+ * so text-only consumers (e.g. the MCP bridge, which historically dropped
+ * structuredContent) stay grounded on which tab they are on and whether it is
+ * still — or slowly — loading. Kept terse to avoid context bloat.
+ */
+function formatTabBriefLine(brief: TabBrief): string {
+  const where = `tab ${brief.index}/${brief.count}`
+  if (!brief.loading) return `[${where}] ${brief.url}`
+  const secs = brief.loadingMs !== null ? ` ${(brief.loadingMs / 1000).toFixed(1)}s` : ''
+  const slow = brief.slowLoad ? ' — LOADING LONGER THAN NORMAL; consider wait_for_load or re-check' : ''
+  return `[${where}] loading${secs}${slow} ${brief.url}`
+}
+
+/**
+ * Merge the tab-grounding brief into a browser tool's successful outcome, both
+ * as structured `tab` state and as an appended text line. Non-browser tools,
+ * failures, and calls with no resolvable tab are returned unchanged.
+ */
+function withTabBrief(
+  tabs: TabManager,
+  name: string,
+  tabId: string | null | undefined,
+  outcome: ToolOutcome
+): ToolOutcome {
+  if (!outcome.ok || !TAB_BRIEF_TOOLS.has(name)) return outcome
+  // Best-effort: grounding enrichment must never fail (or crash) a successful
+  // tool call. If the tab layer can't produce a brief, return the outcome as-is.
+  if (typeof tabs?.tabBrief !== 'function') return outcome
+  let brief: TabBrief | null
+  try {
+    brief = tabs.tabBrief(tabId)
+  } catch {
+    return outcome
+  }
+  if (!brief) return outcome
+  return {
+    ...outcome,
+    text: `${outcome.text}\n${formatTabBriefLine(brief)}`,
+    structuredContent: { ...(outcome.structuredContent ?? {}), tab: brief }
+  }
 }
 
 /**
@@ -621,6 +672,11 @@ export class BrowserTools {
           outcome = { ok: false, text: `Unknown tool: ${name}` }
           break
       }
+      // Ground the model on where it is in the browser: every successful
+      // perception/drive result carries the current tab (id, index/count) and
+      // its live load state, so the model always knows which tab it is on and
+      // whether that tab is still — or abnormally slowly — loading.
+      outcome = withTabBrief(this.tabs, name, ctx.tabId, outcome)
       const state = this.calibrationScope(ctx)
       noteToolCalibrationOutcome(state, name, outcome, ctx.iteration)
       return maybeAddRecalibrationHint(state, name, outcome)

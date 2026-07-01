@@ -14,6 +14,8 @@ import {
   EXTRACT_STRUCTURED_GUIDANCE,
   CODEX_BROWSER_INSTRUCTIONS,
   GLADDIS_WEB_TOOLS_RULE,
+  TAB_BRIEF_CARRYING_TOOLS,
+  TAB_GROUNDING_GUIDANCE,
   summarizeBrowserToolCategories,
   stripNamedToolLead
 } from './codex/dynamicBrowserTools'
@@ -220,8 +222,8 @@ function buildBrowserInteractionGuidance(names: Set<string>): string {
   if (names.has('grep_click') || names.has('grep_type')) {
     lowerLevelLines.push(
       names.has('act')
-        ? '  • grep_click / grep_type → legacy split verbs. They find + act but return NO fresh state, so you would have to read separately. Prefer act.'
-        : '  • grep_click / grep_type → legacy split verbs. They find + act but return NO fresh state, so re-read explicitly after using them.'
+        ? '  • grep_click / grep_type → legacy split verbs. They find + act and return the tab brief, but NOT the fresh page state act gives, so you would still read the page separately. Prefer act.'
+        : '  • grep_click / grep_type → legacy split verbs. They find + act and return the tab brief, but NOT fresh page state, so re-read the page explicitly after using them.'
     )
   }
   if (names.has('screenshot') || names.has('screenshot_app')) {
@@ -245,6 +247,7 @@ function buildBrowserInteractionGuidance(names: Set<string>): string {
     ].join('\n'),
     actionLines.length > 0 ? [`${names.has('act') ? 'Act' : 'Action'} — semantic verbs first, low-level companion actions second:`, ...actionLines].join('\n') : null,
     lowerLevelLines.length > 0 ? ['Lower-level (only when the layers above cannot express what you need):', ...lowerLevelLines].join('\n') : null,
+    TAB_BRIEF_CARRYING_TOOLS.some((name) => names.has(name)) ? TAB_GROUNDING_GUIDANCE : null,
     actionLines.length > 0
       ? 'These action tools ARE interactive browser control — clicking a date grid, opening a result, expanding a menu, filling and submitting a form all happen through them on the visible tab, right now, this turn. When your named next step is a browser interaction (e.g. "click the date cell", "open that itinerary", "click through to the airline"), that interaction IS the next action — perform it. Never defer a browser interaction you can do this turn to a hypothetical future turn, and never ask the user whether an interactive browser surface "will be available next turn": if these tools are attached, it already is.'
       : null

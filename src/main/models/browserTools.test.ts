@@ -36,6 +36,44 @@ describe('BrowserTools', () => {
     })
   })
 
+  it('injects the tab-grounding brief into a successful browser-tool result', async () => {
+    const brief = {
+      id: 'tab-2', index: 2, count: 3, url: 'https://b.test/', title: 'B',
+      loading: true, loadingMs: 6200, slowLoad: true
+    }
+    const tools = new BrowserTools({
+      executeJavaScript: vi.fn(async () => ({ success: true, result: 'ok' })),
+      runWithPendingNetworkCapture: vi.fn(async (_tabId: string, fn: () => Promise<any>) => ({
+        value: await fn(),
+        network: null
+      })),
+      tabBrief: vi.fn(() => brief)
+    } as any, {} as any, {} as any)
+
+    const result = await tools.run('execute_in_browser', { code: '"x"' }, { tabId: 'tab-2' })
+
+    // Structured tab state rides along without clobbering the tool's own fields.
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.tab).toEqual(brief)
+    expect(result.structuredContent?.code).toBe('"x"')
+    // Text channel carries a compact grounding line with the slow-load warning.
+    expect(result.text).toContain('[tab 2/3]')
+    expect(result.text).toContain('LOADING LONGER THAN NORMAL')
+  })
+
+  it('does not attach a tab brief to non-browser (filesystem) tools', async () => {
+    const tabBrief = vi.fn(() => ({
+      id: 'tab-1', index: 1, count: 1, url: 'https://a.test/', title: 'A',
+      loading: false, loadingMs: null, slowLoad: false
+    }))
+    const tools = new BrowserTools({ tabBrief } as any, {} as any, {} as any)
+
+    const result = await tools.run('read_file', { path: 'vite.config.ts' }, { tabId: 'tab-1' })
+
+    expect(result.structuredContent?.tab).toBeUndefined()
+    expect(tabBrief).not.toHaveBeenCalled()
+  })
+
   it('adds a same-tool recalibration hint when read_a11y fails', async () => {
     const tools = new BrowserTools({ getTabUrl: vi.fn(() => 'https://example.com') } as any, {} as any, {} as any)
     const result = await tools.run(

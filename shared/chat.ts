@@ -582,8 +582,10 @@ export type ChatStreamEvent =
       requestId: string
       assistantMessageId?: string
       type: 'contract_trace'
+      provider?: Provider
       profile: ContractTraceProfile
       tools: string[]
+      toolCount?: number
       activePage?: RoutingDecision
       workspace?: RoutingDecision
       codexCwd?: RoutingDecision

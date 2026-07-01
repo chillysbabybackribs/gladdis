@@ -4,6 +4,10 @@ export interface TabInfo {
   title: string
   favicon: string | null
   loading: boolean
+  /** ms the current load has been running, or null when the tab is idle. */
+  loadingMs: number | null
+  /** True when the current load has run past the slow-load threshold. */
+  slowLoad: boolean
   canGoBack: boolean
   canGoForward: boolean
 }

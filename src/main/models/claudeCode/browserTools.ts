@@ -10,6 +10,9 @@ import {
   GLADDIS_DEBUGGING_GUIDANCE,
   GLADDIS_WEB_TOOLS_RULE,
   GREP_PAGE_GUIDANCE,
+  NATIVE_BROWSER_PROHIBITION,
+  TAB_BRIEF_CARRYING_TOOLS,
+  TAB_GROUNDING_GUIDANCE,
   describeSemanticVerbPreference
 } from '../codex/dynamicBrowserTools'
 import { buildCursorNativeWorkContract } from '../codex/processPolicy'
@@ -118,18 +121,17 @@ function buildEmbeddedBrowserInstructions(args: {
     lines.push(ACT_REORIENT_GUIDANCE)
   }
 
+  if (TAB_BRIEF_CARRYING_TOOLS.some((name) => allowed.has(name))) {
+    lines.push(TAB_GROUNDING_GUIDANCE)
+  }
+
   const hasMemoryTools = CODEX_MEMORY_TOOL_NAMES.some((name) => allowed.has(name))
   if (hasMemoryTools) {
     const notebookLine = buildMemoryNotebookLine(allowed)
     if (notebookLine) lines.push(notebookLine)
   }
 
-  lines.push(
-    `NEVER reach for a browser through ${args.runtimeLabel}'s native shell or any other path. Do not run google-chrome, chromium, chrome, ` +
-    'xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, or curl/wget against localhost:9222 DevTools — ' +
-    `not even to "just take a screenshot" or check a dev server. These bypass Gladdis, hide the page from the user, and skip Gladdis's search. ` +
-    'The attached Gladdis MCP tools are always the right tool for browsing.'
-  )
+  lines.push(NATIVE_BROWSER_PROHIBITION)
   lines.push(GLADDIS_DEBUGGING_GUIDANCE.replace('Do not launch a second Gladdis/dev app.', 'Do not launch a second Gladdis/dev app unless you need startup/cold-boot/fresh-process validation, and say why first.'))
   lines.push(args.nativeWorkLine)
 

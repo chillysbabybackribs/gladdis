@@ -31,6 +31,20 @@ Speed is recovered two ways that don't hurt grounding:
 2. **Lazy freshness** — pull exactly the slice needed, exactly when needed, so
    you never re-ground state that didn't change.
 
+Grounding is also a **completion** discipline, not just a perception one. The
+symmetric failure at the end of a task is **proxy substitution**: accepting an
+aggregate or summary *about* the target as if it were the target. A floor/"from"
+price is not a bookable itinerary; "the build usually passes" is not a passing
+build; a count of matches is not the matched record. When a done-check names a
+specific concrete object, a statistic that merely describes or bounds that object
+does **not** satisfy it — the check is *not met*, not met-with-a-caveat. The
+grounding rule "act on state identical to the actual state" applies to the claim
+of doneness exactly as it applies to the act: verify the concrete object, don't
+infer it from a summary. A corollary: if the agent can *name* the action that
+would produce the concrete object (drive the UI instead of reading a summary
+page, try specific inputs), that named step is the next action, not a stopping
+point.
+
 ---
 
 ## 1. The two hard axes

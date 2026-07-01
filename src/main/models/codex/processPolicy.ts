@@ -28,6 +28,25 @@ export const STOP_AFTER_VALIDATED_DONE_GUIDANCE =
   'When your done checks are satisfied and validation has passed, stop and deliver the result. Do not ' +
   'keep exploring or run extra work after confirmed completion unless the user asks for it.'
 
+export const COMPLETION_VERIFICATION_GUIDANCE =
+  'Before you claim a task is complete, re-check the done-checks you wrote against live evidence, and state ' +
+  'each one as met, not met, or could-not-verify with the specific tool result that establishes it — never ' +
+  'leave a check silently unmarked. A finished-format report over unmet checks is not completion. If any done ' +
+  'check is unmet and a concrete next action exists, do not produce a wrap-up, blocker handoff, or “I\'m not done ' +
+  'yet” status message—perform the next action first. Two failure modes are not allowed to pass as done. First, ' +
+  'proxy substitution: when a check calls for a specific concrete object (a bookable itinerary, a file\'s actual ' +
+  'contents, a passing test run, a specific record), an aggregate or summary about that object — a floor/"from" ' +
+  'price, a "usually passes", a count, a description of what the object probably is — does not satisfy it; that ' +
+  'check is not met, not met-with-a-caveat. Second, stopping on a self-named next step: if you can articulate the ' +
+  'very action that would unblock a check (drive the UI instead of reading a summary page, try specific inputs, ' +
+  'open the exact record), that is the next action, not a stopping point — attempt it before reporting the check ' +
+  'as blocked. This holds even when the next action needs a capability not attached to this turn: the routed tool ' +
+  'surface is a floor, not a ceiling, so shell out to fetch web data in the background, run any tool already in ' +
+  'the repo, or write and run a small throwaway tool rather than declaring a tool-based blocker — while keeping ' +
+  'the visible tab primary for anything the user should watch, since shell never supersedes live browser ' +
+  'navigation. Only a block you genuinely cannot name a next step for — with no shell or native command ' +
+  'available to build one — justifies handing back an unmet check, and then say plainly what is missing and why.'
+
 export function buildCodexLocalMachineGuidance(): string {
   return (
     'This turn has the local machine under it. Before changing anything, locate the truth of how this ' +
@@ -118,7 +137,8 @@ export function buildBrowserProcessContract(args: {
 }): string {
   const sections = [
     ACTIVE_PAGE_GROUNDING_GUIDANCE,
-    args.uiVisualConfirmationGuidance
+    args.uiVisualConfirmationGuidance,
+    COMPLETION_VERIFICATION_GUIDANCE
   ]
 
   if (args.includeValidateCommitPush !== false) {

@@ -8,7 +8,7 @@ const STREAM_SEGMENT_SOFT_LIMIT = 1200
 const STREAM_SEGMENT_MIN_BREAK = 300
 
 /**
- * Upper bound (ms) on how long buffered stream events wait before they paint.
+ * Upper bound (ms) on how long buffered stream text waits before it paints.
  * `requestAnimationFrame` is the primary trigger — it coalesces a burst of
  * tokens into one commit per display frame while the panel is painting. But
  * Chromium pauses/heavily-throttles rAF when the window is minimized, hidden,
@@ -343,11 +343,11 @@ interface StreamConsumerArgs {
  * tokens in rapid bursts, each arriving as its own IPC event (its own event-loop
  * tick, so React can't batch them); rendering each one was the stutter — every
  * token cloned the message list, re-parsed the whole bubble's markdown, and
- * forced a scroll reflow. Buffering a frame's worth of tokens and flushing once
+ * forced a scroll reflow. Buffering a frame's worth of text and flushing once
  * caps that work at the display's refresh rate (rendering faster than ~60fps is
  * wasted work that causes the jank, not smoothness). Non-delta events
- * (tool_call/result/error/done) flush the pending buffer first, then apply in
- * the same frame batch so a burst of tool events costs one React commit.
+ * (tool_call/result/error/done) flush the pending text first, then apply in the
+ * same batch so a burst of tool events costs one React commit.
  *
  * Scroll behavior is delegated to the `onCommit` callback. The hook does not
  * touch the DOM directly — that keeps streaming logic separate from the
@@ -365,15 +365,12 @@ export function useStreamConsumer({
   onCommit,
   onTurnEnd
 }: StreamConsumerArgs): void {
-  const receivedText = useRef('')
-  const typedText = useRef('')
-  const isNetworkDone = useRef(false)
-  const terminalEvent = useRef<ChatStreamEvent | null>(null)
+  const bufferedDeltaText = useRef('')
   const lastActiveRequestId = useRef<string | null>(null)
   const lastRequestId = useRef<string | null>(null)
 
-  const typewriterRaf = useRef<number | null>(null)
-  const typewriterTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flushRaf = useRef<number | null>(null)
+  const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const onCommitRef = useRef<() => void>(noop)
   const onTurnEndRef = useRef<() => void>(noop)
@@ -419,87 +416,48 @@ export function useStreamConsumer({
       if (terminal) finishTurn(terminal)
     }
 
-    const clearTypewriterTimers = () => {
-      if (typewriterRaf.current !== null) {
-        cancelAnimationFrame(typewriterRaf.current)
-        typewriterRaf.current = null
+    const clearFlushTimers = () => {
+      if (flushRaf.current !== null) {
+        cancelAnimationFrame(flushRaf.current)
+        flushRaf.current = null
       }
-      if (typewriterTimer.current !== null) {
-        clearTimeout(typewriterTimer.current)
-        typewriterTimer.current = null
+      if (flushTimer.current !== null) {
+        clearTimeout(flushTimer.current)
+        flushTimer.current = null
       }
     }
 
-    const flushTypewriterInstantly = () => {
-      clearTypewriterTimers()
-      const fullText = receivedText.current
-      const currentLen = typedText.current.length
-      const lag = fullText.length - currentLen
-      if (lag > 0) {
-        const remainingText = fullText.slice(currentLen)
-        typedText.current = fullText
-        applyEvents([{
+    const flushBufferedDelta = (extraEvents: ChatStreamEvent[] = []) => {
+      clearFlushTimers()
+      const deltaText = bufferedDeltaText.current
+      bufferedDeltaText.current = ''
+      if (!deltaText) {
+        if (extraEvents.length) applyEvents(extraEvents)
+        return
+      }
+      applyEvents([
+        {
           requestId: activeReq.current ?? lastActiveRequestId.current ?? '',
           assistantMessageId: activeAssistantMessageId.current ?? undefined,
           type: 'delta',
-          text: remainingText
-        }])
-      }
+          text: deltaText
+        },
+        ...extraEvents
+      ])
     }
 
-    const typewriterTick = () => {
-      typewriterRaf.current = null
-      typewriterTimer.current = null
-
-      const fullText = receivedText.current
-      const currentLen = typedText.current.length
-      const lag = fullText.length - currentLen
-
-      if (lag > 0) {
-        // Dynamic pacing / adaptive speed curves:
-        // Determine how many characters to add in this animation tick.
-        let charsToAdd = 1
-        if (isNetworkDone.current) {
-          // Network completed: flush remaining text rapidly to keep UI responsive
-          charsToAdd = Math.max(15, Math.ceil(lag / 2))
-        } else if (lag > 200) {
-          charsToAdd = Math.max(12, Math.floor(lag / 12))
-        } else if (lag > 100) {
-          charsToAdd = 8
-        } else if (lag > 50) {
-          charsToAdd = 4
-        } else if (lag > 20) {
-          charsToAdd = 2
-        }
-
-        charsToAdd = Math.min(charsToAdd, lag)
-        const nextSlice = fullText.slice(currentLen, currentLen + charsToAdd)
-        typedText.current += nextSlice
-
-        applyEvents([{
-          requestId: activeReq.current ?? lastActiveRequestId.current ?? '',
-          assistantMessageId: activeAssistantMessageId.current ?? undefined,
-          type: 'delta',
-          text: nextSlice
-        }])
-
-        scheduleTypewriterTick()
-      } else {
-        // Caught up: process terminal events if they are waiting
-        if (isNetworkDone.current && terminalEvent.current) {
-          const terminal = terminalEvent.current
-          terminalEvent.current = null
-          applyEvents([terminal])
-        }
-      }
+    const flushTick = () => {
+      flushRaf.current = null
+      flushTimer.current = null
+      flushBufferedDelta()
     }
 
-    const scheduleTypewriterTick = () => {
-      if (typewriterRaf.current === null) {
-        typewriterRaf.current = requestAnimationFrame(typewriterTick)
+    const scheduleFlush = () => {
+      if (flushRaf.current === null) {
+        flushRaf.current = requestAnimationFrame(flushTick)
       }
-      if (typewriterTimer.current === null) {
-        typewriterTimer.current = setTimeout(typewriterTick, FALLBACK_FLUSH_MS)
+      if (flushTimer.current === null) {
+        flushTimer.current = setTimeout(flushTick, FALLBACK_FLUSH_MS)
       }
     }
 
@@ -511,52 +469,36 @@ export function useStreamConsumer({
       }
       if (activeId) lastActiveRequestId.current = activeId
 
-      // Detect a new turn starting and reset typewriter state
+      // Detect a new turn starting and reset any buffered stream text.
       if (e.requestId !== lastRequestId.current) {
         lastRequestId.current = e.requestId
-        clearTypewriterTimers()
-        receivedText.current = ''
-        typedText.current = ''
-        isNetworkDone.current = false
-        terminalEvent.current = null
+        clearFlushTimers()
+        bufferedDeltaText.current = ''
       }
 
       // Speak deltas here, NOT inside the setMessages updater — React invokes
       // updaters twice in StrictMode, which would double every spoken fragment.
       if (e.type === 'delta') {
         ttsRef.current.speak(e.text)
-        receivedText.current += e.text
-        scheduleTypewriterTick()
+        bufferedDeltaText.current += e.text
+        scheduleFlush()
         return
       }
 
       if (isTerminal) {
-        isNetworkDone.current = true
-        terminalEvent.current = e
-
-        const lag = receivedText.current.length - typedText.current.length
-        // If lag is small or the user manually cancelled the request, flush immediately
-        if (lag < 15 || !activeReq.current) {
-          flushTypewriterInstantly()
-          applyEvents([e])
-        } else {
-          scheduleTypewriterTick()
-        }
+        flushBufferedDelta([e])
       } else {
-        // Any other structural event (tool_call, capability_activity, etc.)
-        // must be applied synchronously on fully-revealed prose.
-        flushTypewriterInstantly()
-        applyEvents([e])
+        // Any structural event (tool_call, capability_activity, etc.) must
+        // preserve ordering relative to the latest prose, so flush the pending
+        // text and the event together in one commit.
+        flushBufferedDelta([e])
       }
     })
 
     return () => {
       off()
-      clearTypewriterTimers()
-      receivedText.current = ''
-      typedText.current = ''
-      isNetworkDone.current = false
-      terminalEvent.current = null
+      clearFlushTimers()
+      bufferedDeltaText.current = ''
     }
     // Refs are stable; setters are stable. Wire once.
     // eslint-disable-next-line react-hooks/exhaustive-deps

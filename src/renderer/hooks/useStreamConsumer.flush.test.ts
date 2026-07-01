@@ -105,13 +105,9 @@ describe('useStreamConsumer flush liveness', () => {
     act(() => {
       listener?.({ requestId: 'req-1', assistantMessageId: 'asst-1', type: 'delta', text: 'abc' })
     })
-    // No rAF callback has run, but the fallback timer must still start draining.
+    // No rAF callback has run, but the fallback timer must still flush the
+    // buffered text as one chunk.
     expect(messages[1].text).toBe('')
-    await act(async () => {
-      vi.advanceTimersByTime(200)
-      await Promise.resolve()
-    })
-    expect(messages[1].text).toBe('ab')
     await act(async () => {
       vi.advanceTimersByTime(100)
       await Promise.resolve()

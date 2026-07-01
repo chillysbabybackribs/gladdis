@@ -1,34 +1,21 @@
 import { AGENT_TOOLS } from '../agentTools'
-import { GLADDIS_WEB_TOOLS_RULE } from '../codex/dynamicBrowserTools'
+import {
+  ACT_COMPANION_GUIDANCE,
+  ACT_REORIENT_GUIDANCE,
+  CODEX_BROWSER_TOOL_NAMES,
+  CODEX_MEMORY_TOOL_NAMES,
+  CODEX_INTERACTION_TOOL_NAMES,
+  DISCOVER_DATA_SOURCES_GUIDANCE,
+  EXTRACT_STRUCTURED_GUIDANCE,
+  GLADDIS_DEBUGGING_GUIDANCE,
+  GLADDIS_WEB_TOOLS_RULE,
+  GREP_PAGE_GUIDANCE,
+  describeSemanticVerbPreference
+} from '../codex/dynamicBrowserTools'
 
 export const CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME = 'gladdis'
 
-export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
-  'recall_history',
-  'memory_write',
-  'memory_read',
-  'memory_list',
-  'memory_forget',
-  'memory_create_task',
-  'search',
-  'navigate',
-  'read_page',
-  'read_a11y',
-  'grep_page',
-  'extract_structured',
-  'discover_data_sources',
-  'watch_network',
-  'screenshot',
-  'screenshot_app',
-  'set_field',
-  'submit',
-  'open_result',
-  'act',
-  'grep_click',
-  'grep_type',
-  'execute_in_browser',
-  'cdp_command'
-])
+export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set(CODEX_BROWSER_TOOL_NAMES)
 
 export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
   .filter((tool) => CLAUDE_CODE_BROWSER_TOOL_NAMES.has(tool.name))
@@ -46,32 +33,7 @@ export const CLAUDE_CODE_BROWSER_TOOLS = AGENT_TOOLS
 // omits raw FS/shell, which the CLI runtime supplies natively.
 // Kept in parity with CODEX_BROWSER_TOOL_NAMES — see the surface-parity guard in
 // toolSurfaceCoverage.test.ts.
-export const CURSOR_MCP_TOOL_NAMES = new Set([
-  'recall_history',
-  'memory_write',
-  'memory_read',
-  'memory_list',
-  'memory_forget',
-  'memory_create_task',
-  'search',
-  'navigate',
-  'read_page',
-  'read_a11y',
-  'grep_page',
-  'extract_structured',
-  'discover_data_sources',
-  'watch_network',
-  'screenshot',
-  'screenshot_app',
-  'set_field',
-  'submit',
-  'open_result',
-  'act',
-  'grep_click',
-  'grep_type',
-  'execute_in_browser',
-  'cdp_command'
-])
+export const CURSOR_MCP_TOOL_NAMES = new Set(CODEX_BROWSER_TOOL_NAMES)
 
 export function selectEmbeddedMcpToolNames(toolNames: Iterable<string>): ReadonlySet<string> {
   const allowed = new Set<string>()
@@ -89,32 +51,6 @@ export const CURSOR_MCP_TOOLS = AGENT_TOOLS
     inputSchema: tool.parameters,
     outputSchema: tool.outputSchema
   }))
-
-const MEMORY_TOOL_NAMES = [
-  'recall_history',
-  'memory_write',
-  'memory_read',
-  'memory_list',
-  'memory_forget',
-  'memory_create_task'
-] as const
-
-const INTERACTION_TOOL_NAMES = [
-  'navigate',
-  'read_page',
-  'read_a11y',
-  'grep_page',
-  'extract_structured',
-  'discover_data_sources',
-  'watch_network',
-  'screenshot',
-  'screenshot_app',
-  'act',
-  'grep_click',
-  'grep_type',
-  'execute_in_browser',
-  'cdp_command'
-] as const
 
 function describeToolList(toolNames: Iterable<string>): string {
   const tools = [...new Set(toolNames)].sort()
@@ -147,57 +83,41 @@ function buildEmbeddedBrowserInstructions(args: {
     lines.push('Use `search` for live web lookup, and only pass `navigate_visible: true` when the user actually wants the result opened in the visible tab.')
   }
 
-  const hasBrowserInteraction = INTERACTION_TOOL_NAMES.some((name) => allowed.has(name))
+  const hasBrowserInteraction = CODEX_INTERACTION_TOOL_NAMES.some((name) => allowed.has(name))
   if (hasBrowserInteraction) {
-    const browserTools = INTERACTION_TOOL_NAMES.filter((name) => allowed.has(name))
+    const browserTools = CODEX_INTERACTION_TOOL_NAMES.filter((name) => allowed.has(name))
     lines.push(`For browser work beyond search, stay within the attached MCP tools: ${browserTools.join(', ')}.`)
   }
 
-  if (allowed.has('set_field') || allowed.has('submit') || allowed.has('open_result')) {
-    const verbs: string[] = []
-    if (allowed.has('set_field')) verbs.push('`set_field` for filling fields semantically')
-    if (allowed.has('submit')) verbs.push('`submit` for search/send/save intent')
-    if (allowed.has('open_result')) verbs.push('`open_result` for opening the 1st/Nth matching result')
-    lines.push(`Prefer the semantic browser verbs when they fit: ${verbs.join(', ')}.`)
+  const semanticVerbLine = describeSemanticVerbPreference(allowed)
+  if (semanticVerbLine) {
+    lines.push(semanticVerbLine
+      .replace('inputs/textareas/selects', 'fields')
+      .replace('form submission/search/send/save intent', 'search/send/save intent')
+      .replace('result/card/headline', 'result'))
   }
 
   if (allowed.has('act')) {
-    lines.push(
-      '`act` is a companion action tool (click | type | key | select), not the orientation tool. Use `navigate`, `grep_page`, or `read_a11y` first to identify the target, then prefer `set_field`, `submit`, or `open_result` when they fit before dropping to `act`. ' +
-      'Its `type` mode inserts the provided text in one shot, not letter-by-letter, and it returns a fresh `after` object with ' +
-      '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding the next step instead of immediately re-reading the page.'
-    )
+    lines.push(ACT_COMPANION_GUIDANCE)
   }
 
   if (allowed.has('grep_page')) {
-    lines.push(
-      '`grep_page` is SURGICAL, not exploratory: extract the subject from the user request and query 1–3 tight multi-word phrase variations ' +
-      '(for example "released on 14 March 2026" or "Pro plan $20 per user"), never the whole prompt and never a single common word like "price" or "date". ' +
-      'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. The wording does not need to match exactly; if the same terms appear close together or clearly in the same section, inspect that section. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
-    )
+    lines.push(GREP_PAGE_GUIDANCE)
   }
 
   if (allowed.has('extract_structured')) {
-    lines.push(
-      '`extract_structured` is for repeated DOM records, not exploration: use it for tables, cards, feed items, comments, or search results once you know the repeated row selector. ' +
-      'Ask for one specific `item_selector`/`item_xpath` plus a SMALL `fields` map. Avoid broad selectors like `div` and prefer this over many repeated `grep_page` calls when you need several records in the same shape.'
-    )
+    lines.push(EXTRACT_STRUCTURED_GUIDANCE)
   }
 
   if (allowed.has('discover_data_sources')) {
-    lines.push(
-      '`discover_data_sources` is the quick network-intelligence pass: use it early when lists, comments, or tables may be API-backed. It classifies the page, ranks candidate JSON/GraphQL endpoints, and recommends whether to stay in the DOM or pivot to network capture.'
-    )
+    lines.push(DISCOVER_DATA_SOURCES_GUIDANCE)
   }
 
   if (allowed.has('act') && (allowed.has('read_a11y') || allowed.has('grep_page'))) {
-    lines.push(
-      'When `act` returns ok:false with "no visible element matched …", treat that as a re-orient signal: use one of the attached read tools ' +
-      'such as `read_a11y` or `grep_page`, then target a fresh @ref or query instead of retrying the same action.'
-    )
+    lines.push(ACT_REORIENT_GUIDANCE)
   }
 
-  const hasMemoryTools = MEMORY_TOOL_NAMES.some((name) => allowed.has(name))
+  const hasMemoryTools = CODEX_MEMORY_TOOL_NAMES.some((name) => allowed.has(name))
   if (hasMemoryTools) {
     const notebookLine = buildMemoryNotebookLine(allowed)
     if (notebookLine) lines.push(notebookLine)
@@ -209,9 +129,7 @@ function buildEmbeddedBrowserInstructions(args: {
     `not even to "just take a screenshot" or check a dev server. These bypass Gladdis, hide the page from the user, and skip Gladdis's search. ` +
     'The attached Gladdis MCP tools are always the right tool for browsing.'
   )
-  lines.push(
-    'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev app unless you need startup/cold-boot/fresh-process validation, and say why first.'
-  )
+  lines.push(GLADDIS_DEBUGGING_GUIDANCE.replace('Do not launch a second Gladdis/dev app.', 'Do not launch a second Gladdis/dev app unless you need startup/cold-boot/fresh-process validation, and say why first.'))
   lines.push(args.nativeWorkLine)
 
   return lines.join('\n')

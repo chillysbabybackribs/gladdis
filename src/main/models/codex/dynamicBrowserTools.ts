@@ -78,7 +78,37 @@ export const GLADDIS_WEB_TOOLS_RULE =
   'facts from memory, and never claim you cannot search — the search tool is always available for that. ' +
   'Gladdis\'s search is the only web search that exists for this turn.'
 
-const CODEX_MEMORY_TOOL_NAMES = [
+export const BROWSER_SEMANTIC_VERBS_GUIDANCE = 'Prefer the semantic browser verbs when they fit'
+
+export const ACT_COMPANION_GUIDANCE =
+  '`act` is a companion action tool (click | type | key | select), not the orientation tool. Use `navigate`, `grep_page`, or `read_a11y` first to identify the target, then prefer `set_field`, `submit`, or `open_result` when they fit before dropping to `act`. ' +
+  'Its `type` mode inserts the provided text in one shot, not letter-by-letter, and it returns a fresh `after` object with ' +
+  '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding the next step instead of immediately re-reading the page.'
+
+export const GREP_PAGE_GUIDANCE =
+  '`grep_page` is SURGICAL, not exploratory: extract the subject from the user request and query 1–3 tight multi-word phrase variations ' +
+  '(for example "Pro plan $20 per user" or "released on 14 March 2026"), never the whole prompt and never a single common word like "price" or "date". ' +
+  'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. The wording does not need to match exactly; if the same terms appear close together or clearly in the same section, inspect that section. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
+
+export const EXTRACT_STRUCTURED_GUIDANCE =
+  '`extract_structured` is for repeated DOM records, not exploration: use it for tables, cards, feed items, comments, or search results once you know the repeated row selector. ' +
+  'Pass one specific `item_selector`/`item_xpath` and a small `fields` map. Avoid broad selectors like `div`, and prefer this over many repeated `grep_page` calls when you need multiple same-shaped records.'
+
+export const DISCOVER_DATA_SOURCES_GUIDANCE =
+  '`discover_data_sources` is the early network-intelligence pass: use it when repeated records may come from APIs. It classifies the page as server-rendered, API-backed, or mixed, ranks candidate JSON/GraphQL endpoints, and tells you whether to stay in the DOM or pivot to network capture.'
+
+export const ACT_REORIENT_GUIDANCE =
+  'When `act` returns ok:false with "no visible element matched …", treat that as a re-orient signal: use one of the attached read tools ' +
+  'such as `read_a11y` or `grep_page`, then target a fresh @ref or query instead of retrying the same action.'
+
+export const NATIVE_BROWSER_PROHIBITION =
+  'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), ' +
+  'puppeteer scripts, or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. These bypass Gladdis, hide the page from the user, and skip Gladdis\'s superior search. The attached gladdis.* tools are always the right tool; a native browser command is always wrong here.'
+
+export const GLADDIS_DEBUGGING_GUIDANCE =
+  'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev app. Launch a separate instance only for startup/cold-boot/fresh-process validation, and say why first.'
+
+export const CODEX_MEMORY_TOOL_NAMES = [
   'recall_history',
   'memory_write',
   'memory_read',
@@ -87,7 +117,7 @@ const CODEX_MEMORY_TOOL_NAMES = [
   'memory_create_task'
 ] as const
 
-const CODEX_INTERACTION_TOOL_NAMES = [
+export const CODEX_INTERACTION_TOOL_NAMES = [
   'navigate',
   'read_page',
   'read_a11y',
@@ -106,6 +136,19 @@ const CODEX_INTERACTION_TOOL_NAMES = [
   'execute_in_browser',
   'cdp_command'
 ] as const
+
+export function describeSemanticVerbPreference(allowed: ReadonlySet<string>): string | null {
+  if (!allowed.has('set_field') && !allowed.has('submit') && !allowed.has('open_result')) return null
+  const verbs: string[] = []
+  if (allowed.has('set_field')) verbs.push('`set_field` for filling inputs/textareas/selects semantically')
+  if (allowed.has('submit')) verbs.push('`submit` for form submission/search/send/save intent')
+  if (allowed.has('open_result')) verbs.push('`open_result` for opening the 1st/Nth matching result/card/headline')
+  return `${BROWSER_SEMANTIC_VERBS_GUIDANCE}: ${verbs.join(', ')}.`
+}
+
+export function stripNamedToolLead(text: string): string {
+  return text.replace(/^`[^`]+`\s+is\s+/, '')
+}
 
 function describeToolList(toolNames: Iterable<string>): string {
   const tools = [...new Set(toolNames)].sort()
@@ -146,48 +189,27 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
     lines.push(`For browser work beyond search use the attached gladdis.* tools: ${browserTools.join(', ')}.`)
   }
 
-  if (allowed.has('set_field') || allowed.has('submit') || allowed.has('open_result')) {
-    const verbs: string[] = []
-    if (allowed.has('set_field')) verbs.push('`set_field` for filling inputs/textareas/selects semantically')
-    if (allowed.has('submit')) verbs.push('`submit` for form submission/search/send/save intent')
-    if (allowed.has('open_result')) verbs.push('`open_result` for opening the 1st/Nth matching result/card/headline')
-    lines.push(`Prefer the semantic browser verbs when they fit: ${verbs.join(', ')}.`)
-  }
+  const semanticVerbLine = describeSemanticVerbPreference(allowed)
+  if (semanticVerbLine) lines.push(semanticVerbLine)
 
   if (allowed.has('act')) {
-    lines.push(
-      '`act` is a companion action tool (click | type | key | select), not the orientation tool. Use `navigate`, `grep_page`, or `read_a11y` first to identify the target, then prefer `set_field`, `submit`, or `open_result` when they fit before dropping to `act`. ' +
-      'Its `type` mode inserts the provided text in one shot, not letter-by-letter, and it returns a fresh `after` object with ' +
-      '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding the next step instead of immediately re-reading the page.'
-    )
+    lines.push(ACT_COMPANION_GUIDANCE)
   }
 
   if (allowed.has('grep_page')) {
-    lines.push(
-      '`grep_page` is SURGICAL, not exploratory: extract the subject from the user request and query 1–3 tight multi-word phrase variations ' +
-      '(for example "Pro plan $20 per user" or "released on 14 March 2026"), never the whole prompt and never a single common word like "price" or "date". ' +
-      'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. The wording does not need to match exactly; if the same terms appear close together or clearly in the same section, inspect that section. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
-    )
+    lines.push(GREP_PAGE_GUIDANCE)
   }
 
   if (allowed.has('extract_structured')) {
-    lines.push(
-      '`extract_structured` is for repeated DOM records, not exploration: use it for tables, cards, feed items, comments, or search results once you know the repeated row selector. ' +
-      'Pass one specific `item_selector`/`item_xpath` and a small `fields` map. Avoid broad selectors like `div`, and prefer this over many repeated `grep_page` calls when you need multiple same-shaped records.'
-    )
+    lines.push(EXTRACT_STRUCTURED_GUIDANCE)
   }
 
   if (allowed.has('discover_data_sources')) {
-    lines.push(
-      '`discover_data_sources` is the early network-intelligence pass: use it when repeated records may come from APIs. It classifies the page as server-rendered, API-backed, or mixed, ranks candidate JSON/GraphQL endpoints, and tells you whether to stay in the DOM or pivot to network capture.'
-    )
+    lines.push(DISCOVER_DATA_SOURCES_GUIDANCE)
   }
 
   if (allowed.has('act') && (allowed.has('read_a11y') || allowed.has('grep_page'))) {
-    lines.push(
-      'When `act` returns ok:false with "no visible element matched …", treat that as a re-orient signal: use one of the attached read tools ' +
-      'such as `read_a11y` or `grep_page`, then target a fresh @ref or query instead of retrying the same action.'
-    )
+    lines.push(ACT_REORIENT_GUIDANCE)
   }
 
   const hasMemoryTools = CODEX_MEMORY_TOOL_NAMES.some((name) => allowed.has(name))
@@ -196,13 +218,8 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
     if (notebookLine) lines.push(notebookLine)
   }
 
-  lines.push(
-    'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), ' +
-    'puppeteer scripts, or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. These bypass Gladdis, hide the page from the user, and skip Gladdis\'s superior search. The attached gladdis.* tools are always the right tool; a native browser command is always wrong here.'
-  )
-  lines.push(
-    'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev app. Launch a separate instance only for startup/cold-boot/fresh-process validation, and say why first.'
-  )
+  lines.push(NATIVE_BROWSER_PROHIBITION)
+  lines.push(GLADDIS_DEBUGGING_GUIDANCE)
   lines.push('Use Codex-native shell and file tools for local code, package, and command work — just never for browsing.')
 
   return lines.join('\n')

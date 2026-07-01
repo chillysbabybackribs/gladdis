@@ -1,4 +1,5 @@
 import type { ThreadItem } from './protocol'
+import { CODEX_INTERACTION_TOOL_NAMES } from './dynamicBrowserTools'
 
 export interface CodexToolPolicyViolation {
   kind: 'native-browser-tool'
@@ -7,7 +8,7 @@ export interface CodexToolPolicyViolation {
 }
 
 const GLADDIS_BROWSER_GUIDANCE =
-  'Use the gladdis dynamic tools for browser viewing/testing: search, navigate, read_a11y, grep_page, set_field, submit, open_result, extract_structured, discover_data_sources, grep_click, grep_type, or watch_network.'
+  `Use the gladdis dynamic tools for browser viewing/testing: search, ${CODEX_INTERACTION_TOOL_NAMES.join(', ')}.`
 
 /**
  * Codex may use its native shell/file tools for repo work, but browser viewing

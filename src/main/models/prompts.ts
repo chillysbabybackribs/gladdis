@@ -6,9 +6,15 @@ import {
   CURSOR_BROWSER_INSTRUCTIONS
 } from './claudeCode/browserTools'
 import {
+  ACT_COMPANION_GUIDANCE,
+  ACT_REORIENT_GUIDANCE,
   buildCodexBrowserInstructions,
+  CODEX_INTERACTION_TOOL_NAMES,
+  DISCOVER_DATA_SOURCES_GUIDANCE,
+  EXTRACT_STRUCTURED_GUIDANCE,
   CODEX_BROWSER_INSTRUCTIONS,
-  GLADDIS_WEB_TOOLS_RULE
+  GLADDIS_WEB_TOOLS_RULE,
+  stripNamedToolLead
 } from './codex/dynamicBrowserTools'
 
 /**
@@ -101,13 +107,8 @@ const BROWSER_INTERACTION_GUIDANCE =
   'in-place without a follow-up call. A genuinely rare token (proper noun, error code, identifier) is fine; ' +
   'common words are the trap. Use type "selector" ONLY with a specific CSS selector or XPath; never with ' +
   'bare tag names (a / div / img / script dump the page).\n' +
-  '  • extract_structured → bounded JSON extractor for repeated DOM records. Use it for lists, tables, ' +
-  'cards, comments, and search results once you know the repeated item selector/XPath. Give it one specific ' +
-  'record selector plus a small field map; avoid broad selectors like div. This is the right tool when ' +
-  'you need many same-shaped rows and `grep_page` would take repeated passes or truncate.\n' +
-  '  • discover_data_sources → quick network intelligence for the current page. It classifies whether the page looks ' +
-  'server-rendered, API-backed, or mixed, ranks likely JSON/GraphQL endpoints, and tells you whether to stay in the DOM ' +
-  'or pivot to network/API extraction.\n' +
+  `  • extract_structured → ${stripNamedToolLead(EXTRACT_STRUCTURED_GUIDANCE)}\n` +
+  `  • discover_data_sources → ${stripNamedToolLead(DISCOVER_DATA_SOURCES_GUIDANCE)}\n` +
   '  • watch_network → when the answer is data the page fetches from an API (lists, prices, search ' +
   'results, feeds), capture the JSON behind the render instead of scraping HTML.\n\n' +
   'Middle-game discipline for browser tasks:\n' +
@@ -118,18 +119,14 @@ const BROWSER_INTERACTION_GUIDANCE =
   '  • set_field → set an input / textarea / select / contenteditable value in one semantic step. Use it instead of raw typing when the goal is "fill this field". Pass `value`; by default it replaces the current value and fires the normal DOM events.\n' +
   '  • submit → submit the current focused form or a targeted submit control. Use it for search / send / save intent instead of a generic click or Enter when possible.\n' +
   '  • open_result → open the first or Nth matching result / card / headline from the current page and return fresh after-state. Use it for "open the first result" instead of manually clicking.\n' +
-  '  • act → click | type | key | select. Use it after navigate/grep_page/read_a11y have identified the right control. Target by (preferred) a read_a11y @ref, or a `query` ' +
-  '(text / CSS / XPath resolved live), or explicit coords {x,y}. Prefer the semantic verbs above when they fit; use `act` as the lower-level escape hatch. For type pass `text`; for key pass `key` ' +
-  '(Enter / Tab / Escape / Arrow*) with no target; for select pass `option`. `type` inserts the provided text in one shot rather than manually keying each letter. To load a URL use navigate() — ' +
-  'never pass a URL as an act query (act targets on-page elements, not link addresses).\n' +
+  `  • act → ${stripNamedToolLead(ACT_COMPANION_GUIDANCE)} To load a URL use navigate() — never pass a URL as an act query (act targets on-page elements, not link addresses).\n` +
   '  • READ the act result before the next move — IT IS THE POST-ACTION READ. The text channel ends ' +
   'with " Now at {url} — {title} ({readyState}) focus={...}". The structured `after` object has ' +
   '{url, title, readyState, activeElement, bodyTextChars, navigated, elements?}. When ' +
   '`after.navigated` is true the act crossed pages and `after.elements` is a digest of the NEW page\'s ' +
   'top clickable targets with {tag, role, label, x, y} — act on those directly. Do NOT call ' +
   'read_page / read_a11y immediately after a navigating act; the digest you need is already in your ' +
-  'hand. When act returns ok:false with "no visible element matched …", treat that as a re-orient ' +
-  'signal: run read_a11y or a phrased grep_page and target a fresh @ref — do not retry the same query.\n\n' +
+  `hand. ${ACT_REORIENT_GUIDANCE}\n\n` +
   'Lower-level (only when the layers above cannot express what you need):\n' +
   '  • execute_in_browser, cdp_command → targeted DOM mutations, network interception, raw CDP.\n' +
   '  • grep_click / grep_type → legacy split verbs. They find + act but return NO fresh state, so ' +
@@ -163,7 +160,7 @@ const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: s
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
   { enabled: (names) => names.has('search'), text: BROWSER_OVERVIEW },
-  { enabled: (names) => names.has('act') || names.has('set_field') || names.has('submit') || names.has('open_result') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => CODEX_INTERACTION_TOOL_NAMES.some((name) => names.has(name)) || names.has('set_field') || names.has('submit') || names.has('open_result'), text: BROWSER_INTERACTION_GUIDANCE },
   { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
   { enabled: (names) => names.has('run_command'), text: SHELL_GUIDANCE },
@@ -194,7 +191,7 @@ function guidanceKey(tools: ToolDef[]): GuidanceBit {
   const names = new Set(tools.map((tool) => tool.name))
   let key = 0
   if (names.has('search')) key |= GUIDANCE_BITS.browserSearch
-  if (names.has('act') || names.has('set_field') || names.has('submit') || names.has('open_result') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
+  if (CODEX_INTERACTION_TOOL_NAMES.some((name) => names.has(name)) || names.has('set_field') || names.has('submit') || names.has('open_result')) key |= GUIDANCE_BITS.browserInteract
   if (names.has('read_file') || names.has('list_dir') || names.has('search_files')) key |= GUIDANCE_BITS.filesystemRead
   if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
   if (names.has('run_command')) key |= GUIDANCE_BITS.shell

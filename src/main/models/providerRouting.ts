@@ -97,9 +97,9 @@ export async function dispatchAgenticTurn(args: {
   const { req, model, signal, client, browserLlm, maxOutputTokens, deps } = args
   const provider = model.provider
   const profile = args.profile ?? await deps.agentConfig.agentToolProfile(req, provider)
-  const agentSystem = await deps.agentConfig.buildTurnAgentSystem(req, profile.tools, provider)
-  const workspaceBlock = deps.agentConfig.workspaceSystemBlock(profile)
   const ctx = deps.buildToolContext(req, browserLlm)
+  const agentSystem = await deps.agentConfig.buildTurnAgentSystem(req, profile.tools, provider, ctx)
+  const workspaceBlock = deps.agentConfig.workspaceSystemBlock(profile)
 
   // Shared across every provider loop; only the client field + token field name differ.
   const common = {

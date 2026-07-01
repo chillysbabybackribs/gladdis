@@ -37,6 +37,13 @@ import { runSearchTool } from './tools/searchTools'
 import { runShellCommand } from './tools/shellTools'
 import { runRecallHistory } from './tools/historyTools'
 import type { ReadPageCacheStats } from './tools/perceiveTools'
+import {
+  buildToolCalibrationBlock,
+  createToolCalibrationState,
+  maybeAddRecalibrationHint,
+  noteToolCalibrationOutcome,
+  type ToolCalibrationState,
+} from './toolCalibration'
 
 export interface ToolDef {
   name: string
@@ -126,6 +133,9 @@ export class BrowserTools {
 
   /** Root dir where navigate writes captured pages (set once at wire-up). */
   private pageStoreBaseDir: string | null = null
+  /** Per-task calibration notes used for light runtime tool orientation. */
+  private readonly calibrationByScope = new Map<string, ToolCalibrationState>()
+  private static readonly CALIBRATION_SCOPE_LIMIT = 64
 
   constructor(
     public readonly tabs: TabManager,
@@ -181,6 +191,20 @@ export class BrowserTools {
     return scope
   }
 
+  private calibrationScope(ctx: Pick<ToolContext, 'conversationId' | 'tabId'>): ToolCalibrationState {
+    const key = ctx.conversationId || ctx.tabId
+    let state = this.calibrationByScope.get(key)
+    if (!state) {
+      if (this.calibrationByScope.size >= BrowserTools.CALIBRATION_SCOPE_LIMIT) {
+        const first = this.calibrationByScope.keys().next().value
+        if (first !== undefined) this.calibrationByScope.delete(first)
+      }
+      state = createToolCalibrationState()
+      this.calibrationByScope.set(key, state)
+    }
+    return state
+  }
+
   private rememberDone(ctx: ToolContext, key: string, summary: string): void {
     const scope = this.taskScope(ctx)
     if (!scope.has(key) && scope.size >= BrowserTools.TASK_SCOPE_LIMIT) {
@@ -204,6 +228,15 @@ export class BrowserTools {
       }
     }
     this.axRefByTab.delete(tabId)
+  }
+
+  calibrationBlock(toolNames: Iterable<string>, ctx: Pick<ToolContext, 'tabId' | 'conversationId' | 'workspaceRoot'>): string {
+    return buildToolCalibrationBlock({
+      toolNames,
+      tabId: ctx.tabId,
+      workspaceRoot: ctx.workspaceRoot ?? this.files.getRoot(),
+      state: this.calibrationScope(ctx)
+    })
   }
 
   private setAxRefStore(tabId: string, entry: ReadA11yCacheEntry): void {
@@ -314,40 +347,55 @@ export class BrowserTools {
   /** Dispatch a tool call to the right per-domain module. */
   async run(name: string, args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
     try {
+      let outcome: ToolOutcome
       switch (name) {
         // ── Perceive ────────────────────────────────────────────────────────
         case 'read_page':
-          return runReadPage(this.perceiveDeps(), args, ctx.tabId)
+          outcome = await runReadPage(this.perceiveDeps(), args, ctx.tabId)
+          break
         case 'read_a11y':
-          return runReadA11y(this.perceiveDeps(), args, ctx.tabId)
+          outcome = await runReadA11y(this.perceiveDeps(), args, ctx.tabId)
+          break
         case 'grep_page':
-          return runGrepPage(this.perceiveDeps(), args, ctx.tabId)
+          outcome = await runGrepPage(this.perceiveDeps(), args, ctx.tabId)
+          break
         case 'extract_structured':
-          return runExtractStructured(this.perceiveDeps(), args, ctx.tabId)
+          outcome = await runExtractStructured(this.perceiveDeps(), args, ctx.tabId)
+          break
         case 'watch_network':
-          return runWatchNetwork(this.perceiveDeps(), args, ctx.tabId)
+          outcome = await runWatchNetwork(this.perceiveDeps(), args, ctx.tabId)
+          break
         case 'screenshot':
-          return runScreenshot(this.perceiveDeps(), args, ctx.tabId)
+          outcome = await runScreenshot(this.perceiveDeps(), args, ctx.tabId)
+          break
         case 'screenshot_app':
-          return runScreenshotApp(this.perceiveDeps())
+          outcome = await runScreenshotApp(this.perceiveDeps())
+          break
 
         // ── Search ──────────────────────────────────────────────────────────
         case 'search':
-          return runSearchTool(this.searchDeps(), args, ctx)
+          outcome = await runSearchTool(this.searchDeps(), args, ctx)
+          break
 
         // ── Drive (CDP) ─────────────────────────────────────────────────────
         case 'act':
-          return runAct(this.driveDeps(), args, { tabId: ctx.tabId })
+          outcome = await runAct(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
         case 'execute_in_browser':
-          return runExecuteInBrowser(this.driveDeps(), args, { tabId: ctx.tabId })
+          outcome = await runExecuteInBrowser(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
         case 'navigate':
-          return runNavigate(this.driveDeps(), args, { tabId: ctx.tabId, conversationId: ctx.conversationId })
+          outcome = await runNavigate(this.driveDeps(), args, { tabId: ctx.tabId, conversationId: ctx.conversationId })
+          break
         case 'cdp_command':
-          return runCdpCommand(this.driveDeps(), args, { tabId: ctx.tabId })
+          outcome = await runCdpCommand(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
         case 'grep_click':
-          return runGrepClick(this.driveDeps(), args, { tabId: ctx.tabId })
+          outcome = await runGrepClick(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
         case 'grep_type':
-          return runGrepType(this.driveDeps(), args, { tabId: ctx.tabId })
+          outcome = await runGrepType(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
 
         // ── Filesystem ──────────────────────────────────────────────────────
         case 'read_file': {
@@ -365,32 +413,38 @@ export class BrowserTools {
             `${num(args.end_line)}:${args.full === true ? 'full' : ''}`
           const priorRead = this.taskScope(ctx).get(readKey)
           if (priorRead) {
-            return {
+            outcome = {
               ok: true,
               text:
                 `Already read ${String(args.path ?? '')} earlier in this task — its contents are above ` +
                 `(${priorRead}). Re-use that; call recall_history if it was trimmed. ` +
                 `Read again only if the file may have changed since.`
             }
+            break
           }
-          const outcome = await runReadFile(this.fsDeps(), args)
+          outcome = await runReadFile(this.fsDeps(), args)
           if (outcome.ok) {
             this.rememberDone(ctx, readKey, `read at iteration ${ctx.iteration ?? '?'}`)
           }
-          return outcome
+          break
         }
         case 'write_file':
-          return runWriteFile(this.fsDeps(), args)
+          outcome = await runWriteFile(this.fsDeps(), args)
+          break
         case 'edit_file':
-          return runEditFile(this.fsDeps(), args)
+          outcome = await runEditFile(this.fsDeps(), args)
+          break
         case 'list_dir':
-          return runListDir(this.fsDeps(), args)
+          outcome = await runListDir(this.fsDeps(), args)
+          break
         case 'search_files':
-          return runSearchFiles(this.fsDeps(), args)
+          outcome = await runSearchFiles(this.fsDeps(), args)
+          break
 
         // ── Shell ───────────────────────────────────────────────────────────
         case 'run_command':
-          return runShellCommand({ files: this.files }, args)
+          outcome = await runShellCommand({ files: this.files }, args)
+          break
 
         // ── Memory ──────────────────────────────────────────────────────────
         case 'recall_history': {
@@ -398,8 +452,11 @@ export class BrowserTools {
           // recall_history can run without a workspace (it reads ChatStore),
           // but logging requires one. When absent we just skip the log and
           // dispatch normally — telemetry never blocks behaviour.
-          if (!root) return runRecallHistory(this.historyDeps(), args, ctx)
-          return instrumentMemoryTool(
+          if (!root) {
+            outcome = await runRecallHistory(this.historyDeps(), args, ctx)
+            break
+          }
+          outcome = await instrumentMemoryTool(
             'recall_history',
             {
               workspaceRoot: root,
@@ -411,12 +468,16 @@ export class BrowserTools {
             async () => runRecallHistory(this.historyDeps(), args, ctx),
             (out) => recallHistoryHitCount(out.text)
           )
+          break
         }
 
         case 'memory_write': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
-          if (!root) return { ok: false, text: 'memory_write requires a workspace folder. Open one and retry.' }
-          return instrumentMemoryTool(
+          if (!root) {
+            outcome = { ok: false, text: 'memory_write requires a workspace folder. Open one and retry.' }
+            break
+          }
+          outcome = await instrumentMemoryTool(
             'memory_write',
             {
               workspaceRoot: root,
@@ -433,11 +494,15 @@ export class BrowserTools {
               ),
             () => 1
           )
+          break
         }
         case 'memory_read': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
-          if (!root) return { ok: false, text: 'memory_read requires a workspace folder. Open one and retry.' }
-          return instrumentMemoryTool(
+          if (!root) {
+            outcome = { ok: false, text: 'memory_read requires a workspace folder. Open one and retry.' }
+            break
+          }
+          outcome = await instrumentMemoryTool(
             'memory_read',
             {
               workspaceRoot: root,
@@ -450,11 +515,15 @@ export class BrowserTools {
             async () => (await import('./memoryStore')).memoryRead(args, root),
             (out) => memoryReadHitCount(out.text)
           )
+          break
         }
         case 'memory_list': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
-          if (!root) return { ok: false, text: 'memory_list requires a workspace folder. Open one and retry.' }
-          return instrumentMemoryTool(
+          if (!root) {
+            outcome = { ok: false, text: 'memory_list requires a workspace folder. Open one and retry.' }
+            break
+          }
+          outcome = await instrumentMemoryTool(
             'memory_list',
             {
               workspaceRoot: root,
@@ -466,11 +535,15 @@ export class BrowserTools {
             async () => (await import('./memoryStore')).memoryList(args, root),
             (out) => memoryListHitCount(out.text)
           )
+          break
         }
         case 'memory_forget': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
-          if (!root) return { ok: false, text: 'memory_forget requires a workspace folder. Open one and retry.' }
-          return instrumentMemoryTool(
+          if (!root) {
+            outcome = { ok: false, text: 'memory_forget requires a workspace folder. Open one and retry.' }
+            break
+          }
+          outcome = await instrumentMemoryTool(
             'memory_forget',
             {
               workspaceRoot: root,
@@ -483,11 +556,15 @@ export class BrowserTools {
             async () => (await import('./memoryStore')).memoryForget(args, root),
             () => 1
           )
+          break
         }
         case 'memory_create_task': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
-          if (!root) return { ok: false, text: 'memory_create_task requires a workspace folder. Open one and retry.' }
-          return instrumentMemoryTool(
+          if (!root) {
+            outcome = { ok: false, text: 'memory_create_task requires a workspace folder. Open one and retry.' }
+            break
+          }
+          outcome = await instrumentMemoryTool(
             'memory_create_task',
             {
               workspaceRoot: root,
@@ -498,13 +575,21 @@ export class BrowserTools {
             async () => (await import('./memoryStore')).memoryCreateTask(args, root),
             () => 1
           )
+          break
         }
 
         default:
-          return { ok: false, text: `Unknown tool: ${name}` }
+          outcome = { ok: false, text: `Unknown tool: ${name}` }
+          break
       }
+      const state = this.calibrationScope(ctx)
+      noteToolCalibrationOutcome(state, name, outcome, ctx.iteration)
+      return maybeAddRecalibrationHint(state, name, outcome)
     } catch (err) {
-      return { ok: false, text: `Tool ${name} failed: ${(err as Error)?.message ?? String(err)}` }
+      const outcome = { ok: false, text: `Tool ${name} failed: ${(err as Error)?.message ?? String(err)}` }
+      const state = this.calibrationScope(ctx)
+      noteToolCalibrationOutcome(state, name, outcome, ctx.iteration)
+      return maybeAddRecalibrationHint(state, name, outcome)
     }
   }
 }

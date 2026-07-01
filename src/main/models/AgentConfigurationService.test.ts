@@ -4,7 +4,8 @@ import { AgentConfigurationService, type AgentToolSurface } from './AgentConfigu
 function makeConfigService(workspaceRoot: string | null = null) {
   const tools = {
     getWorkspaceRoot: () => workspaceRoot,
-    tabs: { liveTabId: vi.fn((id?: string | null) => id ?? 'tab-1') }
+    tabs: { liveTabId: vi.fn((id?: string | null) => id ?? 'tab-1') },
+    calibrationBlock: vi.fn(() => '## Tool calibration\nCalibrate the current tool before switching to another one.\nIf read_a11y is noisy or incomplete, retry read_a11y first.\nIf grep_page misses, keep grep_page and try 2-3 sharper phrase variations.')
   } as any
   const repoIntelligence = {} as any
   const emit = vi.fn()
@@ -118,5 +119,20 @@ describe('AgentConfigurationService', () => {
     expect(system).toContain('read_file with explicit start_line/end_line windows')
     expect(system).toContain('Avoid full:true unless the file is small')
     expect(system).toContain('Keep Gladdis browser tools first-class for web search')
+  })
+
+  it('adds same-tool calibration guidance to the turn system prompt', async () => {
+    const { service } = makeConfigService('/home/user/project')
+    const req = { messages: [{ role: 'user', content: 'inspect the page controls and then patch the code' }] } as any
+    const system = await service.buildTurnAgentSystem(
+      req,
+      (await service.agentToolProfile(req, 'openai')).tools,
+      'openai'
+    )
+
+    expect(system).toContain('## Tool calibration')
+    expect(system).toContain('Calibrate the current tool before switching to another one')
+    expect(system).toContain('If read_a11y is noisy or incomplete, retry read_a11y first')
+    expect(system).toContain('If grep_page misses, keep grep_page and try 2-3 sharper phrase variations')
   })
 })

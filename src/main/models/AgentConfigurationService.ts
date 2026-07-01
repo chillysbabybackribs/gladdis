@@ -213,12 +213,17 @@ export class AgentConfigurationService {
   public async buildTurnAgentSystem(
     req: ChatRequest,
     tools: Parameters<typeof buildAgentSystem>[0],
-    provider?: Provider
+    provider?: Provider,
+    ctx?: Pick<ToolContext, 'tabId' | 'conversationId' | 'workspaceRoot'>
   ): Promise<string> {
     const base = await buildAgentSystem(tools)
     const providerBlock = provider === 'openai' || provider === 'grok' ? DIRECT_API_WORKSHOP_BLOCK : null
+    const calibrationBlock = this.tools.calibrationBlock(
+      tools.map((tool) => tool.name),
+      ctx ?? this.toolContext(req)
+    )
     const custom = this.customAgentSystemBlock(req)
-    return [base, providerBlock, custom].filter(Boolean).join('\n\n')
+    return [base, calibrationBlock, providerBlock, custom].filter(Boolean).join('\n\n')
   }
 
   public workspaceSystemBlock(_profile?: AgentToolSurface): string | null {

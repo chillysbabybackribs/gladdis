@@ -36,6 +36,20 @@ describe('BrowserTools', () => {
     })
   })
 
+  it('adds a same-tool recalibration hint when read_a11y fails', async () => {
+    const tools = new BrowserTools({ getTabUrl: vi.fn(() => 'https://example.com') } as any, {} as any, {} as any)
+    const result = await tools.run(
+      'read_a11y',
+      {},
+      { tabId: 'tab-1', conversationId: 'conv-1', workspaceRoot: '/tmp/ws', iteration: 2 }
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('Recalibration hint:')
+    expect(result.text).toContain('retry read_a11y first')
+    expect(result.text).toContain('viewportOnly')
+  })
+
   it('returns structured content for memory workspace reads', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gladdis-memory-workspace-'))
     const chats = {

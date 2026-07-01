@@ -2,7 +2,7 @@ import type { TabManager } from '../../TabManager'
 import type { ToolOutcome } from '../browserTools'
 import { cap, safeJson } from './toolUtils'
 import { executeGrepInTab, summarizeNetworkCapture } from './perceiveTools'
-import { clampInt, sleep } from './toolUtils'
+import { clampInt, sleep, waitForTextStable } from './toolUtils'
 import { formatDataSourceDiscovery } from '../../network/dataSourceDiscovery'
 import type { AxSnapshotNode } from '../../extract/axTree'
 import type { PageCapture } from '../../../../shared/extraction'
@@ -445,6 +445,20 @@ export async function runAct(
     return { ok: false, text: 'act: "kind" must be one of click, type, key, select.' }
   }
 
+  // ── Optional navigate-then-act fusion ──────────────────────────────────────
+  // `act({ navigate: url, ... })` loads the URL, WAITS for the page to settle
+  // (the "wait in between"), then runs the action against the settled page —
+  // saving the navigate→act round-trip. It is fail-safe: if navigation fails, or
+  // the target does not resolve on the settled page, the action does NOT click a
+  // guess — it returns ok:false with the landed URL and a re-orient hint, so the
+  // navigation's effect is still known and the model recovers cleanly.
+  let navPrefix = ''
+  if (args.navigate !== undefined) {
+    const navPrelude = await runActNavigatePrelude(deps, args, ctx, kind)
+    if (!navPrelude.ok) return navPrelude.outcome
+    navPrefix = navPrelude.prefix
+  }
+
   // URL before the action — compared in captureAfterState to decide whether the
   // act caused a navigation (and thus needs a fresh element digest, contract C1).
   const beforeUrl = deps.tabs.getTabUrl(ctx.tabId) ?? null
@@ -471,7 +485,7 @@ export async function runAct(
     return withOptionalNetworkCapture(
       {
         ok: true,
-        text: `act(key): pressed ${def.key}.${afterStateLine(after)}`,
+        text: `${navPrefix}act(key): pressed ${def.key}.${afterStateLine(after)}`,
         structuredContent: { kind, key: def.key, after }
       },
       network
@@ -481,7 +495,10 @@ export async function runAct(
   // ── click / type / select: resolve an element target first ─────────────────
   const target = await resolveActTarget(deps, ctx.tabId, args)
   if (!target.ok) {
-    return { ok: false, text: `act(${kind}): ${target.text}` }
+    // Fail-safe: if this was a navigate-then-act and the target is not on the
+    // settled page, report the successful navigation + the miss + a re-orient
+    // hint rather than clicking a guess. navPrefix already names the landed URL.
+    return { ok: false, text: `${navPrefix}act(${kind}): ${target.text}` }
   }
   const { x, y, describe, matchInfo } = target
 
@@ -494,7 +511,7 @@ export async function runAct(
     return withOptionalNetworkCapture(
       {
         ok: true,
-        text: `act(click): ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
+        text: `${navPrefix}act(click): ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
         structuredContent: { kind, coordinates: { x, y }, match: matchInfo, after }
       },
       network
@@ -511,7 +528,7 @@ export async function runAct(
     return withOptionalNetworkCapture(
       {
         ok: true,
-        text: `act(type): focused ${describe} and typed ${text.length} chars at (${x}, ${y}).${afterStateLine(after)}`,
+        text: `${navPrefix}act(type): focused ${describe} and typed ${text.length} chars at (${x}, ${y}).${afterStateLine(after)}`,
         structuredContent: { kind, text, coordinates: { x, y }, match: matchInfo, after }
       },
       network
@@ -542,7 +559,7 @@ export async function runAct(
   return withOptionalNetworkCapture(
     {
       ok: true,
-      text: `act(select): chose "${option}" on ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
+      text: `${navPrefix}act(select): chose "${option}" on ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
       structuredContent: { kind, option, coordinates: { x, y }, match: matchInfo, after }
     },
     network
@@ -700,6 +717,46 @@ export async function runOpenResult(
     },
     network
   )
+}
+
+/**
+ * act's `navigate` mode: load args.navigate, then WAIT for the page to settle
+ * before the caller resolves + dispatches the action. Reuses runNavigate (URL
+ * validation, network-arm handling, orientation capture) and waitForTextStable
+ * (the shared settle poll). Returns a short text prefix naming the landed URL so
+ * the eventual result records that the navigation happened; on a bad URL or
+ * failed load it returns ok:false with runNavigate's own error, and the action
+ * is never attempted.
+ *
+ * Note: a navigate-then-act can only target by `query`/`coords` — a read_a11y
+ * @ref or a wireframe idx cannot exist until AFTER this load, so there is
+ * nothing stale to pass in. The settle-wait + resolveActTarget's fail-safe
+ * (ok:false, no guess-click) are what keep resolving-on-an-unseen-page honest.
+ */
+async function runActNavigatePrelude(
+  deps: DriveToolsDeps,
+  args: Record<string, any>,
+  ctx: DriveToolsContext,
+  kind: string
+): Promise<{ ok: true; prefix: string } | { ok: false; outcome: ToolOutcome }> {
+  const url = args.navigate
+  // Settle budget: default 3s (inline settle, not a rescue), bounded 0–15s.
+  const settleMs = clampInt(args.settle_ms, 0, 15_000, 3_000)
+
+  const navOutcome = await runNavigate(deps, { url, wait: true }, ctx)
+  if (!navOutcome.ok) {
+    // Bad URL / failed load — surface runNavigate's error verbatim; do not act.
+    return { ok: false, outcome: { ok: false, text: `act(${kind}) navigate: ${navOutcome.text}` } }
+  }
+
+  if (settleMs > 0) {
+    await waitForTextStable((code) => deps.tabs.executeJavaScript(ctx.tabId, code), settleMs)
+  }
+
+  const nav = (navOutcome.structuredContent ?? {}) as { url?: unknown; redirected?: unknown }
+  const landed = typeof nav.url === 'string' ? nav.url : String(url)
+  const redirected = nav.redirected === true ? ' (redirected)' : ''
+  return { ok: true, prefix: `Navigated to ${landed}${redirected}, settled. ` }
 }
 
 interface ActTargetResolved {

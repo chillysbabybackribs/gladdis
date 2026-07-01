@@ -678,6 +678,17 @@ describe('BrowserTools', () => {
       return {}
     })
     const executeJavaScript = vi.fn(async (_id: string, code: string) => {
+      // waitForTextStable's probe (exact): a bare `return (document.body && ...
+      // ).length`. Return a constant so the stability loop settles at once. Match
+      // the full string so it does NOT catch the after-state script, which also
+      // reads innerText.length as a `bodyTextChars` field.
+      if (code.trim().startsWith('return (document.body && document.body.innerText) ? document.body.innerText.length')) {
+        return { success: true, result: 500 }
+      }
+      // navigate's orientation probe: `{ u, r, n }`.
+      if (code.includes('return { u: location.href, r: document.readyState, n:')) {
+        return { success: true, result: { u: opts.afterUrl ?? 'https://example.com/after', r: 'complete', n: 500 } }
+      }
       // The navigation-settle probe: `return { u: location.href, r: ... }`.
       // Report the after-url as already settled so the settle loop exits at once.
       if (code.includes('return { u: location.href')) {
@@ -705,17 +716,20 @@ describe('BrowserTools', () => {
       }
       return { success: true, result: { ok: true, value: 'v', label: 'l' } }
     })
+    const navigate = vi.fn(async () => {})
     const tabs = {
       list: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com' }],
       getTabUrl: () => opts.beforeUrl ?? 'https://example.com',
       cdpSend,
       executeJavaScript,
+      navigate,
+      takeArmedNetworkCapture: () => null,
       runWithPendingNetworkCapture: async (_id: string, action: () => Promise<unknown> | unknown) => ({
         value: await action(),
         network: null
       })
     }
-    return { tabs, cdpSend, executeJavaScript, cdp }
+    return { tabs, cdpSend, executeJavaScript, navigate, cdp }
   }
 
   const VISIBLE_BUTTON = {
@@ -794,6 +808,62 @@ describe('BrowserTools', () => {
 
     expect(result.ok).toBe(true)
     expect(result.structuredContent).toMatchObject({ kind: 'select', option: 'Canada' })
+  })
+
+  it('act(navigate) loads the URL, settles, then acts on the settled page in one call', async () => {
+    const { tabs, navigate } = makeActTabs({
+      grepMatches: [VISIBLE_BUTTON],
+      afterUrl: 'https://example.com/loaded'
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'act',
+      { kind: 'click', navigate: 'https://example.com/loaded', query: 'Submit', settle_ms: 10 },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(true)
+    // The navigation actually happened before the action.
+    expect(navigate).toHaveBeenCalledWith('tab-1', 'https://example.com/loaded', expect.anything())
+    // Result records the navigation AND the action + fresh after-state.
+    expect(result.text).toContain('Navigated to https://example.com/loaded')
+    expect(result.text).toContain('act(click)')
+    expect(result.structuredContent?.after).toMatchObject({ captured: true })
+  })
+
+  it('act(navigate) fails safe when the target is not on the settled page (no guess click)', async () => {
+    // No grep matches → target does not resolve after the load.
+    const { tabs, cdpSend, navigate } = makeActTabs({ grepMatches: [], afterUrl: 'https://example.com/loaded' })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'act',
+      { kind: 'click', navigate: 'https://example.com/loaded', query: 'Nonexistent', settle_ms: 10 },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(false)
+    // Navigation still happened and is reported...
+    expect(navigate).toHaveBeenCalled()
+    expect(result.text).toContain('Navigated to https://example.com/loaded')
+    // ...but NO click was dispatched (fail-safe, not a guess).
+    expect(cdpSend).not.toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.anything())
+  })
+
+  it('act(navigate) rejects a non-http URL without attempting the action', async () => {
+    const { tabs, cdpSend, navigate } = makeActTabs({ grepMatches: [VISIBLE_BUTTON] })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'act',
+      { kind: 'click', navigate: 'javascript:alert(1)', query: 'Submit' },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(false)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(cdpSend).not.toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.anything())
   })
 
   it('set_field sets an input semantically and returns fresh after-state', async () => {

@@ -165,7 +165,12 @@ export const DRIVE_TOOLS: ToolDef[] = [
       'the action landed without calling read_page/read_a11y again. When an action navigates to a new ' +
       'page, `after.navigated` is true and `after.elements` lists the new page\'s top clickable targets ' +
       'with coordinates — act on those directly instead of re-reading. ' +
-      'To load a URL, use navigate() — do NOT pass a URL as an act query; act targets on-page elements, not links by their address.',
+      'To load a URL, use navigate() — do NOT pass a URL as an act query; act targets on-page elements, not links by their address. ' +
+      'FUSION: pass `navigate` (a URL) to load that page, WAIT for it to settle, THEN do this action on it in ONE call — ' +
+      'saving the navigate→act round-trip. Because the page is loaded by this same call, target it by `query` (text/CSS/XPath) ' +
+      'or `coords`, NOT by a @ref/idx (those do not exist until after the load). It fails safe: if the page does not load, or ' +
+      'the target is not found on the settled page, it returns ok:false with the landed URL and a re-orient hint — it never ' +
+      'clicks a guess. Tune the settle wait with `settle_ms` (default 3000).',
     parameters: {
       type: 'object',
       properties: {
@@ -173,6 +178,16 @@ export const DRIVE_TOOLS: ToolDef[] = [
           type: 'string',
           enum: ['click', 'type', 'key', 'select'],
           description: 'The action to perform.'
+        },
+        navigate: {
+          type: 'string',
+          description:
+            'Optional URL to load (and wait to settle) BEFORE performing this action, fusing navigate→act into one call. ' +
+            'When set, target the action by `query`/`coords` only (a @ref/idx cannot predate this load).'
+        },
+        settle_ms: {
+          type: 'number',
+          description: 'When `navigate` is set, how long (ms, 0–15000, default 3000) to wait for the loaded page to settle before acting.'
         },
         ref: { type: 'string', description: 'read_a11y ref like @a1 (preferred target).' },
         query: {

@@ -47,6 +47,55 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Poll document.body.innerText length until it stops growing across a few
+ * consecutive reads (allowing tiny jitter), or the deadline passes. The shared
+ * settle primitive: wait_for_load uses it to rescue a still-rendering page, and
+ * act's `navigate` mode uses it as the "wait in between" so the chained action
+ * resolves against a settled page instead of a half-rendered SPA shell.
+ *
+ * Takes an injected `runJs` (a tab's executeJavaScript) rather than a tabs
+ * handle, so this stays a dependency-free utility. Returns whether it
+ * stabilized and the final text length.
+ */
+export async function waitForTextStable(
+  runJs: (code: string) => Promise<{ success: boolean; result?: unknown }>,
+  maxMs: number
+): Promise<{ stabilized: boolean; textLen: number }> {
+  const deadline = Date.now() + maxMs
+  const readTextLen = async (): Promise<number> => {
+    try {
+      const res = await runJs(
+        'return (document.body && document.body.innerText) ? document.body.innerText.length : 0'
+      )
+      return res.success && typeof res.result === 'number' ? res.result : 0
+    } catch {
+      return 0
+    }
+  }
+
+  const STABLE_SAMPLES = 3
+  const JITTER = 8
+  let last = await readTextLen()
+  let stableCount = 0
+  let stabilized = false
+  while (Date.now() < deadline) {
+    await sleep(300)
+    const now = await readTextLen()
+    if (Math.abs(now - last) <= JITTER) {
+      stableCount += 1
+      if (stableCount >= STABLE_SAMPLES && now > 0) {
+        stabilized = true
+        break
+      }
+    } else {
+      stableCount = 0
+    }
+    last = now
+  }
+  return { stabilized, textLen: last }
+}
+
+/**
  * Canonicalize a URL for per-task dedup: lowercase host, drop trailing
  * slash + fragment. Falls back to a best-effort string normalization on
  * obviously-malformed URLs so the dedup key still works.

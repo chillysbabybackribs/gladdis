@@ -460,7 +460,7 @@ export class BrowserTools {
 
         // ── Drive (CDP) ─────────────────────────────────────────────────────
         case 'act':
-          outcome = await runAct(this.driveDeps(), args, { tabId: ctx.tabId })
+          outcome = await runAct(this.driveDeps(), args, { tabId: ctx.tabId, conversationId: ctx.conversationId })
           break
         case 'set_field':
           outcome = await runSetField(this.driveDeps(), args, { tabId: ctx.tabId })

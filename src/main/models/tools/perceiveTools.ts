@@ -6,7 +6,7 @@ import { captureAxSnapshotForTab, digestAxSnapshot } from '../../extract/axTree'
 import { buildPageWireframe, formatPageWireframe } from '../../extract/pageWireframe'
 import type { PageCapture } from '../../../../shared/extraction'
 import type { SavedPage } from '../../extract/pageStore'
-import { sleep } from './toolUtils'
+import { waitForTextStable } from './toolUtils'
 import type { CapturedNetworkBody, CapturedNetworkRequest } from '../../network/watchNetworkRecorder'
 import type { NetworkFilterSpec } from '../../network/watchNetworkRecorder'
 import {
@@ -151,42 +151,10 @@ export async function runWaitForLoad(
   conversationId?: string | null
 ): Promise<ToolOutcome> {
   const maxMs = Math.min(Math.max(Number(args.timeout_ms) || 6_000, 1_000), 15_000)
-  const deadline = Date.now() + maxMs
-  const readTextLen = async (): Promise<number> => {
-    try {
-      const res = await deps.tabs.executeJavaScript(
-        tabId,
-        'return (document.body && document.body.innerText) ? document.body.innerText.length : 0'
-      )
-      return res.success && typeof res.result === 'number' ? res.result : 0
-    } catch {
-      return 0
-    }
-  }
-
-  // Poll until the text length is stable across STABLE_SAMPLES consecutive reads
-  // (allowing tiny jitter), or the deadline passes.
-  const STABLE_SAMPLES = 3
-  const JITTER = 8 // chars of noise we treat as "unchanged"
-  let last = await readTextLen()
-  let stableCount = 0
-  let stabilized = false
-  while (Date.now() < deadline) {
-    await sleep(300)
-    const now = await readTextLen()
-    if (Math.abs(now - last) <= JITTER) {
-      stableCount += 1
-      if (stableCount >= STABLE_SAMPLES && now > 0) {
-        stabilized = true
-        break
-      }
-    } else {
-      stableCount = 0
-    }
-    last = now
-  }
-
-  const finalLen = last
+  const { stabilized, textLen: finalLen } = await waitForTextStable(
+    (code) => deps.tabs.executeJavaScript(tabId, code),
+    maxMs
+  )
   // Re-capture the now-settled page (fresh wireframe + re-save to disk).
   let wireframe: ReturnType<typeof buildPageWireframe> | null = null
   let saved: SavedPage | null = null

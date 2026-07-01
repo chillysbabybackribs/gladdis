@@ -103,7 +103,8 @@ export const BROWSER_SEMANTIC_VERBS_GUIDANCE = 'Prefer the semantic browser verb
 export const ACT_COMPANION_GUIDANCE =
   '`act` is a companion action tool (click | type | key | select), not the orientation tool. Use `navigate`, `grep_page`, or `read_a11y` first to identify the target, then prefer `set_field`, `submit`, or `open_result` when they fit before dropping to `act`. ' +
   'Its `type` mode inserts the provided text in one shot, not letter-by-letter, and it returns a fresh `after` object with ' +
-  '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding the next step instead of immediately re-reading the page.'
+  '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding the next step instead of immediately re-reading the page. ' +
+  'When the very next step after loading a page is an obvious action on it, you can fuse them: pass `navigate` (a URL) to act, which loads that page, waits for it to settle, then acts on it in one call — target by `query`/`coords` only (a @ref cannot predate the load). It fails safe: a failed load or an unfound target returns ok:false with the landed URL, never a guess-click.'
 
 export const GREP_PAGE_GUIDANCE =
   '`grep_page` is SURGICAL, not exploratory: extract the subject from the user request and query 1–3 tight multi-word phrase variations ' +

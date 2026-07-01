@@ -80,6 +80,52 @@ describe('grep payload (real DOM)', () => {
     expect(hits.length).toBeGreaterThan(0)
   })
 
+  it('matches a form control by aria-label when it has no visible text (the Google Flights trap)', async () => {
+    // Exact reproduction of the set_field failure: an input whose name lives in
+    // aria-label/placeholder, with empty value/innerText. A plain innerText grep
+    // finds nothing; the label-match pass must resolve it.
+    const tabs = tabsFor(
+      `<div><input type="text" role="combobox" aria-label="Where to? " placeholder="Where to?" value=""></div>`
+    )
+    const res = await executeGrepInTab(tabs as any, 'tab-1', 'Where to?', 'text', false, 2)
+    expect(res.success).toBe(true)
+    const hits = ((res.result as any[]) ?? []).filter((m) => m.type !== 'error')
+    expect(hits.length, 'aria-label control should resolve').toBeGreaterThan(0)
+    const control = hits.find((m) => m.type === 'control_match')
+    expect(control, 'should return a control_match with coordinates').toBeTruthy()
+    expect(control.coordinates).toBeTruthy()
+    expect(control.visible).toBe(true)
+  })
+
+  it('matches a date/departure input by placeholder label', async () => {
+    const tabs = tabsFor(
+      `<input type="text" class="TP4Lpb" placeholder="Departure" aria-label="Departure">`
+    )
+    const res = await executeGrepInTab(tabs as any, 'tab-1', 'Departure', 'text', false, 2)
+    const hits = ((res.result as any[]) ?? []).filter((m) => m.type !== 'error')
+    expect(hits.some((m) => m.type === 'control_match')).toBe(true)
+  })
+
+  it('ranks the exact-label control ahead of a partial one', async () => {
+    const tabs = tabsFor(
+      `<input aria-label="Search everywhere else"><input aria-label="Search">`
+    )
+    const res = await executeGrepInTab(tabs as any, 'tab-1', 'Search', 'text', false, 2)
+    const controls = ((res.result as any[]) ?? []).filter((m) => m.type === 'control_match')
+    expect(controls.length).toBeGreaterThanOrEqual(2)
+    // Exact "Search" must come first so matchIndex 0 hits the right field.
+    expect(controls[0].label.toLowerCase()).toBe('search')
+  })
+
+  it('does not turn ordinary page-text grep into control noise', async () => {
+    // A query that matches page prose but no control label must not fabricate
+    // control_match entries.
+    const tabs = tabsFor(`<p>Departure lounge access is included.</p>`)
+    const res = await executeGrepInTab(tabs as any, 'tab-1', 'Departure lounge access', 'text', false, 2)
+    const controls = ((res.result as any[]) ?? []).filter((m) => m.type === 'control_match')
+    expect(controls.length).toBe(0)
+  })
+
   it('returns a qualified lead when the line is semantically close but not exact', async () => {
     const tabs = tabsFor(`<p>The tower is 330 metres (1,083 ft) tall.</p>`)
     const res = await executeGrepInTab(tabs as any, 'tab-1', 'Height 300 meters', 'text', false, 2)

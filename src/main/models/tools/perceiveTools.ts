@@ -536,6 +536,65 @@ export async function executeGrepInTab(
       return (s || '').replace(/[\\s\\u00a0]+/g, ' ');
     }
 
+    // Form controls carry their name in aria-label / placeholder / name / an
+    // associated <label>, not in innerText — so a plain innerText grep for
+    // "Departure" or "Where to?" finds nothing even though the field is right
+    // there, visible and named. This pass matches interactive controls by their
+    // ACCESSIBLE LABEL so set_field / submit / act / grep_page can target
+    // "fill the Departure field" the obvious way. Exact-label hits rank ahead of
+    // startsWith ahead of substring; ties break by document order.
+    function findControlMatchesByLabel(pattern) {
+      const want = normalizeWs(pattern).trim().toLowerCase();
+      if (!want) return [];
+      const controls = Array.from(document.querySelectorAll(
+        'input:not([type=hidden]), textarea, select, [role="combobox"], [role="textbox"], [role="searchbox"], [role="spinbutton"], [contenteditable="true"]'
+      ));
+      const scored = [];
+      for (const el of controls) {
+        if (!isElementVisible(el)) continue;
+        const labels = [];
+        const al = el.getAttribute('aria-label');
+        const ph = el.getAttribute('placeholder');
+        const nm = el.getAttribute('name');
+        if (al) labels.push(al);
+        if (ph) labels.push(ph);
+        if (nm) labels.push(nm);
+        if (el.id) {
+          try {
+            const lab = document.querySelector('label[for="' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]');
+            if (lab && lab.innerText) labels.push(lab.innerText);
+          } catch (e) { /* invalid id for selector — skip */ }
+        }
+        let best = -1;
+        for (const raw of labels) {
+          const lab = normalizeWs(raw).trim().toLowerCase();
+          if (!lab) continue;
+          if (lab === want) { best = 3; break; }
+          if (lab.startsWith(want)) best = Math.max(best, 2);
+          else if (lab.includes(want)) best = Math.max(best, 1);
+        }
+        if (best < 0) continue;
+        const coords = getElementCoords(el);
+        if (!coords) continue;
+        scored.push({
+          rank: best,
+          match: {
+            type: 'control_match',
+            tagName: el.tagName.toLowerCase(),
+            role: el.getAttribute('role') || null,
+            label: normalizeWs(labels[0] || '').trim().slice(0, 80),
+            outerHTML: el.outerHTML.slice(0, 300),
+            innerText: '',
+            selector: getCssSelector(el),
+            coordinates: coords,
+            visible: true
+          }
+        });
+      }
+      scored.sort((a, b) => b.rank - a.rank);
+      return scored.slice(0, 8).map((s) => s.match);
+    }
+
     function tokenizeText(s) {
       const cleaned = normalizeWs(String(s || ''))
         .toLowerCase()
@@ -739,12 +798,22 @@ export async function executeGrepInTab(
       selectorResults = findSelectorMatches(query);
     }
 
+    let controlResults = [];
     if (type === 'text' || type === 'regex') {
       const isRegex = (type === 'regex');
       textResults = findTextMatches(query, isRegex, caseSensitive, contextLines);
     }
+    // Label-match form controls for literal text queries. Controls named only by
+    // aria-label/placeholder are invisible to innerText grep, so without this a
+    // set_field/act query like "Departure" resolves to nothing. Regex queries
+    // are excluded — a label pattern is meant for prose, not control names.
+    if (type === 'text') {
+      controlResults = findControlMatchesByLabel(query);
+    }
 
-    const combined = [...selectorResults, ...textResults];
+    // Controls first: when a query names a form field, acting on the field beats
+    // acting on a stray text node that happens to share the word.
+    const combined = [...controlResults, ...selectorResults, ...textResults];
     const qualifiedLeads = type === 'text' && combined.length === 0
       ? findQualifiedTextLeads(query, contextLines)
       : [];

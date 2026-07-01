@@ -240,6 +240,7 @@ function buildBrowserInteractionGuidance(names: Set<string>): string {
       'Middle-game discipline for browser tasks:',
       '  • Before leaving a page you may need later, preserve it now: save the page or extract the exact records you will compare against.',
       '  • For each subtask, identify the evidence shape you need: one fact, one control, repeated flat records, hierarchical records, or API-backed data.',
+      '  • Target form fields and buttons by their LABEL — set_field/act/grep_page match a control by its accessible name (aria-label / placeholder / associated label), so a field showing no visible text (an empty "Departure" or "Where to?" input) still resolves by that label. Do not stitch a query out of two adjacent things you see, e.g. a calendar cell rendered as day + price ("22$1,320") is two nodes, not one target. For grid / calendar / date-picker cells, read_a11y and click the @ref of the exact cell (its accessible name is the whole "Wednesday, July 22 — $1,320").',
       '  • After each meaningful read/action, grade the result: right entity, right structure, enough coverage. If not, recalibrate the same tool once before switching surfaces.'
     ].join('\n'),
     actionLines.length > 0 ? [`${names.has('act') ? 'Act' : 'Action'} — semantic verbs first, low-level companion actions second:`, ...actionLines].join('\n') : null,

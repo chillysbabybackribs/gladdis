@@ -387,6 +387,11 @@ function openAiBody(args: {
 
   if (args.tools) {
     body.tools = args.tools
+    // Let the model fan out independent tool calls in one turn (reads, separate
+    // field fills, multi-source lookups). Defaults vary by model/endpoint —
+    // reasoning models are conservative here — so set it explicitly. Write→submit
+    // sequencing is enforced by prompt guidance, not by disabling this.
+    body.parallel_tool_calls = true
   }
 
   return body

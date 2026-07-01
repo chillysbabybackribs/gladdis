@@ -1005,7 +1005,7 @@ export class ChatService {
           const wsBlock = this.agentConfig.workspaceSystemBlock(profile)
           const repoBlock = await this.agentConfig.codexRepoOverviewBlock(req, actionableText)
           const claudeSystem = [
-            buildClaudeCodeSystem({ enableBrowserTools: enableClaudeMcp }),
+            buildClaudeCodeSystem({ browserToolNames: embeddedToolNames }),
             this.agentConfig.customAgentSystemBlock(req),
             wsBlock,
             repoBlock
@@ -1047,7 +1047,7 @@ export class ChatService {
           this.cursorValidationStates.set(req.requestId, createToolValidationState())
           const wsBlock = this.agentConfig.workspaceSystemBlock(profile)
           const cursorSystem = [
-            buildCursorSystem({ enableBrowserTools: enableCursorMcp }),
+            buildCursorSystem({ browserToolNames: embeddedToolNames }),
             this.agentConfig.customAgentSystemBlock(req),
             wsBlock
           ].filter(Boolean).join('\n\n')

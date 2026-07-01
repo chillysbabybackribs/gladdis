@@ -1,6 +1,15 @@
 import type { ToolDef } from './browserTools'
-import { CLAUDE_CODE_BROWSER_INSTRUCTIONS, CURSOR_BROWSER_INSTRUCTIONS } from './claudeCode/browserTools'
-import { CODEX_BROWSER_INSTRUCTIONS, GLADDIS_WEB_TOOLS_RULE } from './codex/dynamicBrowserTools'
+import {
+  buildClaudeCodeBrowserInstructions,
+  buildCursorBrowserInstructions,
+  CLAUDE_CODE_BROWSER_INSTRUCTIONS,
+  CURSOR_BROWSER_INSTRUCTIONS
+} from './claudeCode/browserTools'
+import {
+  buildCodexBrowserInstructions,
+  CODEX_BROWSER_INSTRUCTIONS,
+  GLADDIS_WEB_TOOLS_RULE
+} from './codex/dynamicBrowserTools'
 
 /**
  * Operating brief for gladdis. Not a persona — orientation and stance, not a
@@ -239,11 +248,19 @@ export const ASK_SYSTEM =
 /**
  * Codex turns run through the local app-server for repo/file/shell work.
  */
-const CODEX_SYSTEM_CACHE = new Map<boolean, string>()
+const CODEX_SYSTEM_CACHE = new Map<string, string>()
 
-export function buildCodexSystem(options: { enableGladdisTools: boolean }): string {
-  const cached = CODEX_SYSTEM_CACHE.get(options.enableGladdisTools)
+function toolCacheKey(toolNames?: Iterable<string>): string {
+  if (!toolNames) return 'none'
+  const names = [...new Set(toolNames)].sort()
+  return names.length > 0 ? names.join('|') : 'none'
+}
+
+export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> }): string {
+  const key = toolCacheKey(options.gladdisToolNames)
+  const cached = CODEX_SYSTEM_CACHE.get(key)
   if (cached) return cached
+  const gladdisToolNames = new Set(options.gladdisToolNames ?? [])
 
   const core =
     `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
@@ -259,10 +276,10 @@ export function buildCodexSystem(options: { enableGladdisTools: boolean }): stri
     'instruction. Do not edit files, run validations, navigate pages, or continue old work from a bare ' +
     'resume request.'
 
-  const result = options.enableGladdisTools
+  const result = gladdisToolNames.size > 0
     ? core +
       '\n\n' +
-      `${CODEX_BROWSER_INSTRUCTIONS}\n\n` +
+      `${buildCodexBrowserInstructions(gladdisToolNames)}\n\n` +
       'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
       'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
       'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
@@ -274,22 +291,24 @@ export function buildCodexSystem(options: { enableGladdisTools: boolean }): stri
       '\n\nUse your native shell/file tools for local repo, package, validation, and coding work. ' +
       'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
 
-  CODEX_SYSTEM_CACHE.set(options.enableGladdisTools, result)
+  CODEX_SYSTEM_CACHE.set(key, result)
   return result
 }
 
-export const CODEX_SYSTEM = buildCodexSystem({ enableGladdisTools: true })
+export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Claude Code turns run through the local Claude CLI, preserving Claude's
  * native repo/shell toolchain while Gladdis owns the surrounding chat shell.
  * Gladdis browser tools are attached through the in-process HTTP MCP server.
  */
-const CLAUDE_CODE_SYSTEM_CACHE = new Map<boolean, string>()
+const CLAUDE_CODE_SYSTEM_CACHE = new Map<string, string>()
 
-export function buildClaudeCodeSystem(options: { enableBrowserTools: boolean }): string {
-  const cached = CLAUDE_CODE_SYSTEM_CACHE.get(options.enableBrowserTools)
+export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<string> }): string {
+  const key = toolCacheKey(options.browserToolNames)
+  const cached = CLAUDE_CODE_SYSTEM_CACHE.get(key)
   if (cached) return cached
+  const browserToolNames = new Set(options.browserToolNames ?? [])
 
   const core =
     `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
@@ -306,10 +325,10 @@ export function buildClaudeCodeSystem(options: { enableBrowserTools: boolean }):
     'the next concrete instruction. Do not edit files, run validations, navigate pages, or continue old ' +
     'work from a bare resume request.'
 
-  const result = options.enableBrowserTools
+  const result = browserToolNames.size > 0
     ? core +
       '\n\n' +
-      `${CLAUDE_CODE_BROWSER_INSTRUCTIONS}\n\n` +
+      `${buildClaudeCodeBrowserInstructions(browserToolNames)}\n\n` +
       'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
       'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
       'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
@@ -320,11 +339,11 @@ export function buildClaudeCodeSystem(options: { enableBrowserTools: boolean }):
       '\n\nKeep Claude Code native local repo, file, shell, git, and validation abilities focused on the task. ' +
       'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
 
-  CLAUDE_CODE_SYSTEM_CACHE.set(options.enableBrowserTools, result)
+  CLAUDE_CODE_SYSTEM_CACHE.set(key, result)
   return result
 }
 
-export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ enableBrowserTools: true })
+export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Cursor turns run through the local Cursor Agent CLI. Keep this lean: Cursor
@@ -332,12 +351,14 @@ export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ enableBrowserTools: tr
  * here should be only the Gladdis-specific contract and browser-tool rules.
  */
 
-// Cache for cursor system prompts - keyed by enableBrowserTools boolean
-const CURSOR_SYSTEM_CACHE = new Map<boolean, string>()
+// Cache for cursor system prompts - keyed by the routed Gladdis tool subset
+const CURSOR_SYSTEM_CACHE = new Map<string, string>()
 
-export function buildCursorSystem(options: { enableBrowserTools: boolean }): string {
-  const cached = CURSOR_SYSTEM_CACHE.get(options.enableBrowserTools)
+export function buildCursorSystem(options: { browserToolNames?: Iterable<string> }): string {
+  const key = toolCacheKey(options.browserToolNames)
+  const cached = CURSOR_SYSTEM_CACHE.get(key)
   if (cached) return cached
+  const browserToolNames = new Set(options.browserToolNames ?? [])
 
   const core =
     `${ABOUT_GLADDIS}\n\n` +
@@ -345,7 +366,7 @@ export function buildCursorSystem(options: { enableBrowserTools: boolean }): str
     'verify before asserting, and complete the task end-to-end when feasible.'
 
   let result: string
-  if (!options.enableBrowserTools) {
+  if (browserToolNames.size === 0) {
     result =
       core +
       '\n\nUse Cursor native local repo, file, shell, and validation abilities for code work. ' +
@@ -355,7 +376,7 @@ export function buildCursorSystem(options: { enableBrowserTools: boolean }): str
     result =
       core +
       '\n\n' +
-      `${CURSOR_BROWSER_INSTRUCTIONS}\n\n` +
+      `${buildCursorBrowserInstructions(browserToolNames)}\n\n` +
       'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, or ' +
       'current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
       'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and launching ' +
@@ -363,8 +384,8 @@ export function buildCursorSystem(options: { enableBrowserTools: boolean }): str
       'intended UI is visible before finishing.'
   }
 
-  CURSOR_SYSTEM_CACHE.set(options.enableBrowserTools, result)
+  CURSOR_SYSTEM_CACHE.set(key, result)
   return result
 }
 
-export const CURSOR_SYSTEM = buildCursorSystem({ enableBrowserTools: true })
+export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })

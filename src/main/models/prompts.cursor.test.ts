@@ -1,18 +1,47 @@
 import { describe, expect, it } from 'vitest'
 import { buildCursorSystem, CURSOR_SYSTEM } from './prompts'
-import { CURSOR_BROWSER_INSTRUCTIONS } from './claudeCode/browserTools'
+import { buildCursorBrowserInstructions, CURSOR_BROWSER_INSTRUCTIONS } from './claudeCode/browserTools'
 
 describe('buildCursorSystem', () => {
   it('omits browser MCP instructions on code-only turns', () => {
-    const prompt = buildCursorSystem({ enableBrowserTools: false })
-    expect(prompt).not.toContain(CURSOR_BROWSER_INSTRUCTIONS)
+    const prompt = buildCursorSystem({})
+    expect(prompt).not.toContain(buildCursorBrowserInstructions(['search']))
     expect(prompt).toContain('Use Cursor native local repo, file, shell, and validation abilities')
     expect(prompt).toContain('run the narrowest relevant local verification command')
     expect(prompt).toContain('failed post-action verification result')
   })
 
   it('includes browser MCP instructions when the bridge is enabled', () => {
-    const prompt = buildCursorSystem({ enableBrowserTools: true })
+    const prompt = buildCursorSystem({ browserToolNames: ['search', 'act'] })
+    expect(prompt).toContain('Attached Gladdis MCP tools this turn: act, search.')
+    expect(prompt).toContain('act is the primary action verb')
+    expect(prompt).not.toContain('memory_create_task')
+  })
+
+  it('keeps the full default cursor system prompt in sync with the exported constant', () => {
+    const prompt = buildCursorSystem({
+      browserToolNames: [
+        'search',
+        'navigate',
+        'read_page',
+        'read_a11y',
+        'grep_page',
+        'watch_network',
+        'screenshot',
+        'screenshot_app',
+        'act',
+        'grep_click',
+        'grep_type',
+        'execute_in_browser',
+        'cdp_command',
+        'recall_history',
+        'memory_write',
+        'memory_read',
+        'memory_list',
+        'memory_forget',
+        'memory_create_task'
+      ]
+    })
     expect(prompt).toContain(CURSOR_BROWSER_INSTRUCTIONS)
     expect(prompt).toBe(CURSOR_SYSTEM)
   })

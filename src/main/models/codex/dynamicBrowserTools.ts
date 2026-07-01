@@ -73,49 +73,111 @@ export const GLADDIS_WEB_TOOLS_RULE =
   'facts from memory, and never claim you cannot search — the search tool is always available for that. ' +
   'Gladdis\'s search is the only web search that exists for this turn.'
 
+const CODEX_MEMORY_TOOL_NAMES = [
+  'recall_history',
+  'memory_write',
+  'memory_read',
+  'memory_list',
+  'memory_forget',
+  'memory_create_task'
+] as const
+
+const CODEX_INTERACTION_TOOL_NAMES = [
+  'navigate',
+  'read_page',
+  'read_a11y',
+  'grep_page',
+  'watch_network',
+  'screenshot',
+  'screenshot_app',
+  'act',
+  'grep_click',
+  'grep_type',
+  'execute_in_browser',
+  'cdp_command'
+] as const
+
+function describeToolList(toolNames: Iterable<string>): string {
+  const tools = [...new Set(toolNames)].sort()
+  return tools.length > 0 ? tools.join(', ') : 'none'
+}
+
+function buildMemoryNotebookLine(allowed: ReadonlySet<string>): string | null {
+  const parts: string[] = []
+  if (allowed.has('memory_read')) parts.push('memory_read before re-asking for context that may already be known')
+  if (allowed.has('memory_write')) parts.push('memory_write for durable decisions/constraints/identifiers')
+  if (allowed.has('memory_list')) parts.push('memory_list for a quick inventory')
+  if (allowed.has('memory_create_task')) parts.push('memory_create_task for task-specific notes')
+  if (allowed.has('memory_forget')) parts.push('memory_forget to clear stale notes')
+  if (parts.length === 0) return null
+  return `For longer or multi-step tasks, use the memory_* notebook tools (your native cross-session memory is disabled here, so this is the only durable channel): ${parts.join(', ')}. Store concise, reusable facts rather than large transcript dumps.`
+}
+
 // The single source of truth for how Codex is told to do web/browser work.
 // Injected into CODEX_SYSTEM (see prompts.ts) so it actually reaches the model
 // on every turn. Native web search is already disabled via config; the trap
 // this closes is Codex reaching for a browser through its NATIVE SHELL tool
 // (which stays on for code work) during "visual validation" — hence the
 // explicit "even via your shell" line.
-export const CODEX_BROWSER_INSTRUCTIONS =
-  `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the gladdis.* tools: act is the primary action verb ' +
-  '(click | type | key | select) — it does the action AND returns a fresh `after` object with ' +
-  '{url, title, readyState, activeElement, navigated, elements?} so you re-orient FROM the result ' +
-  'instead of calling read_page/read_a11y again. Pair it with navigate (returns a page MAP of ' +
-  'primary @refs ready to act on), read_page (orient when you did not just navigate), read_a11y ' +
-  '(a11y tree with @aN refs for control-heavy UIs), grep_page (surgical text/element lookup), ' +
-  'watch_network (read the JSON behind a page instead of scraping its HTML), grep_click/grep_type ' +
-  '(legacy split verbs — only when you specifically do not want the act re-orientation), ' +
-  'execute_in_browser, cdp_command, screenshot, and screenshot_app. For Gladdis state and continuity ' +
-  'use recall_history plus the memory_* notebook tools; for local repo/code/package work, use your ' +
-  'native shell and file tools instead of inventing removed Gladdis repo tools.\n' +
-  'grep_page is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the ' +
-  'user actually wants (e.g. "Pro plan $20 per user", "released on 14 March 2026"), never a single ' +
-  'common word like "price" or "date" — those flood with noise. If the first phrasing misses, run 2–3 ' +
-  'variations of the same meaning rather than broadening. Use type "selector" ONLY with a specific CSS ' +
-  'selector or XPath; never with bare tag names (a/div/img dump the page).\n' +
-  'After every act call, READ the returned `after` object before deciding the next step — IT IS the ' +
-  'post-action read. When `after.navigated` is true the page changed and `after.elements` lists the ' +
-  'new page\'s top targets with coordinates; act on those directly. Do NOT immediately call ' +
-  'read_page/read_a11y after a navigating act — the digest you need is already in hand. When act ' +
-  'returns ok:false with "no visible element matched …", treat that as a re-orient signal: run ' +
-  'read_a11y or a re-phrased grep_page, then target a fresh @ref — do not retry the same query.\n' +
-  'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook (your native cross-session ' +
-  'memory is disabled here, so this is the only durable channel): memory_read before re-asking for context that ' +
-  'may already be known, memory_write for durable decisions/constraints/identifiers, memory_list for a quick ' +
-  'inventory, memory_create_task for task-specific notes, and memory_forget to clear stale notes. Store concise, ' +
-  'reusable facts rather than large transcript dumps.\n' +
-  'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, ' +
-  'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +
-  'or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. ' +
-  'These bypass Gladdis, hide the page from the user, and skip Gladdis\'s superior search. The gladdis.* tools ' +
-  'are always the right tool; a native browser command is always wrong here.\n' +
-  'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev ' +
-  'app. Launch a separate instance only for startup/cold-boot/fresh-process validation, and say why first.\n' +
-  'Use Codex-native shell/file tools for local code, package, and command work — just never for browsing.'
+export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string>): string {
+  const allowed = new Set(allowedToolNames ?? CODEX_BROWSER_TOOL_NAMES)
+  const lines: string[] = [
+    GLADDIS_WEB_TOOLS_RULE,
+    `Attached Gladdis tools this turn: ${describeToolList(allowed)}.`
+  ]
+
+  if (allowed.has('search')) {
+    lines.push('Use `search` for live web lookup, and use `navigate` to load a known URL in the visible tab when you already know where to go.')
+  }
+
+  const hasBrowserInteraction = CODEX_INTERACTION_TOOL_NAMES.some((name) => allowed.has(name))
+  if (hasBrowserInteraction) {
+    const browserTools = CODEX_INTERACTION_TOOL_NAMES.filter((name) => allowed.has(name))
+    lines.push(`For browser work beyond search use the attached gladdis.* tools: ${browserTools.join(', ')}.`)
+  }
+
+  if (allowed.has('act')) {
+    lines.push(
+      'act is the primary action verb (click | type | key | select) and returns a fresh `after` object with ' +
+      '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding ' +
+      'the next step instead of immediately re-reading the page.'
+    )
+  }
+
+  if (allowed.has('grep_page')) {
+    lines.push(
+      '`grep_page` is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the user actually wants ' +
+      '(for example "Pro plan $20 per user" or "released on 14 March 2026"), never a single common word like "price" or "date". ' +
+      'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
+    )
+  }
+
+  if (allowed.has('act') && (allowed.has('read_a11y') || allowed.has('grep_page'))) {
+    lines.push(
+      'When `act` returns ok:false with "no visible element matched …", treat that as a re-orient signal: use one of the attached read tools ' +
+      'such as `read_a11y` or `grep_page`, then target a fresh @ref or query instead of retrying the same action.'
+    )
+  }
+
+  const hasMemoryTools = CODEX_MEMORY_TOOL_NAMES.some((name) => allowed.has(name))
+  if (hasMemoryTools) {
+    const notebookLine = buildMemoryNotebookLine(allowed)
+    if (notebookLine) lines.push(notebookLine)
+  }
+
+  lines.push(
+    'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), ' +
+    'puppeteer scripts, or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. These bypass Gladdis, hide the page from the user, and skip Gladdis\'s superior search. The attached gladdis.* tools are always the right tool; a native browser command is always wrong here.'
+  )
+  lines.push(
+    'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev app. Launch a separate instance only for startup/cold-boot/fresh-process validation, and say why first.'
+  )
+  lines.push('Use Codex-native shell and file tools for local code, package, and command work — just never for browsing.')
+
+  return lines.join('\n')
+}
+
+export const CODEX_BROWSER_INSTRUCTIONS = buildCodexBrowserInstructions(CODEX_BROWSER_TOOL_NAMES)
 
 export const CODEX_DISABLED_NATIVE_CONFIG = {
   web_search: 'disabled',

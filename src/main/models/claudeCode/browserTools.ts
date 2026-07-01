@@ -80,82 +80,132 @@ export const CURSOR_MCP_TOOLS = AGENT_TOOLS
     outputSchema: tool.outputSchema
   }))
 
-export const CLAUDE_CODE_BROWSER_INSTRUCTIONS =
-  `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the Gladdis MCP tools: act is the primary action verb ' +
-  '(click | type | key | select) — it does the action AND returns a fresh `after` object with ' +
-  '{url, title, readyState, activeElement, navigated, elements?} so you re-orient FROM the result ' +
-  'instead of calling read_page/read_a11y again. Pair it with navigate (returns a page MAP of ' +
-  'primary @refs ready to act on), read_page (orient when you did not just navigate), read_a11y ' +
-  '(a11y tree with @aN refs for control-heavy UIs), grep_page (surgical text/element lookup), ' +
-  'watch_network (read the JSON behind a page instead of scraping its HTML), grep_click/grep_type ' +
-  '(legacy split verbs — only when you specifically do not want the act re-orientation), ' +
-  'execute_in_browser, and cdp_command. For Gladdis-native context helpers use recall_history, ' +
-  'memory_write, memory_read, memory_list, memory_forget, and memory_create_task.\n' +
-  'grep_page is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the ' +
-  'user actually wants (e.g. "released on 14 March 2026", "Pro plan $20 per user"), never a single ' +
-  'common word like "price" or "date" — those flood with noise. If the first phrasing misses, run 2–3 ' +
-  'variations of the same meaning rather than broadening. Use type "selector" ONLY with a specific CSS ' +
-  'selector or XPath; never with bare tag names (a/div/img dump the page).\n' +
-  'After every act call, READ the returned `after` object before deciding the next step — IT IS the ' +
-  'post-action read. When `after.navigated` is true, `after.elements` lists the new page\'s top targets ' +
-  'with coordinates; act on those directly. Do NOT immediately call read_page/read_a11y after a ' +
-  'navigating act — the digest you need is already in hand. When act returns ok:false with "no visible ' +
-  'element matched …", treat that as a re-orient signal: run read_a11y or a re-phrased grep_page, then ' +
-  'target a fresh @ref — do not retry the same query.\n' +
-  'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook: call memory_read before re-asking for ' +
-  'context that may already be known, use memory_write for durable decisions/constraints/identifiers, use memory_list for a ' +
-  'quick inventory, use memory_create_task for task-specific notes, and use memory_forget to clear stale notes when plans change. ' +
-  'Store concise, reusable facts rather than large transcript dumps.\n' +
-  'NEVER reach for a browser through Claude Code\'s native shell or any other path. Do not run google-chrome, ' +
-  'chromium, chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer ' +
-  'scripts, or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev ' +
-  'server. These bypass Gladdis, hide the page from the user, and skip Gladdis\'s search. The Gladdis MCP tools ' +
-  'are always the right tool; a native browser command is always wrong here.\n' +
-  'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev ' +
-  'app unless you need startup/cold-boot/fresh-process validation, and say why first.\n' +
-  'Keep Claude Code\'s native local repo, file, and shell abilities for code work; use the Gladdis MCP tools ' +
-  'for browser work and Gladdis-specific context helpers.'
+const MEMORY_TOOL_NAMES = [
+  'recall_history',
+  'memory_write',
+  'memory_read',
+  'memory_list',
+  'memory_forget',
+  'memory_create_task'
+] as const
+
+const INTERACTION_TOOL_NAMES = [
+  'navigate',
+  'read_page',
+  'read_a11y',
+  'grep_page',
+  'watch_network',
+  'screenshot',
+  'screenshot_app',
+  'act',
+  'grep_click',
+  'grep_type',
+  'execute_in_browser',
+  'cdp_command'
+] as const
+
+function describeToolList(toolNames: Iterable<string>): string {
+  const tools = [...new Set(toolNames)].sort()
+  return tools.length > 0 ? tools.join(', ') : 'none'
+}
+
+function buildMemoryNotebookLine(allowed: ReadonlySet<string>): string | null {
+  const parts: string[] = []
+  if (allowed.has('memory_read')) parts.push('call memory_read before re-asking for context that may already be known')
+  if (allowed.has('memory_write')) parts.push('use memory_write for durable decisions/constraints/identifiers')
+  if (allowed.has('memory_list')) parts.push('use memory_list for a quick inventory')
+  if (allowed.has('memory_create_task')) parts.push('use memory_create_task for task-specific notes')
+  if (allowed.has('memory_forget')) parts.push('use memory_forget to clear stale notes when plans change')
+  if (parts.length === 0) return null
+  return `For longer or multi-step tasks, use the memory_* tools as a lightweight notebook: ${parts.join(', ')}. Store concise, reusable facts rather than large transcript dumps.`
+}
+
+function buildEmbeddedBrowserInstructions(args: {
+  allowedToolNames?: Iterable<string>
+  runtimeLabel: string
+  nativeWorkLine: string
+}): string {
+  const allowed = new Set(args.allowedToolNames ?? CURSOR_MCP_TOOL_NAMES)
+  const lines: string[] = [
+    GLADDIS_WEB_TOOLS_RULE,
+    `Attached Gladdis MCP tools this turn: ${describeToolList(allowed)}.`
+  ]
+
+  if (allowed.has('search')) {
+    lines.push('Use `search` for live web lookup, and only pass `navigate_visible: true` when the user actually wants the result opened in the visible tab.')
+  }
+
+  const hasBrowserInteraction = INTERACTION_TOOL_NAMES.some((name) => allowed.has(name))
+  if (hasBrowserInteraction) {
+    const browserTools = INTERACTION_TOOL_NAMES.filter((name) => allowed.has(name))
+    lines.push(`For browser work beyond search, stay within the attached MCP tools: ${browserTools.join(', ')}.`)
+  }
+
+  if (allowed.has('act')) {
+    lines.push(
+      'act is the primary action verb (click | type | key | select) and returns a fresh `after` object with ' +
+      '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding ' +
+      'the next step instead of immediately re-reading the page.'
+    )
+  }
+
+  if (allowed.has('grep_page')) {
+    lines.push(
+      '`grep_page` is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the user actually wants ' +
+      '(for example "released on 14 March 2026" or "Pro plan $20 per user"), never a single common word like "price" or "date". ' +
+      'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
+    )
+  }
+
+  if (allowed.has('act') && (allowed.has('read_a11y') || allowed.has('grep_page'))) {
+    lines.push(
+      'When `act` returns ok:false with "no visible element matched …", treat that as a re-orient signal: use one of the attached read tools ' +
+      'such as `read_a11y` or `grep_page`, then target a fresh @ref or query instead of retrying the same action.'
+    )
+  }
+
+  const hasMemoryTools = MEMORY_TOOL_NAMES.some((name) => allowed.has(name))
+  if (hasMemoryTools) {
+    const notebookLine = buildMemoryNotebookLine(allowed)
+    if (notebookLine) lines.push(notebookLine)
+  }
+
+  lines.push(
+    `NEVER reach for a browser through ${args.runtimeLabel}'s native shell or any other path. Do not run google-chrome, chromium, chrome, ` +
+    'xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, or curl/wget against localhost:9222 DevTools — ' +
+    `not even to "just take a screenshot" or check a dev server. These bypass Gladdis, hide the page from the user, and skip Gladdis's search. ` +
+    'The attached Gladdis MCP tools are always the right tool for browsing.'
+  )
+  lines.push(
+    'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev app unless you need startup/cold-boot/fresh-process validation, and say why first.'
+  )
+  lines.push(args.nativeWorkLine)
+
+  return lines.join('\n')
+}
+
+export function buildClaudeCodeBrowserInstructions(allowedToolNames?: Iterable<string>): string {
+  return buildEmbeddedBrowserInstructions({
+    allowedToolNames,
+    runtimeLabel: 'Claude Code',
+    nativeWorkLine:
+      "Keep Claude Code's native local repo, file, and shell abilities for code work; use the attached Gladdis MCP tools for browser work and Gladdis-specific context helpers."
+  })
+}
+
+export const CLAUDE_CODE_BROWSER_INSTRUCTIONS = buildClaudeCodeBrowserInstructions(CLAUDE_CODE_BROWSER_TOOL_NAMES)
 
 // Cursor Agent MCP browser contract. Cursor's bridge registers CURSOR_MCP_TOOLS,
 // which includes the five memory_* notebook tools, so this prompt teaches that
 // workflow too — otherwise those registered tools are unprompted dead weight
 // the model never learns to call.
-export const CURSOR_BROWSER_INSTRUCTIONS =
-  `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the Gladdis MCP tools: act is the primary action verb ' +
-  '(click | type | key | select) — it does the action AND returns a fresh `after` object with ' +
-  '{url, title, readyState, activeElement, navigated, elements?} so you re-orient FROM the result ' +
-  'instead of calling read_page/read_a11y again. Pair it with navigate (returns a page MAP of ' +
-  'primary @refs ready to act on), read_page (orient when you did not just navigate), read_a11y ' +
-  '(a11y tree with @aN refs for control-heavy UIs), grep_page (surgical text/element lookup), ' +
-  'watch_network (read the JSON behind a page instead of scraping its HTML), grep_click/grep_type ' +
-  '(legacy split verbs — only when you specifically do not want the act re-orientation), ' +
-  'execute_in_browser, and cdp_command. For Gladdis-native context helpers use recall_history, ' +
-  'memory_write, memory_read, memory_list, memory_forget, and memory_create_task.\n' +
-  'grep_page is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the ' +
-  'user actually wants (e.g. "released on 14 March 2026", "Pro plan $20 per user"), never a single ' +
-  'common word like "price" or "date" — those flood with noise. If the first phrasing misses, run 2–3 ' +
-  'variations of the same meaning rather than broadening. Use type "selector" ONLY with a specific CSS ' +
-  'selector or XPath; never with bare tag names (a/div/img dump the page).\n' +
-  'After every act call, READ the returned `after` object before deciding the next step — IT IS the ' +
-  'post-action read. When `after.navigated` is true, `after.elements` lists the new page\'s top targets ' +
-  'with coordinates; act on those directly. Do NOT immediately call read_page/read_a11y after a ' +
-  'navigating act — the digest you need is already in hand. When act returns ok:false with "no visible ' +
-  'element matched …", treat that as a re-orient signal: run read_a11y or a re-phrased grep_page, then ' +
-  'target a fresh @ref — do not retry the same query.\n' +
-  'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook: call memory_read before re-asking for ' +
-  'context that may already be known, use memory_write for durable decisions/constraints/identifiers, use memory_list for a ' +
-  'quick inventory, use memory_create_task for task-specific notes, and use memory_forget to clear stale notes when plans change. ' +
-  'Store concise, reusable facts rather than large transcript dumps.\n' +
-  'NEVER reach for a browser through Cursor Agent native shell or any other path. Do not run google-chrome, chromium, ' +
-  'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +
-  'or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. ' +
-  'These bypass Gladdis, hide the page from the user, and skip Gladdis search. The Gladdis MCP tools ' +
-  'are always the right tool; a native browser command is always wrong here.\n' +
-  'When debugging Gladdis itself, use the current visible app/browser first. Do not launch a second Gladdis/dev ' +
-  'app unless you need startup/cold-boot/fresh-process validation, and say why first.\n' +
-  'Use Cursor native local repo, file, shell, and validation abilities for code work. After editing files, run the narrowest ' +
-  'relevant local verification command before claiming success; if validation fails, fix it or say clearly why it cannot pass. ' +
-  'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context, continue from the ' +
-  'same workspace state, and do another validation pass before finishing. Use the Gladdis MCP tools for browser work.'
+export function buildCursorBrowserInstructions(allowedToolNames?: Iterable<string>): string {
+  return buildEmbeddedBrowserInstructions({
+    allowedToolNames,
+    runtimeLabel: 'Cursor Agent',
+    nativeWorkLine:
+      'Use Cursor native local repo, file, shell, and validation abilities for code work. After editing files, run the narrowest relevant local verification command before claiming success; if validation fails, fix it or say clearly why it cannot pass. If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context, continue from the same workspace state, and do another validation pass before finishing. Use the attached Gladdis MCP tools for browser work.'
+  })
+}
+
+export const CURSOR_BROWSER_INSTRUCTIONS = buildCursorBrowserInstructions(CURSOR_MCP_TOOL_NAMES)

@@ -42,7 +42,7 @@ export async function runCodexHandoff(
     const wsBlock = agentConfig.workspaceSystemBlock(initialProfile)
     const repoBlock = await agentConfig.codexRepoOverviewBlock(req, actionableText)
     const codexSystem = [
-      buildCodexSystem({ enableGladdisTools: dynamicToolNames.size > 0 }),
+      buildCodexSystem({ gladdisToolNames: dynamicToolNames }),
       agentConfig.customAgentSystemBlock(req),
       wsBlock,
       repoBlock

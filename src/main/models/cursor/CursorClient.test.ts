@@ -493,7 +493,7 @@ describe('CursorClient pause/resume', () => {
 })
 
 describe('CursorClient bridge warming', () => {
-  it('warms bridge and reuses it for subsequent turns', async () => {
+  it('warms the bridge server without retaining a warmup session', async () => {
     const mockDispose = vi.fn()
     const mockBridge = { dispose: mockDispose, env: {}, mcpConfig: '{}' }
     const createBridge = vi.fn().mockResolvedValue(mockBridge)
@@ -512,22 +512,11 @@ describe('CursorClient bridge warming', () => {
       modelId: 'warmup',
       requestId: null
     })
-    expect((client as any).warmedBridge).not.toBeNull()
-
-    // Clear the mock to check it's not called again
-    createBridge.mockClear()
-
-    // Taking the warmed bridge clears the cache
-    const taken = (client as any).takeWarmedBridge('/tmp/workspace', 'conv-1', 'model-1', 'req-1')
-    expect(taken).toBe(mockBridge)
-    expect((client as any).warmedBridge).toBeNull()
-
-    // Taking again returns null (already consumed)
-    const takenAgain = (client as any).takeWarmedBridge('/tmp/workspace', 'conv-2', 'model-2', 'req-2')
-    expect(takenAgain).toBeNull()
+    expect(mockDispose).toHaveBeenCalledTimes(1)
+    expect((client as any).warmedBridge).toBeUndefined()
   })
 
-  it('clears warmed bridge when workspace changes', async () => {
+  it('re-warms independently after a workspace change', async () => {
     const mockDispose = vi.fn()
     const mockBridge = { dispose: mockDispose, env: {}, mcpConfig: '{}' }
     const createBridge = vi.fn().mockResolvedValue(mockBridge)
@@ -542,19 +531,22 @@ describe('CursorClient bridge warming', () => {
 
     // Warm for workspace-a
     await client.warmBridge()
-    expect((client as any).warmedBridge?.workdir).toBe('/tmp/workspace-a')
+    expect(createBridge).toHaveBeenNthCalledWith(1, {
+      conversationId: null,
+      modelId: 'warmup',
+      requestId: null
+    })
 
     // Change workspace and warm again
     currentWorkspace = '/tmp/workspace-b'
     await client.warmBridge()
 
-    // Old bridge should be disposed, new one created for workspace-b
-    expect(mockDispose).toHaveBeenCalled()
+    // Each warmup session is disposed immediately.
+    expect(mockDispose).toHaveBeenCalledTimes(2)
     expect(createBridge).toHaveBeenCalledTimes(2)
-    expect((client as any).warmedBridge?.workdir).toBe('/tmp/workspace-b')
   })
 
-  it('clears warmed bridge on explicit call', async () => {
+  it('clearWarmedBridge is a safe no-op when no session is retained', async () => {
     const mockDispose = vi.fn()
     const mockBridge = { dispose: mockDispose, env: {}, mcpConfig: '{}' }
     const createBridge = vi.fn().mockResolvedValue(mockBridge)
@@ -567,11 +559,9 @@ describe('CursorClient bridge warming', () => {
     )
 
     await client.warmBridge()
-    expect((client as any).warmedBridge).not.toBeNull()
-
     client.clearWarmedBridge()
-    expect(mockDispose).toHaveBeenCalled()
-    expect((client as any).warmedBridge).toBeNull()
+    expect(mockDispose).toHaveBeenCalledTimes(1)
+    expect((client as any).warmedBridge).toBeUndefined()
   })
 
   it('does not warm if createBridgeSession is not provided', async () => {
@@ -583,7 +573,7 @@ describe('CursorClient bridge warming', () => {
     )
 
     await client.warmBridge()
-    expect((client as any).warmedBridge).toBeNull()
+    expect((client as any).warmedBridge).toBeUndefined()
   })
 })
 

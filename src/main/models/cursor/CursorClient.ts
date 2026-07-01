@@ -78,12 +78,6 @@ export class CursorClient {
   private readonly activeProcesses = new Map<string, import('node:child_process').ChildProcess>()
   private readonly pausedRequests = new Set<string>()
   private readonly resumeResolvers = new Map<string, () => void>()
-  /** Pre-warmed bridge session for imminent browser-enabled turns */
-  private warmedBridge: {
-    bridge: Awaited<ReturnType<CreateCursorBridgeSession>>
-    workdir: string
-    createdAt: number
-  } | null = null
 
   constructor(
     private readonly emit: (e: ChatStreamEvent) => void,
@@ -148,60 +142,24 @@ export class CursorClient {
   }
 
   /**
-   * Pre-warm the MCP bridge session for an imminent browser-enabled turn.
-   * This moves the ~50-150ms bridge setup cost off the critical path.
-   * The warmed bridge is valid for the current workspace directory.
+   * Pre-warm the MCP bridge server for an imminent browser-enabled turn.
+   * We intentionally dispose the warmup session immediately so later turns
+   * always bind browser tool calls to the user's selected model.
    */
   async warmBridge(): Promise<void> {
     if (!this.createBridgeSession) return
-    const workdir = this.getWorkspaceRoot() ?? process.cwd()
-
-    // Dispose any stale warmed bridge from a different workspace
-    if (this.warmedBridge && this.warmedBridge.workdir !== workdir) {
-      this.warmedBridge.bridge.dispose()
-      this.warmedBridge = null
-    }
-
-    // Skip if already warmed for this workspace
-    if (this.warmedBridge) return
-
     const bridge = await this.createBridgeSession({
       conversationId: null,
       modelId: 'warmup',
       requestId: null
     })
-
-    this.warmedBridge = { bridge, workdir, createdAt: Date.now() }
-    cursorDebug(`bridge warmed for ${workdir}`)
+    bridge.dispose()
+    cursorDebug(`bridge server warmed for ${this.getWorkspaceRoot() ?? process.cwd()}`)
   }
 
   /** Clear the warmed bridge, disposing if present. */
   clearWarmedBridge(): void {
-    if (this.warmedBridge) {
-      this.warmedBridge.bridge.dispose()
-      this.warmedBridge = null
-      cursorDebug('bridge warm cleared')
-    }
-  }
-
-  private takeWarmedBridge(
-    workdir: string,
-    conversationId: string | null,
-    modelId: string,
-    requestId: string | null
-  ): Awaited<ReturnType<CreateCursorBridgeSession>> | null {
-    if (!this.warmedBridge) return null
-    const { bridge, workdir: warmedWorkdir } = this.warmedBridge
-
-    // Can only reuse if workspace matches
-    if (warmedWorkdir !== workdir) {
-      this.clearWarmedBridge()
-      return null
-    }
-
-    this.warmedBridge = null
-    cursorDebug(`bridge reused warmed session for ${workdir}`)
-    return bridge
+    cursorDebug('bridge warm cleared')
   }
 
   private async computeStatus(): Promise<CursorStatus> {
@@ -310,19 +268,13 @@ export class CursorClient {
     // Use pre-warmed bridge if available and valid, otherwise create fresh
     let bridge: Awaited<ReturnType<CreateCursorBridgeSession>> | null = null
     if (needsMcpBridge) {
-      const warmed = this.takeWarmedBridge(workdir, args.conversationId, args.modelId, args.requestId)
-      if (warmed) {
-        bridge = warmed
-        cursorDebug(`bridge reused warmed +${Date.now() - turnStart}ms`)
-      } else {
-        bridge = await this.createBridgeSession!({
-          conversationId: args.conversationId,
-          modelId: args.modelId,
-          requestId: args.requestId,
-          allowedToolNames: args.allowedToolNames
-        })
-        cursorDebug(`bridge created fresh +${Date.now() - turnStart}ms`)
-      }
+      bridge = await this.createBridgeSession!({
+        conversationId: args.conversationId,
+        modelId: args.modelId,
+        requestId: args.requestId,
+        allowedToolNames: args.allowedToolNames
+      })
+      cursorDebug(`bridge created fresh +${Date.now() - turnStart}ms`)
     }
 
     const buildUserBody = (resumeId: string | null, userText: string): string => {

@@ -91,18 +91,6 @@ const MAX_OUTPUT_TOKENS = 32_000
 const ANTHROPIC_MAX_TOKENS = MAX_OUTPUT_TOKENS
 const DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS = 4_096
 const CURSOR_POST_ACTION_MAX_ATTEMPTS = 2
-const EMBEDDED_BROWSER_LLM_MODEL_ORDER = [
-  'gemini-3.5-flash',
-  'gemini-2.5-flash',
-  'gemini-3.1-flash-lite',
-  'openai-gpt-4o-mini',
-  'openai-gpt-4-1-mini',
-  'openai-gpt-5.4-mini',
-  'grok-build-0.1',
-  'claude-haiku-4-5',
-  'claude-sonnet-4-6'
-] as const
-
 const TOOL_ROUTER_MODEL_ORDER = [
   'gemini-2.5-flash-lite',
   'gemini-3.1-flash-lite',
@@ -526,7 +514,7 @@ export class ChatService {
               requestId: args.requestId,
               allowedToolNames: args.allowedToolNames,
               browserLlm: (system, user, options) =>
-                this.embeddedBrowserLlm(system, user, {
+                this.complete(args.modelId, system, user, {
                   ...options,
                   conversationId: null
                 })
@@ -556,7 +544,7 @@ export class ChatService {
               requestId: args.requestId,
               allowedToolNames: args.allowedToolNames,
               browserLlm: (system, user, options) =>
-                this.embeddedBrowserLlm(system, user, {
+                this.complete(args.modelId, system, user, {
                   ...options,
                   conversationId: null
                 })
@@ -1160,28 +1148,6 @@ export class ChatService {
           conversationId: options?.conversationId ?? conversationId
         })
     }
-  }
-
-  private embeddedBrowserLlm(
-    system: string,
-    user: string,
-    options?: LlmCompleteOptions
-  ): Promise<string> {
-    const model = this.preferredEmbeddedBrowserModel()
-    return this.complete(model.id, system, user, options)
-  }
-
-  private preferredEmbeddedBrowserModel(): ModelOption {
-    const keyStatus = this.keys.status()
-    for (const modelId of EMBEDDED_BROWSER_LLM_MODEL_ORDER) {
-      const model = this.model(modelId)
-      if (!model) continue
-      if (model.provider === 'anthropic' && keyStatus.anthropic) return model
-      if (model.provider === 'google' && keyStatus.google) return model
-      if (model.provider === 'openai' && keyStatus.openai) return model
-      if (model.provider === 'grok' && keyStatus.grok) return model
-    }
-    throw new Error('No API-backed browser helper model is available for embedded MCP tool work')
   }
 
   private toolRouterLlm(

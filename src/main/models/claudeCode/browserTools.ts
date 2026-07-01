@@ -149,9 +149,9 @@ function buildEmbeddedBrowserInstructions(args: {
 
   if (allowed.has('act')) {
     lines.push(
-      'act is the primary action verb (click | type | key | select) and returns a fresh `after` object with ' +
-      '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding ' +
-      'the next step instead of immediately re-reading the page.'
+      '`act` is a companion action tool (click | type | key | select), not the orientation tool. Use `navigate`, `grep_page`, or `read_a11y` first to identify the target, then use `act`. ' +
+      'Its `type` mode inserts the provided text in one shot, not letter-by-letter, and it returns a fresh `after` object with ' +
+      '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding the next step instead of immediately re-reading the page.'
     )
   }
 

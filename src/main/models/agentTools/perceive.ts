@@ -60,7 +60,7 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
       'interactive controls, with stable refs (@a1, @a2, …) and live coordinates ' +
       'when available. Use read_page first for orientation; reach for read_a11y when you need ' +
       'control discovery on refactored or component-heavy UIs where CSS selectors churn. Returned ' +
-      '@a1-style refs can be passed directly to act (the primary action verb). Still use ' +
+      '@a1-style refs can be passed directly to act after you have oriented to the right control. Still use ' +
       'grep_page for exact text passages.',
     parameters: {
       type: 'object',

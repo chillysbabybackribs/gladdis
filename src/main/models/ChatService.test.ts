@@ -41,7 +41,7 @@ import { streamGooglePlain } from './providers/google'
 import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
 import { shouldAttachActivePageContext, shouldContinueActivePageContext, shouldUseBrowserTools } from '../../../shared/types'
 import { shouldUseWorkspaceContext } from '../../../shared/types'
-import { AGENT_TOOLS, selectAgentToolProfile, resolveTurnTools } from './agentTools'
+import { AGENT_TOOLS } from './agentTools'
 import { BrowserTools } from './browserTools'
 import { CODEX_BROWSER_INSTRUCTIONS, CODEX_BROWSER_TOOL_NAMES } from './codex/dynamicBrowserTools'
 import { createLoopStateEmitter } from './loopStateEmitter'
@@ -120,221 +120,84 @@ function makeSupervisorHarness(req: {
 }
 
 describe('ChatService provider hardening', () => {
-  it('exposes a single unified search tool plus fetch_page', () => {
+  it('exposes the reduced primitive tool surface', () => {
     const toolNames = AGENT_TOOLS.map((tool) => tool.name)
     expect(toolNames).toEqual(
       expect.arrayContaining([
-        'repo_overview',
-        'search_repo',
-        'repo_grep_task',
-        'read_spans',
-        'research_dossier',
-        'verify_change',
         'search',
         'navigate',
-        'fetch_page'
+        'grep_page',
+        'read_a11y',
+        'watch_network',
+        'grep_click',
+        'grep_type',
+        'execute_in_browser',
+        'cdp_command',
+        'read_file',
+        'write_file',
+        'edit_file',
+        'list_dir',
+        'search_files',
+        'run_command'
       ])
     )
-    expect(toolNames).not.toContain('background_web_search')
-    expect(toolNames).not.toContain('search_task')
-    expect(toolNames).not.toContain('search_web')
-    expect(toolNames).not.toContain('check_page')
+    // read_page (orientation) restored; act is the fused action verb.
+    expect(toolNames).toContain('read_page')
+    expect(toolNames).toContain('act')
+    // Workflow + variant tools collapsed away in the surface reduction.
+    expect(toolNames).not.toContain('repo_overview')
+    expect(toolNames).not.toContain('search_repo')
+    expect(toolNames).not.toContain('fetch_page')
+    expect(toolNames).not.toContain('search_open')
+    expect(toolNames).not.toContain('deep_search')
+    // Legacy split action verbs superseded by act.
+    expect(toolNames).not.toContain('click_xy')
+    expect(toolNames).not.toContain('type_text')
+    expect(toolNames).not.toContain('press_key')
   })
 
   it('gives all three providers ONE browser surface (Codex sees the same tools)', () => {
-    expect(CODEX_BROWSER_TOOL_NAMES.has('repo_overview')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('search_repo')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('repo_grep_task')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('read_spans')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('research_dossier')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('verify_change')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('search')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('navigate')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('fetch_page')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('read_page')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('grep_page')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('watch_network')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('read_a11y')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('act')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_click')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_type')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('click_xy')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('type_text')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('press_key')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('execute_in_browser')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('cdp_command')).toBe(true)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('background_web_search')).toBe(false)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('search_task')).toBe(false)
-    expect(CODEX_BROWSER_TOOL_NAMES.has('check_page')).toBe(false)
+    // Removed in the surface reduction.
+    expect(CODEX_BROWSER_TOOL_NAMES.has('repo_overview')).toBe(false)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('verify_change')).toBe(false)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('fetch_page')).toBe(false)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('click_xy')).toBe(false)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('type_text')).toBe(false)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('press_key')).toBe(false)
   })
 
-  it('upgrades the toolless conversation baseline to filesystem when a workspace folder is open', () => {
-    // No folder: a non-actionable prompt stays lean conversation.
-    const noFolder = selectAgentToolProfile('make the settings copy sound more official')
-    expect(noFolder.name).toBe('conversation')
-    expect(noFolder.tools.map((tool) => tool.name)).not.toContain('read_file')
-
-    // Folder open: the same prompt now starts with file/coding tools present,
-    // so the model never has to request_tools("filesystem") before acting.
-    const withFolder = selectAgentToolProfile('make the settings copy sound more official', {
-      hasWorkspaceFolder: true
-    })
-    expect(withFolder.name).toBe('filesystem')
-    expect(withFolder.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(['read_file', 'edit_file', 'search_files', 'run_command'])
+  it('offers the full flat tool surface every turn (profiles + request_tools retired)', () => {
+    // C8: there is no lean/conversation/browser/filesystem profile and no
+    // request_tools escalation — every turn gets all of AGENT_TOOLS.
+    const names = AGENT_TOOLS.map((tool) => tool.name)
+    // The full surface spans every domain in one list.
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'search', 'read_page', 'read_a11y', 'grep_page', 'watch_network',
+        'act', 'navigate', 'execute_in_browser', 'cdp_command',
+        'read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_command',
+        'recall_history', 'memory_write'
+      ])
     )
-
-    // Explicit browser intent still wins even with a folder open (request_tools
-    // bridges to filesystem if that turn also needs it).
-    const browserWithFolder = selectAgentToolProfile('click the login button on the active page', {
-      hasWorkspaceFolder: true
-    })
-    expect(browserWithFolder.name).toBe('browser')
-  })
-
-  it('selects lean tool profiles for obvious filesystem and browser tasks', () => {
-    const fsProfile = selectAgentToolProfile('read src/main/models/ChatService.ts and suggest fixes')
-    expect(fsProfile.name).toBe('filesystem')
-    expect(fsProfile.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(['read_file', 'search_files', 'run_validation', 'recall_history'])
-    )
-    expect(fsProfile.tools.map((tool) => tool.name)).not.toContain('read_page')
-
-    const browserProfile = selectAgentToolProfile('click the login button on the active page')
-    expect(browserProfile.name).toBe('browser')
-    expect(browserProfile.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(['read_page', 'read_a11y', 'click_xy'])
-    )
-    expect(browserProfile.tools.map((tool) => tool.name)).not.toContain('write_file')
-
-    const mixedProfile = selectAgentToolProfile('edit the app UI and validate it with a browser screenshot')
-    expect(mixedProfile.name).toBe('filesystem')
-    expect(mixedProfile.tools.map((tool) => tool.name)).toContain('run_validation')
-
-    const localPageProfile = selectAgentToolProfile('create a login form page in src/renderer')
-    expect(localPageProfile.name).toBe('filesystem')
-    expect(localPageProfile.tools.map((tool) => tool.name)).not.toContain('read_page')
-
-    const localDocsProfile = selectAgentToolProfile('explain the docs architecture in this repo')
-    expect(localDocsProfile.name).toBe('filesystem')
-    expect(localDocsProfile.tools.map((tool) => tool.name)).not.toContain('search')
-
-    const officialStyleProfile = selectAgentToolProfile('make the settings copy sound more official')
-    expect(officialStyleProfile.name).toBe('conversation')
-
-    const officialDocsProfile = selectAgentToolProfile('look up the official xAI docs for Grok 4.3')
-    expect(officialDocsProfile.name).toBe('research')
-    expect(officialDocsProfile.tools.map((tool) => tool.name)).toContain('search')
-
-    const conversationProfile = selectAgentToolProfile('tell me a joke')
-    expect(conversationProfile.name).toBe('conversation')
-    // Lean profile carries recall_history, memory tools, plus the request_tools escape hatch, so
-    // the model can always pull in tools instead of stalling when it needs to act.
-    expect(conversationProfile.tools.map((tool) => tool.name)).toEqual([
-      'recall_history',
-      'memory_write',
-      'memory_read',
-      'memory_list',
-      'memory_forget',
-      'memory_create_task',
-      'request_tools'
-    ])
-  })
-
-  it('lets a lean turn escalate into filesystem tools via request_tools', async () => {
-    // The exact dead-stop from the trace: a turn lands in the conversation profile
-    // (1 real tool), the model needs to inspect/install in the project. It must be
-    // able to pull in filesystem tools mid-turn instead of narrating and stopping.
-    const lean = selectAgentToolProfile('what performance packages should we consider installing')
-    expect(lean.tools.map((t) => t.name)).toContain('request_tools')
-    expect(lean.tools.map((t) => t.name)).not.toContain('run_command')
-
-    // Drive the REAL dispatcher: request the filesystem group.
+    // request_tools no longer exists as a tool.
+    expect(names).not.toContain('request_tools')
+    // Calling it is now an unknown tool, not an escalation path.
     const bt = new BrowserTools({} as any, {} as any, {} as any)
-    const granted = new Set<string>()
-    const res = await bt.run('request_tools', { group: 'filesystem' }, { tabId: 'tab-1', grantedTools: granted } as any)
-    expect(res.ok).toBe(true)
-    expect(granted.has('run_command')).toBe(true)
-    expect(granted.has('read_file')).toBe(true)
-    expect(granted.has('repo_overview')).toBe(true)
-    expect(granted.has('search_repo')).toBe(true)
-    expect(granted.has('repo_grep_task')).toBe(true)
-    expect(granted.has('read_spans')).toBe(true)
-    expect(granted.has('research_dossier')).toBe(true)
-    expect(granted.has('verify_change')).toBe(true)
-
-    // After the grant, resolveTurnTools surfaces the filesystem tools for the next step.
-    const next = resolveTurnTools(lean.tools, granted).map((t) => t.name)
-    expect(next).toContain('repo_overview')
-    expect(next).toContain('search_repo')
-    expect(next).toContain('repo_grep_task')
-    expect(next).toContain('read_spans')
-    expect(next).toContain('research_dossier')
-    expect(next).toContain('verify_change')
-    expect(next).toContain('run_command')
-    expect(next).toContain('edit_file')
-
-    const toolOnlyGranted = new Set<string>()
-    const exact = await bt.run('request_tools', { tools: ['read_file', 'edit_file'] }, { tabId: 'tab-1', grantedTools: toolOnlyGranted } as any)
-    expect(exact.ok).toBe(true)
-    expect(toolOnlyGranted.has('read_file')).toBe(true)
-    expect(toolOnlyGranted.has('edit_file')).toBe(true)
-    expect(toolOnlyGranted.has('run_command')).toBe(false)
-    const nextExact = resolveTurnTools(lean.tools, toolOnlyGranted).map((t) => t.name)
-    expect(nextExact).toContain('read_file')
-    expect(nextExact).toContain('edit_file')
-    expect(nextExact).not.toContain('run_command')
-
-    const normalizedAlias = new Set<string>()
-    const alias = await bt.run(
-      'request_tools',
-      { group: 'fs', tools: ['Read File', 'RUN-COMMAND'] },
-      { tabId: 'tab-1', grantedTools: normalizedAlias } as any
-    )
-    expect(alias.ok).toBe(true)
-    expect(normalizedAlias.has('read_file')).toBe(true)
-    expect(normalizedAlias.has('run_command')).toBe(true)
-
-    const normalizedStringArgs = new Set<string>()
-    const aliasFromString = await bt.run(
-      'request_tools',
-      {
-        group: 'file_system, web search',
-        tools: 'read_file, RUN-COMMAND'
-      },
-      { tabId: 'tab-1', grantedTools: normalizedStringArgs } as any
-    )
-    expect(aliasFromString.ok).toBe(true)
-    expect(normalizedStringArgs.has('run_command')).toBe(true)
-    expect(normalizedStringArgs.has('read_file')).toBe(true)
-    expect(normalizedStringArgs.has('search')).toBe(true)
-    expect(normalizedStringArgs.has('fetch_page')).toBe(true)
-    expect(normalizedStringArgs.has('deep_search')).toBe(true)
-
-    // An unknown group is rejected, not silently granted.
-    const bad = await bt.run('request_tools', { group: 'nonsense' }, { tabId: 'tab-1', grantedTools: new Set() } as any)
-    expect(bad.ok).toBe(false)
-    const badTools = await bt.run('request_tools', { tools: ['non_existent_tool'] }, { tabId: 'tab-1', grantedTools: new Set() } as any)
-    expect(badTools.ok).toBe(false)
-  })
-
-  it('wires repo_grep_task into the capability broker handed to BrowserTools', async () => {
-    const workspaceRoot = '/home/dp/Desktop/myworkspace/Gladdis'
-    const { tools } = makeService(workspaceRoot)
-    expect(tools.setCapabilityBroker).toHaveBeenCalledTimes(1)
-    const broker = tools.setCapabilityBroker.mock.calls[0]?.[0]
-    expect(broker).toBeTruthy()
-
-    const result = await broker.repoGrepTask(
-      {
-        requestId: 'req-1',
-        taskId: 'task-1'
-      },
-      {
-        workspaceRoot,
-        task: 'Find where browser tabs are created and managed'
-      }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.summary).toContain('Find where browser tabs are created and managed')
+    return bt.run('request_tools', { group: 'filesystem' }, { tabId: 'tab-1' } as any).then((res) => {
+      expect(res.ok).toBe(false)
+      expect(res.text).toContain('Unknown tool')
+    })
   })
 
   it('describes recall_history as context recovery, not automatic continuation', () => {
@@ -349,17 +212,17 @@ describe('ChatService provider hardening', () => {
     expect(shouldUseWorkspaceContext('search the web for xAI docs')).toBe(false)
     expect(shouldUseWorkspaceContext('look up the official React docs')).toBe(false)
     expect(shouldUseWorkspaceContext('what is a folder in programming?')).toBe(false)
-    expect(selectAgentToolProfile('what is a folder in programming?').name).toBe('conversation')
 
     expect(shouldUseWorkspaceContext('edit the app UI and run typecheck')).toBe(true)
     expect(shouldUseWorkspaceContext('explain the docs architecture in this repo')).toBe(true)
     expect(shouldUseWorkspaceContext('read src/main/models/ChatService.ts')).toBe(true)
   })
 
-  it('routes install/update requests to a filesystem profile so run_command is offered', () => {
+  it('routes install/update requests to a workspace turn', () => {
     // Regression: install/update vocabulary was absent from the routing
-    // predicates, so the model was handed the browser profile (no run_command)
-    // and could only talk about installing — never actually run it.
+    // predicates, so these turns were misclassified as non-workspace. They must
+    // route to a workspace turn (run_command is always available on the flat
+    // surface; the routing signal is what matters now).
     const installs = [
       'install the foobar package',
       'update typescript',
@@ -376,14 +239,12 @@ describe('ChatService provider hardening', () => {
     ]
     for (const text of installs) {
       expect(shouldUseWorkspaceContext(text), text).toBe(true)
-      const tools = selectAgentToolProfile(text).tools.map((t) => t.name)
-      expect(tools, text).toContain('run_command')
     }
   })
 
   it('does not let install/update wording hijack web or conversational turns', () => {
     // The install short-circuit must stay narrow: plain-English "update"/"set up"
-    // phrasings about news/web content must not be pulled into a filesystem turn.
+    // phrasings about news/web content must not be pulled into a workspace turn.
     const notInstalls = [
       'update me on the news',
       'look up the latest React news',
@@ -394,8 +255,6 @@ describe('ChatService provider hardening', () => {
     ]
     for (const text of notInstalls) {
       expect(shouldUseWorkspaceContext(text), text).toBe(false)
-      const tools = selectAgentToolProfile(text).tools.map((t) => t.name)
-      expect(tools, text).not.toContain('run_command')
     }
   })
 
@@ -442,27 +301,6 @@ describe('ChatService provider hardening', () => {
       type: 'error',
       message: 'Unknown model missing-model'
     })
-  })
-
-  it('forwards broker-driven loop phase changes through ChatService event emission', async () => {
-    const { tools, emit } = makeService('/tmp/selected-project')
-    const broker = tools.setCapabilityBroker.mock.calls[0][0]
-
-    await broker.repoOverview(
-      { requestId: 'req-loop', assistantMessageId: 'assistant-loop', taskId: 'task-loop', iteration: 4 },
-      { workspaceRoot: '/tmp/selected-project', focus: 'chat service' }
-    )
-
-    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
-      requestId: 'req-loop',
-      assistantMessageId: 'assistant-loop',
-      type: 'loop_state',
-      taskId: 'task-loop',
-      event: 'phase_changed',
-      phase: 'inspect',
-      iteration: 4,
-      summary: 'Gathering repository overview.'
-    }))
   })
 
   it('emits supervisor-owned iteration lifecycle events', () => {
@@ -794,31 +632,30 @@ describe('ChatService provider hardening', () => {
     }))
   })
 
-  it('only includes prompt guidance for the tools exposed to that turn', async () => {
-    const conversationSystem = await buildAgentSystem(selectAgentToolProfile('tell me a joke').tools)
-    expect(conversationSystem).toContain('- recall_history:')
-    expect(conversationSystem).toContain('Resume process:')
-    expect(conversationSystem).toContain('A bare resume request such as "pick up where we were"')
-    expect(conversationSystem).toContain('not permission to edit files')
-    expect(conversationSystem).toContain('look for opened doors')
-    expect(conversationSystem).toContain('After each state-changing action, re-read the affected source or UI')
-    expect(conversationSystem).not.toContain('[NEED_MORE_CONTEXT]')
-    expect(conversationSystem).not.toContain('## Browser tools')
-    expect(conversationSystem).not.toContain('## Filesystem')
-    expect(conversationSystem).not.toContain('Always call read_page FIRST')
-    expect(conversationSystem).not.toContain('search_files first')
+  it('includes guidance for every domain of the flat surface', async () => {
+    // C8: every turn gets the full surface, so its system prompt carries all the
+    // domain guidance blocks (browser, filesystem, shell, memory) at once.
+    const system = await buildAgentSystem(AGENT_TOOLS)
 
-    const filesystemSystem = await buildAgentSystem(
-      selectAgentToolProfile('read src/main/models/ChatService.ts').tools
-    )
-    expect(filesystemSystem).toContain('## Filesystem')
-    expect(filesystemSystem).toContain('## Validation')
-    expect(filesystemSystem).toContain('run_validation')
-    expect(filesystemSystem).toContain('- run_validation:')
-    expect(filesystemSystem).toContain('Choose the shortest trustworthy path')
-    expect(filesystemSystem).toContain('use a neighboring capability already available')
-    expect(filesystemSystem).not.toContain('## Browser tools')
-    expect(filesystemSystem).not.toContain('- read_page:')
+    // Always-on base guidance.
+    expect(system).toContain('- recall_history:')
+    expect(system).toContain('Resume process:')
+    expect(system).toContain('A bare resume request such as "pick up where we were"')
+    expect(system).toContain('not permission to edit files')
+    expect(system).toContain('look for opened doors')
+    expect(system).toContain('After each state-changing action, re-read the affected source or UI')
+    expect(system).not.toContain('[NEED_MORE_CONTEXT]')
+
+    // Every domain block is present because every domain's tools are present.
+    expect(system).toContain('## Browser')
+    expect(system).toContain('## Filesystem')
+    expect(system).toContain('## Shell')
+    expect(system).toContain('- run_command:')
+    expect(system).toContain('Choose the shortest trustworthy path')
+    expect(system).toContain('use a neighboring capability already available')
+
+    // request_tools guidance is gone.
+    expect(system).not.toContain('request_tools')
   })
 
   it.skip('keeps Codex resume memory pull-only instead of injecting a previous-chat overview', async () => {
@@ -917,6 +754,9 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('Do not launch a second Gladdis/dev')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('playwright (screenshot/open/codegen/test/show-report)')
     expect(CODEX_BROWSER_INSTRUCTIONS).toContain('localhost:9222 DevTools')
+    expect(CODEX_BROWSER_INSTRUCTIONS).not.toContain('repo_overview')
+    expect(CODEX_BROWSER_INSTRUCTIONS).not.toContain('search_repo')
+    expect(CODEX_BROWSER_INSTRUCTIONS).toContain('native shell and file tools')
   })
 
   it('does not attach or read the active page for ordinary chat', async () => {
@@ -1493,6 +1333,38 @@ describe('ChatService provider hardening', () => {
       'sys',
       'user',
       expect.objectContaining({ stage: 'pipeline:final', conversationId: 'explicit-conv' })
+    )
+  })
+
+  it('binds bridge-backed browser tool calls to the selected model instead of a helper model', async () => {
+    const { service } = makeService('/tmp/workspace')
+    const complete = vi.spyOn(service as any, 'complete').mockResolvedValue('ok')
+    const registerSession = vi.fn(async () => ({ dispose: vi.fn(), env: {}, mcpConfig: '{}' }))
+    ;(service as any).claudeCodeBridgeServer = { registerSession }
+
+    const client = (service as any).cursor()
+    const createBridgeSession = (client as any).createBridgeSession as Function
+
+    await createBridgeSession({
+      conversationId: 'conv-1',
+      modelId: 'openai-gpt-5.5',
+      requestId: 'req-1',
+      allowedToolNames: new Set(['navigate'])
+    })
+
+    expect(registerSession).toHaveBeenCalledOnce()
+    const firstRegisterCall = registerSession.mock.calls[0] as unknown as [any] | undefined
+    expect(firstRegisterCall).toBeDefined()
+    const session = firstRegisterCall?.[0] as { browserLlm: (system: string, user: string, options?: unknown) => Promise<unknown> } | undefined
+    expect(session).toBeDefined()
+
+    await session!.browserLlm('sys', 'user', { stage: 'pipeline:planner' })
+
+    expect(complete).toHaveBeenCalledWith(
+      'openai-gpt-5.5',
+      'sys',
+      'user',
+      expect.objectContaining({ stage: 'pipeline:planner', conversationId: null })
     )
   })
 

@@ -69,7 +69,7 @@ const BROWSER_OVERVIEW =
   'WITHOUT changing the visible tab. Pass navigate_visible: true (or rely on the auto-trigger when ' +
   'the user explicitly asked to "open / visit / navigate to" a result) to also load the best hit.\n' +
   '  • navigate → load a known URL in the visible tab. The result already includes a clustered page ' +
-  'map with @refs, so on most pages you can act() next without a separate read.\n\n' +
+  'map in document order, so on many pages you can decide the next step without a separate read.\n\n' +
   'For targeting on a page that is already loaded, use grep_page (distinctive multi-word phrases, ' +
   'not single common words) or read_a11y (control discovery via @aN refs), then act. After an act, ' +
   'use the returned `after` field instead of re-reading. Prefer finishing the user goal over literal ' +
@@ -82,7 +82,7 @@ const BROWSER_INTERACTION_GUIDANCE =
   'Orient (re-use what is already in the result; do not re-read for free):\n' +
   '  • navigate → the result IS the orientation. It returns the effective URL after any redirect, ' +
   'readyState, a page-text size hint, AND a clustered MAP of the page\'s primary handles ' +
-  '(search box, nav, main actions) with @refs you can pass straight to act. Only call read_page / ' +
+  '(search box, nav, main actions) in document order. It is for orientation, not stable act refs. Only call read_page / ' +
   'read_a11y after navigate if the map is genuinely not enough.\n' +
   '  • read_page → bounded structural digest (summary + ACTIONS table). Use only when you DID NOT just ' +
   'navigate. It is orientation, not targeting.\n' +
@@ -114,10 +114,10 @@ const BROWSER_INTERACTION_GUIDANCE =
   '  • Before leaving a page you may need later, preserve it now: save the page or extract the exact records you will compare against.\n' +
   '  • For each subtask, identify the evidence shape you need: one fact, one control, repeated flat records, hierarchical records, or API-backed data.\n' +
   '  • After each meaningful read/action, grade the result: right entity, right structure, enough coverage. If not, recalibrate the same tool once before switching surfaces.\n\n' +
-  'Act — one primary verb:\n' +
-  '  • act → click | type | key | select. Target by (preferred) a read_a11y @ref, or a `query` ' +
+  'Act — companion interaction layer, after orientation/targeting:\n' +
+  '  • act → click | type | key | select. Use it after navigate/grep_page/read_a11y have identified the right control. Target by (preferred) a read_a11y @ref, or a `query` ' +
   '(text / CSS / XPath resolved live), or explicit coords {x,y}. For type pass `text`; for key pass `key` ' +
-  '(Enter / Tab / Escape / Arrow*) with no target; for select pass `option`. To load a URL use navigate() — ' +
+  '(Enter / Tab / Escape / Arrow*) with no target; for select pass `option`. `type` inserts the provided text in one shot rather than manually keying each letter. To load a URL use navigate() — ' +
   'never pass a URL as an act query (act targets on-page elements, not link addresses).\n' +
   '  • READ the act result before the next move — IT IS THE POST-ACTION READ. The text channel ends ' +
   'with " Now at {url} — {title} ({readyState}) focus={...}". The structured `after` object has ' +

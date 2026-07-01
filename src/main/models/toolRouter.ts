@@ -30,7 +30,7 @@ export interface RouteAgentToolsArgs {
   llm?: LlmComplete
 }
 
-const BROWSER_ESSENTIAL = ['search', 'navigate', 'grep_page', 'act'] as const
+const BROWSER_ESSENTIAL = ['search', 'navigate', 'grep_page'] as const
 const BROWSER_ADVANCED = [
   'read_page',
   'read_a11y',

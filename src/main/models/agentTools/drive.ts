@@ -2,19 +2,23 @@ import type { ToolDef } from '../browserTools'
 
 /**
  * DRIVE tools — browser actions.
- * `act` is the primary fused action verb (find target + act + return fresh
- * state in one call). Use execute_in_browser / cdp_command only when a direct
- * act is not suitable. grep_click / grep_type remain as the legacy split verbs.
+ * `act` is the companion action verb (resolve a target + act + return fresh
+ * state in one call). It works best after navigate/grep_page/read_a11y have
+ * already oriented the model to the right control. Use execute_in_browser /
+ * cdp_command only when a direct act is not suitable. grep_click / grep_type
+ * remain as the legacy split verbs.
  */
 export const DRIVE_TOOLS: ToolDef[] = [
   {
     name: 'act',
     description:
       'Do one browser action on the visible tab AND get the page\'s fresh state back ' +
-      'in the same call — no separate read needed afterwards. ' +
+      'in the same call — no separate read needed afterwards. Use it as a companion ' +
+      'to navigate/grep_page/read_a11y, not as your first orientation tool. ' +
       'kind: "click" | "type" | "key" | "select". ' +
       'Target an element by (preferred) a read_a11y @ref, or a `query` (text/CSS/XPath ' +
       'resolved live on the page), or explicit `coords` {x,y}. For kind "type" pass `text`; ' +
+      'the text is inserted in one shot, not typed letter-by-letter. ' +
       'for "key" pass `key` (Enter, Tab, Escape, Arrow*, …) and no target; for "select" pass ' +
       '`option` (the label or value to choose). ' +
       'Resolution is exact (literal node + literal coordinate), never guessed. If the target ' +

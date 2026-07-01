@@ -22,7 +22,7 @@ describe('ClaudeCodeBridgeServer', () => {
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_write for durable decisions/constraints/identifiers')
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_create_task for task-specific notes')
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Store concise, reusable facts rather than large transcript dumps')
-    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('act is the primary action verb')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('`act` is a companion action tool')
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).not.toContain('fetch_page')
   })
 

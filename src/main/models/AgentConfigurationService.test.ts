@@ -35,11 +35,11 @@ describe('AgentConfigurationService', () => {
       'search',
       'navigate',
       'grep_page',
-      'act',
       'search_files',
       'read_file',
       'edit_file'
     ]))
+    expect(openaiNames).not.toContain('act')
     expect(openaiNames).not.toContain('run_command')
     expect(openaiNames).not.toContain('memory_write')
   })
@@ -92,7 +92,8 @@ describe('AgentConfigurationService', () => {
     const profile = await service.agentToolProfile(req)
     const names = profile.tools.map((tool: { name: string }) => tool.name)
     expect(profile.name).toContain('browser-core')
-    expect(names).toEqual(expect.arrayContaining(['search', 'navigate', 'grep_page', 'act']))
+    expect(names).toEqual(expect.arrayContaining(['search', 'navigate', 'grep_page']))
+    expect(names).not.toContain('act')
   })
 
   it('attaches the workspace block when a folder is selected', () => {

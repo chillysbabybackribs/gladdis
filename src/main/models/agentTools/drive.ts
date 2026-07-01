@@ -1,20 +1,117 @@
 import type { ToolDef } from '../browserTools'
 
 /**
- * DRIVE tools — low-level browser actions.
- * Prefer grep_page / grep_click / grep_type for discovery + action.
- * Use click_xy, type_text, press_key, execute_in_browser, and cdp_command only when a direct grep action is not suitable.
- * Return only ack strings; the LLM never sees raw page data from these.
- * Read with `read_page` afterwards when you need page state.
+ * DRIVE tools — browser actions.
+ * `act` is the primary fused action verb (find target + act + return fresh
+ * state in one call). Use execute_in_browser / cdp_command only when a direct
+ * act is not suitable. grep_click / grep_type remain as the legacy split verbs.
  */
 export const DRIVE_TOOLS: ToolDef[] = [
   {
+    name: 'act',
+    description:
+      'Do one browser action on the visible tab AND get the page\'s fresh state back ' +
+      'in the same call — no separate read needed afterwards. ' +
+      'kind: "click" | "type" | "key" | "select". ' +
+      'Target an element by (preferred) a read_a11y @ref, or a `query` (text/CSS/XPath ' +
+      'resolved live on the page), or explicit `coords` {x,y}. For kind "type" pass `text`; ' +
+      'for "key" pass `key` (Enter, Tab, Escape, Arrow*, …) and no target; for "select" pass ' +
+      '`option` (the label or value to choose). ' +
+      'Resolution is exact (literal node + literal coordinate), never guessed. If the target ' +
+      'no longer resolves, the call fails with a re-orient hint instead of clicking the wrong ' +
+      'thing — re-run read_a11y/grep_page and target a fresh @ref from the current tab snapshot. ' +
+      'The returned `after` field reports the new url/title/readyState/focus so you can confirm ' +
+      'the action landed without calling read_page/read_a11y again. When an action navigates to a new ' +
+      'page, `after.navigated` is true and `after.elements` lists the new page\'s top clickable targets ' +
+      'with coordinates — act on those directly instead of re-reading. ' +
+      'To load a URL, use navigate() — do NOT pass a URL as an act query; act targets on-page elements, not links by their address.',
+    parameters: {
+      type: 'object',
+      properties: {
+        kind: {
+          type: 'string',
+          enum: ['click', 'type', 'key', 'select'],
+          description: 'The action to perform.'
+        },
+        ref: { type: 'string', description: 'read_a11y ref like @a1 (preferred target).' },
+        query: {
+          type: 'string',
+          description: 'Text, CSS selector, or XPath to resolve the target live. Used when no ref.'
+        },
+        type: {
+          type: 'string',
+          enum: ['text', 'regex', 'selector'],
+          description: 'How to interpret `query`. Defaults to "text".'
+        },
+        caseSensitive: { type: 'boolean', description: 'Case sensitivity for text/regex query. Default false.' },
+        coords: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          description: 'Explicit viewport coordinates (last-resort target).'
+        },
+        text: { type: 'string', description: 'For kind "type": the text to type into the focused target.' },
+        key: { type: 'string', description: 'For kind "key": the key name, e.g. "Enter".' },
+        option: { type: 'string', description: 'For kind "select": the option label or value to choose.' }
+      },
+      required: ['kind']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string' },
+        text: { type: 'string' },
+        key: { type: 'string' },
+        option: { type: 'string' },
+        coordinates: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y']
+        },
+        match: { type: 'object' },
+        after: {
+          type: 'object',
+          properties: {
+            url: { type: ['string', 'null'] },
+            title: { type: 'string' },
+            readyState: { type: 'string' },
+            bodyTextChars: { type: 'number' },
+            activeElement: { type: ['string', 'null'] },
+            navigated: { type: 'boolean' },
+            elements: {
+              type: 'array',
+              description: 'On navigation, the new page\'s top interactive targets — act on these directly without a re-read.',
+              items: {
+                type: 'object',
+                properties: {
+                  tag: { type: 'string' },
+                  role: { type: ['string', 'null'] },
+                  label: { type: 'string' },
+                  x: { type: 'number' },
+                  y: { type: 'number' }
+                }
+              }
+            },
+            captured: { type: 'boolean' }
+          }
+        }
+      },
+      required: ['kind', 'after']
+    }
+  },
+  {
     name: 'navigate',
     description:
-      'Navigate the active browser tab to a URL and ack on load settle. ' +
-      'The result reports the page text size — use it to size your next grep_page: ' +
-      'a heavy page needs distinctive multi-word queries (expect many hits), a light ' +
-      'page lets you grep broadly. Call read_page afterwards if you need the page content.',
+      'Navigate the active tab to a URL and land ORIENTED — the result is a page brief, ' +
+      'not just an ack. It returns: the effective URL after any redirect (spot a login wall / ' +
+      'regional bounce), the load/readyState, a page-text size hint, a WIREFRAME of the page in ' +
+      'DOCUMENT ORDER (interactive elements top-to-bottom exactly as they appear, each with an ' +
+      'idx and href — the first listed is the first on the page, so "the top X" is the first X; ' +
+      'nothing is ranked, YOU decide what matters), AND it SAVES THE WHOLE CLEANED PAGE TO DISK. ' +
+      'The result gives the file paths (a .md of the readable content and a .actions.json of the ' +
+      'interactive elements) — read or grep those LOCAL files for the full content instead of ' +
+      're-fetching the page. Long runs of repetitive items (timestamps, "N comments") collapse ' +
+      'in place to "[N× role idx a–b]" without breaking order. For exact text on the live page, ' +
+      'grep_page still works; use read_a11y only for control-heavy component UIs.',
     parameters: {
       type: 'object',
       properties: {
@@ -33,70 +130,78 @@ export const DRIVE_TOOLS: ToolDef[] = [
     outputSchema: {
       type: 'object',
       properties: {
-        url: { type: 'string' },
+        url: { type: 'string', description: 'Effective URL after any redirect.' },
+        requestedUrl: { type: 'string' },
+        redirected: { type: 'boolean' },
+        readyState: { type: ['string', 'null'] },
         wait: { type: 'boolean' },
         timeoutMs: { type: 'number' },
-        pageTextChars: { type: ['number', 'null'] }
+        pageTextChars: { type: ['number', 'null'] },
+        savedMarkdownPath: { type: 'string', description: 'Local .md of the cleaned readable page — read/grep it.' },
+        savedActionsPath: { type: 'string', description: 'Local .actions.json of DOM-order interactive elements.' },
+        dataSourceDiscovery: {
+          type: 'object',
+          description: 'When navigation was network-armed, a quick summary of whether the page looks server-rendered, API-backed, or mixed.',
+          properties: {
+            pageUrl: { type: 'string' },
+            capturedAt: { type: 'number' },
+            observedWindowMs: { type: 'number' },
+            totalSeen: { type: 'number' },
+            matchedCount: { type: 'number' },
+            pageMode: { type: 'string' },
+            botProtectionSuspected: { type: 'boolean' },
+            recommendation: { type: 'string' },
+            candidateApis: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  url: { type: 'string' },
+                  method: { type: 'string' },
+                  status: { type: 'number' },
+                  type: { type: 'string' },
+                  mimeType: { type: 'string' },
+                  kind: { type: 'string' },
+                  auth: { type: 'string' },
+                  score: { type: 'number' }
+                }
+              }
+            }
+          }
+        },
+        wireframe: {
+          type: 'object',
+          description: 'Page interactive elements in DOCUMENT ORDER (not ranked). "top" = first line.',
+          properties: {
+            url: { type: 'string' },
+            title: { type: 'string' },
+            totalActions: { type: 'number' },
+            truncated: { type: 'boolean' },
+            headings: {
+              type: 'array',
+              items: { type: 'object', properties: { level: { type: 'number' }, text: { type: 'string' } } }
+            },
+            lines: {
+              type: 'array',
+              description: 'Each line is one element (kind:"action") or a collapsed repetitive run (kind:"group").',
+              items: {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['action', 'group'] },
+                  idx: { type: 'number' },
+                  role: { type: 'string' },
+                  name: { type: 'string' },
+                  href: { type: 'string' },
+                  count: { type: 'number' },
+                  idxStart: { type: 'number' },
+                  idxEnd: { type: 'number' }
+                }
+              }
+            }
+          }
+        }
       },
       required: ['url', 'wait', 'timeoutMs']
-    }
-  },
-  {
-    name: 'click_xy',
-    description:
-      'Trusted mouse click at viewport coordinates (x, y) or a read_a11y @aN ref. ' +
-      'Use x,y from read_page ACTIONS, grep_page coordinates, or pass ref after read_a11y.',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number', description: 'Viewport X. Omit when using ref.' },
-        y: { type: 'number', description: 'Viewport Y. Omit when using ref.' },
-        ref: { type: 'string', description: 'read_a11y ref like @a1. Resolves to live coordinates.' }
-      }
-    },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        x: { type: 'number' },
-        y: { type: 'number' },
-        ref: { type: 'string' },
-        role: { type: 'string' },
-        name: { type: 'string' }
-      },
-      required: ['x', 'y']
-    }
-  },
-  {
-    name: 'type_text',
-    description: 'Type text into the focused element. Click the target first.',
-    parameters: {
-      type: 'object',
-      properties: { text: { type: 'string' } },
-      required: ['text']
-    },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        text: { type: 'string' },
-        charsTyped: { type: 'number' }
-      },
-      required: ['text', 'charsTyped']
-    }
-  },
-  {
-    name: 'press_key',
-    description:
-      'Press a single key: Enter, Tab, Escape, Backspace, Delete, ' +
-      'ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown.',
-    parameters: {
-      type: 'object',
-      properties: { key: { type: 'string', description: 'Key name, e.g. "Enter".' } },
-      required: ['key']
-    },
-    outputSchema: {
-      type: 'object',
-      properties: { key: { type: 'string' } },
-      required: ['key']
     }
   },
   {

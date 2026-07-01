@@ -2,8 +2,12 @@ import type { TabManager } from '../../TabManager'
 import type { ToolOutcome } from '../browserTools'
 import { cap, safeJson } from './toolUtils'
 import { executeGrepInTab, summarizeNetworkCapture } from './perceiveTools'
-import { clampInt } from './toolUtils'
+import { clampInt, sleep } from './toolUtils'
+import { formatDataSourceDiscovery } from '../../network/dataSourceDiscovery'
 import type { AxSnapshotNode } from '../../extract/axTree'
+import type { PageCapture } from '../../../../shared/extraction'
+import type { SavedPage } from '../../extract/pageStore'
+import { buildPageWireframe, formatPageWireframe } from '../../extract/pageWireframe'
 import {
   axNodeCenter,
   axRefTargetError,
@@ -15,10 +19,15 @@ import {
 export interface DriveToolsDeps {
   tabs: TabManager
   resolveAxRef?: (tabId: string, query: string) => AxSnapshotNode | null
+  /** Cleaned DOM-order page extractor (navigate's orientation source). */
+  extractor?: { run: (tabId: string) => Promise<PageCapture> }
+  /** Persist a captured page to disk; returns the saved file paths. */
+  savePage?: (cap: PageCapture, conversationId: string | null | undefined) => Promise<SavedPage>
 }
 
 export interface DriveToolsContext {
   tabId: string
+  conversationId?: string | null
 }
 
 /** CDP key descriptors for the non-printing keys the agent can press. */
@@ -107,20 +116,56 @@ export async function runNavigate(
     await deps.tabs.navigate(ctx.tabId, parsedUrl, { wait: shouldWait, timeoutMs })
   }
 
-  // Free calibration signal for the model's next read: how text-heavy this page
-  // is, measured at settle. Lets it size grep_page queries up-front (large →
-  // distinctive phrases, expect many hits; small → broaden safely) instead of
-  // guessing blind. Best-effort only — a read failure must not fail navigation.
+  // Orientation brief — land the model ready to ACT instead of forcing a wasted
+  // "now tell me what's here" turn. Captures the four things a model needs after
+  // a navigation (effective URL, load status, semantic handles, size) in this
+  // one call. Best-effort: any probe failure must not fail navigation.
+  let effectiveUrl: string | null = null
+  let readyState: string | null = null
   let pageTextChars: number | null = null
   if (shouldWait) {
     try {
       const res = await deps.tabs.executeJavaScript(
         ctx.tabId,
-        'return (document.body && document.body.innerText) ? document.body.innerText.length : 0'
+        'return { u: location.href, r: document.readyState, n: (document.body && document.body.innerText) ? document.body.innerText.length : 0 }'
       )
-      if (res.success && typeof res.result === 'number') pageTextChars = res.result
+      if (res.success && res.result && typeof res.result === 'object') {
+        const r = res.result as { u?: unknown; r?: unknown; n?: unknown }
+        effectiveUrl = typeof r.u === 'string' ? r.u : null
+        readyState = typeof r.r === 'string' ? r.r : null
+        pageTextChars = typeof r.n === 'number' ? r.n : null
+      }
     } catch {
-      pageTextChars = null
+      /* leave nulls */
+    }
+  }
+
+  // Did we land somewhere other than where we asked? (login wall, regional
+  // redirect, canonicalization.) Surface it so the model doesn't act blind.
+  const landedUrl = effectiveUrl ?? parsedUrl
+  const redirected = !!effectiveUrl && stripHash(effectiveUrl) !== stripHash(parsedUrl)
+
+  // Orientation from the DOM (PageExtractor), NOT the a11y tree. The a11y tree
+  // fails on table-heavy pages (empty `row` nodes, footer-first, stories crowded
+  // out); PageCapture.actions is the real interactive surface in document order,
+  // with real names/hrefs. We capture the whole cleaned page ONCE, write it to
+  // disk (so later reads/greps are local, no re-fetch), and return a compact
+  // document-order wireframe + the saved file paths. All best-effort.
+  let wireframe: ReturnType<typeof buildPageWireframe> | null = null
+  let saved: SavedPage | null = null
+  if (shouldWait && deps.extractor) {
+    try {
+      const cap: PageCapture = await deps.extractor.run(ctx.tabId)
+      wireframe = buildPageWireframe(cap)
+      if (deps.savePage) {
+        try {
+          saved = await deps.savePage(cap, ctx.conversationId)
+        } catch {
+          saved = null
+        }
+      }
+    } catch {
+      wireframe = null
     }
   }
 
@@ -129,119 +174,40 @@ export async function runNavigate(
       ? ''
       : ` Page text: ~${pageTextChars.toLocaleString()} chars` +
         (pageTextChars > 50_000
-          ? ' (heavy — use distinctive multi-word grep_page queries; expect many hits).'
+          ? ' (heavy — prefer distinctive multi-word grep_page queries; expect many hits).'
           : pageTextChars < 4_000
             ? ' (light — broad grep_page terms are safe).'
             : '.')
 
+  const header = shouldWait
+    ? `Navigated to ${landedUrl}${redirected ? ` (redirected from ${parsedUrl})` : ''} — ${readyState ?? 'loaded'}.`
+    : `Navigating to ${parsedUrl}.`
+  const savedText = saved
+    ? `\nSaved full page: ${saved.markdownPath} · ${saved.actionsPath} (read/grep locally, no re-fetch).`
+    : ''
+  const wireframeText = wireframe ? `\n${formatPageWireframe(wireframe)}` : ''
+  const dataSourceDiscovery = network ? deps.tabs.getNetworkAwareness(ctx.tabId) : null
+  const dataSourceText = dataSourceDiscovery
+    ? `\n${formatDataSourceDiscovery(dataSourceDiscovery, { label: 'NAVIGATION DATA DISCOVERY' })}`
+    : ''
+
   return withOptionalNetworkCapture(
     {
       ok: true,
-      text:
-        (shouldWait
-          ? `Navigated to ${parsedUrl} (waited up to ${timeoutMs}ms).`
-          : `Navigating to ${parsedUrl}.`) + sizeHint,
+      text: `${header}${sizeHint}${savedText}${wireframeText}${dataSourceText}`,
       structuredContent: {
-        url: parsedUrl,
+        url: landedUrl,
+        requestedUrl: parsedUrl,
+        redirected,
+        readyState,
         wait: shouldWait,
         timeoutMs,
-        pageTextChars
+        pageTextChars,
+        ...(saved ? { savedMarkdownPath: saved.markdownPath, savedActionsPath: saved.actionsPath } : {}),
+        ...(wireframe ? { wireframe } : {}),
+        ...(dataSourceDiscovery ? { dataSourceDiscovery } : {})
       }
     },
-    network
-  )
-}
-
-export async function runClickXY(
-  deps: DriveToolsDeps,
-  args: Record<string, any>,
-  ctx: DriveToolsContext
-): Promise<ToolOutcome> {
-  const refArg = typeof args.ref === 'string' ? args.ref.trim() : ''
-  if (refArg) {
-    const resolved = await resolveAxRefTarget(deps, ctx.tabId, refArg)
-    if (!resolved.ok) {
-      return { ok: false, text: `click_xy: ${resolved.text}` }
-    }
-    const { node, x, y } = resolved
-    const { network } = await deps.tabs.runWithPendingNetworkCapture(
-      ctx.tabId,
-      () => dispatchClick(deps.tabs, ctx.tabId, x, y)
-    )
-    return withOptionalNetworkCapture(
-      {
-        ok: true,
-        text: `click_xy successful. ${describeAxRefMatch(node)} at coordinate (${x}, ${y}).`,
-        structuredContent: {
-          x,
-          y,
-          ref: node.ref,
-          role: node.role,
-          name: node.name,
-          ...(node.frameLabel ? { frameLabel: node.frameLabel } : {})
-        }
-      },
-      network
-    )
-  }
-
-  const x = Number(args.x)
-  const y = Number(args.y)
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return {
-      ok: false,
-      text: 'click_xy: provide numeric x and y, or ref from read_a11y (e.g. @a1).'
-    }
-  }
-  const { network } = await deps.tabs.runWithPendingNetworkCapture(
-    ctx.tabId,
-    () => dispatchClick(deps.tabs, ctx.tabId, x, y)
-  )
-  return withOptionalNetworkCapture(
-    { ok: true, text: `Clicked at (${x}, ${y}).`, structuredContent: { x, y } },
-    network
-  )
-}
-
-export async function runTypeText(
-  deps: DriveToolsDeps,
-  args: Record<string, any>,
-  ctx: DriveToolsContext
-): Promise<ToolOutcome> {
-  const text = String(args.text ?? '')
-  const { network } = await deps.tabs.runWithPendingNetworkCapture(
-    ctx.tabId,
-    () => deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
-  )
-  return withOptionalNetworkCapture(
-    { ok: true, text: `Typed ${text.length} chars.`, structuredContent: { text, charsTyped: text.length } },
-    network
-  )
-}
-
-export async function runPressKey(
-  deps: DriveToolsDeps,
-  args: Record<string, any>,
-  ctx: DriveToolsContext
-): Promise<ToolOutcome> {
-  const key = String(args.key ?? '')
-  const def = KEY_MAP[key.toLowerCase()]
-  if (!def) {
-    return { ok: false, text: `press_key: unknown key "${key}". Supported: ${Object.keys(KEY_MAP).join(', ')}.` }
-  }
-  const common = {
-    key: def.key,
-    code: def.code,
-    windowsVirtualKeyCode: def.keyCode,
-    nativeVirtualKeyCode: def.keyCode,
-    ...(def.text ? { text: def.text } : {})
-  }
-  const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
-    await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyDown', ...common })
-    await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', ...common })
-  })
-  return withOptionalNetworkCapture(
-    { ok: true, text: `Pressed ${key}.`, structuredContent: { key } },
     network
   )
 }
@@ -445,6 +411,396 @@ export async function runGrepType(
   } catch (err: any) {
     return { ok: false, text: `grep_type error: ${err.message}` }
   }
+}
+
+/**
+ * `act` — the single fused action verb (target spec §2.2).
+ *
+ * Collapses the older point-action helpers into one
+ * primitive: resolve a target (ref > query > coords), dispatch trusted input,
+ * and ALWAYS return fresh post-action `after` state (contract C1) so the model
+ * re-grounds for free without a separate perception turn.
+ *
+ * Resolution is exact (literal node + literal coordinate), never inferred
+ * (C3). A target that no longer resolves returns ok:false with a re-orient
+ * hint rather than acting on a guess (C6).
+ */
+export async function runAct(
+  deps: DriveToolsDeps,
+  args: Record<string, any>,
+  ctx: DriveToolsContext
+): Promise<ToolOutcome> {
+  const kind = String(args.kind ?? '').trim().toLowerCase()
+  if (kind !== 'click' && kind !== 'type' && kind !== 'key' && kind !== 'select') {
+    return { ok: false, text: 'act: "kind" must be one of click, type, key, select.' }
+  }
+
+  // URL before the action — compared in captureAfterState to decide whether the
+  // act caused a navigation (and thus needs a fresh element digest, contract C1).
+  const beforeUrl = deps.tabs.getTabUrl(ctx.tabId) ?? null
+
+  // ── key: no element target; dispatch a key event at the current focus ──────
+  if (kind === 'key') {
+    const key = String(args.key ?? '')
+    const def = KEY_MAP[key.toLowerCase()]
+    if (!def) {
+      return { ok: false, text: `act(key): unknown key "${key}". Supported: ${Object.keys(KEY_MAP).join(', ')}.` }
+    }
+    const common = {
+      key: def.key,
+      code: def.code,
+      windowsVirtualKeyCode: def.keyCode,
+      nativeVirtualKeyCode: def.keyCode,
+      ...(def.text ? { text: def.text } : {})
+    }
+    const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+      await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyDown', ...common })
+      await deps.tabs.cdpSend(ctx.tabId, 'Input.dispatchKeyEvent', { type: 'keyUp', ...common })
+    })
+    const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+    return withOptionalNetworkCapture(
+      {
+        ok: true,
+        text: `act(key): pressed ${def.key}.${afterStateLine(after)}`,
+        structuredContent: { kind, key: def.key, after }
+      },
+      network
+    )
+  }
+
+  // ── click / type / select: resolve an element target first ─────────────────
+  const target = await resolveActTarget(deps, ctx.tabId, args)
+  if (!target.ok) {
+    return { ok: false, text: `act(${kind}): ${target.text}` }
+  }
+  const { x, y, describe, matchInfo } = target
+
+  if (kind === 'click') {
+    const { network } = await deps.tabs.runWithPendingNetworkCapture(
+      ctx.tabId,
+      () => dispatchClick(deps.tabs, ctx.tabId, x, y)
+    )
+    const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+    return withOptionalNetworkCapture(
+      {
+        ok: true,
+        text: `act(click): ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
+        structuredContent: { kind, coordinates: { x, y }, match: matchInfo, after }
+      },
+      network
+    )
+  }
+
+  if (kind === 'type') {
+    const text = String(args.text ?? '')
+    const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+      await dispatchClick(deps.tabs, ctx.tabId, x, y)
+      await deps.tabs.cdpSend(ctx.tabId, 'Input.insertText', { text })
+    })
+    const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+    return withOptionalNetworkCapture(
+      {
+        ok: true,
+        text: `act(type): focused ${describe} and typed ${text.length} chars at (${x}, ${y}).${afterStateLine(after)}`,
+        structuredContent: { kind, text, coordinates: { x, y }, match: matchInfo, after }
+      },
+      network
+    )
+  }
+
+  // kind === 'select': focus a <select>, then commit the chosen option via DOM.
+  const option = String(args.option ?? '')
+  if (!option) {
+    return { ok: false, text: 'act(select): "option" (the visible label or value to choose) is required.' }
+  }
+  const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+    await dispatchClick(deps.tabs, ctx.tabId, x, y)
+  })
+  const selectResult = await deps.tabs.executeJavaScript(
+    ctx.tabId,
+    selectOptionScript(x, y, option)
+  )
+  if (!selectResult.success) {
+    return { ok: false, text: `act(select): could not choose "${option}" — ${selectResult.error}.` }
+  }
+  const selectPayload = selectResult.result as { ok?: boolean; reason?: string } | null
+  if (!selectPayload || selectPayload.ok !== true) {
+    const reason = selectPayload?.reason ?? 'no <select> at the resolved target'
+    return { ok: false, text: `act(select): could not choose "${option}" — ${reason}.` }
+  }
+  const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+  return withOptionalNetworkCapture(
+    {
+      ok: true,
+      text: `act(select): chose "${option}" on ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
+      structuredContent: { kind, option, coordinates: { x, y }, match: matchInfo, after }
+    },
+    network
+  )
+}
+
+interface ActTargetResolved {
+  ok: true
+  x: number
+  y: number
+  describe: string
+  matchInfo: Record<string, unknown>
+}
+
+/** Resolve an act() element target: ref > query > coords. */
+async function resolveActTarget(
+  deps: DriveToolsDeps,
+  tabId: string,
+  args: Record<string, any>
+): Promise<ActTargetResolved | { ok: false; text: string }> {
+  const refArg = typeof args.ref === 'string' ? args.ref.trim() : ''
+  const queryArg = typeof args.query === 'string' ? args.query.trim() : ''
+  const hasCoords = Number.isFinite(Number(args?.coords?.x)) && Number.isFinite(Number(args?.coords?.y))
+
+  // ref (preferred): resolve against the latest read_a11y snapshot.
+  if (refArg || isAxRefQuery(queryArg, args.type)) {
+    const refQuery = refArg || queryArg
+    const resolved = await resolveAxRefTarget(deps, tabId, refQuery)
+    if (!resolved.ok) return { ok: false, text: resolved.text }
+    const { node, x, y } = resolved
+    return {
+      ok: true,
+      x,
+      y,
+      describe: describeAxRefMatch(node),
+      matchInfo: {
+        ref: node.ref,
+        role: node.role,
+        name: node.name,
+        ...(node.frameLabel ? { frameLabel: node.frameLabel } : {})
+      }
+    }
+  }
+
+  // query: resolve via the live grep engine (text/regex/selector).
+  if (queryArg) {
+    const explicitType = args.type || 'text'
+    if (explicitType !== 'text' && explicitType !== 'regex' && explicitType !== 'selector') {
+      return { ok: false, text: 'query "type" must be "text", "regex", or "selector".' }
+    }
+    const caseSensitive = !!args.caseSensitive
+    const runResult = await executeGrepInTab(deps.tabs, tabId, queryArg, explicitType, caseSensitive, 2)
+    if (!runResult.success) {
+      return { ok: false, text: `search execution failed: ${runResult.error}` }
+    }
+    const matches = ((runResult.result as any[]) || []).filter(
+      (m) => m.type !== 'error' && m.coordinates && m.visible
+    )
+    if (matches.length === 0) {
+      // C6: no act-on-a-guess. Tell the model to re-orient.
+      return {
+        ok: false,
+        text: `no visible element matched "${queryArg}". Re-run read_a11y/grep_page to re-orient, then target a @ref.`
+      }
+    }
+    const best = matches[0]
+    let describe = `<${best.tagName || 'element'}>`
+    if (best.selector) describe += ` (${best.selector})`
+    if (best.matchedLine) describe += ` "${best.matchedLine}"`
+    return {
+      ok: true,
+      x: best.coordinates.x,
+      y: best.coordinates.y,
+      describe,
+      matchInfo: {
+        ...(best.tagName ? { tagName: best.tagName } : {}),
+        ...(best.selector ? { selector: best.selector } : {}),
+        ...(best.matchedLine ? { matchedLine: best.matchedLine } : {})
+      }
+    }
+  }
+
+  // coords (last resort): explicit, no resolution.
+  if (hasCoords) {
+    const x = Math.round(Number(args.coords.x))
+    const y = Math.round(Number(args.coords.y))
+    return { ok: true, x, y, describe: `coordinate (${x}, ${y})`, matchInfo: { x, y } }
+  }
+
+  return {
+    ok: false,
+    text: 'provide a target: ref (@a1 from read_a11y), query (text/selector), or coords {x,y}.'
+  }
+}
+
+/**
+ * Contract C1: capture a fresh, cheap post-action snapshot in one round-trip.
+ * Not a full a11y re-capture — just the signal the model needs to confirm the
+ * state changed: url, title, readyState, and a bounded body-text length plus
+ * the active element. Sampled live, so it is never stale.
+ */
+/**
+ * A click that triggers navigation returns from dispatchClick BEFORE the new
+ * page loads, so sampling immediately would see the old URL and never ship the
+ * fresh-page digest (C1). Briefly wait for a navigation to start+settle:
+ * resolve as soon as the URL changes and the document is interactive/complete,
+ * or bail fast when nothing navigates so same-page clicks stay snappy.
+ */
+async function waitForActSettle(
+  deps: DriveToolsDeps,
+  tabId: string,
+  beforeUrl: string | null,
+  maxMs = 800
+): Promise<void> {
+  const deadline = Date.now() + maxMs
+  // A navigation typically begins within a poll or two of the click. Give it a
+  // short grace window to START; once we've seen a URL change we wait (longer)
+  // for the new doc to become usable. If nothing has navigated within the grace
+  // window, it was a same-page click — return so it stays snappy.
+  const navStartGraceMs = 180
+  let sawNavigation = false
+  while (Date.now() < deadline) {
+    let url: string | null = null
+    let readyState: string | null = null
+    try {
+      const res = await deps.tabs.executeJavaScript(
+        tabId,
+        'return { u: location.href, r: document.readyState }'
+      )
+      if (res.success && res.result && typeof res.result === 'object') {
+        const r = res.result as { u?: unknown; r?: unknown }
+        url = typeof r.u === 'string' ? r.u : null
+        readyState = typeof r.r === 'string' ? r.r : null
+      }
+    } catch {
+      // The tab may be mid-swap during a navigation — that IS a navigation signal.
+      sawNavigation = true
+    }
+    const navigated = !!url && !!beforeUrl && stripHash(url) !== stripHash(beforeUrl)
+    if (navigated) {
+      sawNavigation = true
+      if (readyState === 'interactive' || readyState === 'complete') return
+    } else if (!sawNavigation && Date.now() - (deadline - maxMs) >= navStartGraceMs) {
+      return // same-page click — nothing started navigating in the grace window
+    }
+    await sleep(45)
+  }
+}
+
+async function captureAfterState(
+  deps: DriveToolsDeps,
+  tabId: string,
+  beforeUrl: string | null = null
+): Promise<Record<string, unknown>> {
+  await waitForActSettle(deps, tabId, beforeUrl)
+  try {
+    const res = await deps.tabs.executeJavaScript(tabId, AFTER_STATE_SCRIPT)
+    if (res.success && res.result && typeof res.result === 'object') {
+      const after = res.result as Record<string, unknown>
+      // Contract C1, navigation case: when the act moved us to a new URL, the
+      // model's prior page orientation is stale and it would otherwise burn a
+      // re-orient read. So we ALSO ship a compact digest of the new page's top
+      // interactive elements — enough to act again immediately. On a same-page
+      // act (no URL change) the prior targets still hold, so we drop the list to
+      // stay cheap and avoid context bloat.
+      const afterUrl = typeof after.url === 'string' ? after.url : null
+      const navigated = !!afterUrl && !!beforeUrl && stripHash(afterUrl) !== stripHash(beforeUrl)
+      after.navigated = navigated
+      if (!navigated && Array.isArray(after.elements)) delete after.elements
+      return after
+    }
+  } catch {
+    /* best-effort: a failed after-read must not fail the action */
+  }
+  return { url: deps.tabs.getTabUrl(tabId) ?? null, captured: false, navigated: false }
+}
+
+function stripHash(url: string): string {
+  const i = url.indexOf('#')
+  return i === -1 ? url : url.slice(0, i)
+}
+
+const AFTER_STATE_SCRIPT = `
+  const active = document.activeElement;
+  const activeDesc = active && active !== document.body
+    ? (active.tagName.toLowerCase()
+       + (active.id ? '#' + active.id : '')
+       + (active.getAttribute && active.getAttribute('name') ? '[name=' + active.getAttribute('name') + ']' : ''))
+    : null;
+  // Compact digest of the top visible interactive elements, so a navigation can
+  // hand the model something to act on without a separate read.
+  function vis(el) {
+    const s = getComputedStyle(el);
+    if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.top < (window.innerHeight || 800) && r.bottom > 0;
+  }
+  const seen = new Set();
+  const elements = [];
+  const nodes = document.querySelectorAll('a[href], button, input, textarea, select, [role=button], [role=link], [role=tab], [onclick]');
+  for (let i = 0; i < nodes.length && elements.length < 40; i++) {
+    const el = nodes[i];
+    if (!vis(el)) continue;
+    const label = (el.getAttribute('aria-label') || el.innerText || el.value || el.getAttribute('placeholder') || el.getAttribute('name') || '').replace(/[\\s\\u00a0]+/g, ' ').trim().slice(0, 80);
+    if (!label) continue;
+    const key = el.tagName + '|' + label;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const r = el.getBoundingClientRect();
+    elements.push({
+      tag: el.tagName.toLowerCase(),
+      role: el.getAttribute('role') || null,
+      label: label,
+      x: Math.round(r.left + r.width / 2),
+      y: Math.round(r.top + r.height / 2)
+    });
+  }
+  return {
+    url: location.href,
+    title: document.title,
+    readyState: document.readyState,
+    bodyTextChars: (document.body && document.body.innerText) ? document.body.innerText.length : 0,
+    activeElement: activeDesc,
+    elements: elements,
+    captured: true
+  };
+`
+
+function afterStateLine(after: Record<string, unknown>): string {
+  if (after.captured !== true) return ''
+  const url = typeof after.url === 'string' ? after.url : ''
+  const title = typeof after.title === 'string' && after.title ? ` — ${after.title}` : ''
+  const active = typeof after.activeElement === 'string' && after.activeElement ? ` focus=${after.activeElement}` : ''
+  let line = ` Now at ${url}${title} (${after.readyState}).${active}`
+  // On a navigation, append the new page's top targets so the model can act
+  // again without a separate read (contract C1).
+  if (after.navigated === true && Array.isArray(after.elements) && after.elements.length) {
+    const items = (after.elements as Array<Record<string, unknown>>)
+      .slice(0, 20)
+      .map((e) => `"${String(e.label)}" (${e.tag}@${e.x},${e.y})`)
+      .join('; ')
+    line += ` Page changed — top targets: ${items}.`
+  }
+  return line
+}
+
+/** In-page script: pick the option whose label/value matches on the <select> at (x,y). */
+function selectOptionScript(x: number, y: number, option: string): string {
+  return `
+    const el = document.elementFromPoint(${x}, ${y});
+    const sel = el && (el.closest ? el.closest('select') : null);
+    if (!sel) return { ok: false, reason: 'no <select> at the resolved coordinate' };
+    const want = ${JSON.stringify(option)};
+    const wantLc = want.toLowerCase();
+    let chosen = -1;
+    for (let i = 0; i < sel.options.length; i++) {
+      const o = sel.options[i];
+      if (o.value === want || o.text === want ||
+          o.text.trim().toLowerCase() === wantLc || o.value.toLowerCase() === wantLc) {
+        chosen = i; break;
+      }
+    }
+    if (chosen === -1) return { ok: false, reason: 'no option matched "' + want + '"' };
+    sel.selectedIndex = chosen;
+    sel.dispatchEvent(new Event('input', { bubbles: true }));
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return { ok: true, value: sel.options[chosen].value, label: sel.options[chosen].text };
+  `
 }
 
 function withOptionalNetworkCapture(

@@ -20,11 +20,11 @@ import {
   ACTIVE_PAGE_GROUNDING_GUIDANCE,
   buildClaudeLocalMachineGuidance,
   buildCodexLocalMachineGuidance,
+  buildCursorNativeWorkContract,
   buildCursorLocalMachineGuidance,
   buildResumeProcessGuidance,
   CLAUDE_NATIVE_WORK_GUIDANCE,
   CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE,
-  CURSOR_NATIVE_WORK_GUIDANCE,
   STOP_WHEN_DONE_GUIDANCE,
   UI_VISUAL_CONFIRMATION_GUIDANCE,
   VALIDATE_COMMIT_PUSH_GUIDANCE,
@@ -375,10 +375,7 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   if (browserToolNames.size === 0) {
     result =
       core +
-      `\n\n${CURSOR_NATIVE_WORK_GUIDANCE} ` +
-      'After editing files, run the narrowest relevant local verification command before claiming success. ' +
-      'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context and keep going until you pass validation or can clearly explain the blocker. ' +
-      'After validation passes and the task is complete, stop rather than continuing to explore.'
+      `\n\n${buildCursorNativeWorkContract()}`
   } else {
     result =
       core +

@@ -12,6 +12,7 @@ import {
   GREP_PAGE_GUIDANCE,
   describeSemanticVerbPreference
 } from '../codex/dynamicBrowserTools'
+import { buildCursorNativeWorkContract } from '../codex/processPolicy'
 
 export const CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME = 'gladdis'
 
@@ -154,8 +155,7 @@ export function buildCursorBrowserInstructions(allowedToolNames?: Iterable<strin
   return buildEmbeddedBrowserInstructions({
     allowedToolNames,
     runtimeLabel: 'Cursor Agent',
-    nativeWorkLine:
-      'Use Cursor native local repo, file, shell, and validation abilities for code work. After editing files, run the narrowest relevant local verification command before claiming success; if validation fails, fix it or say clearly why it cannot pass. If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context, continue from the same workspace state, and do another validation pass before finishing. Once validation passes and the requested task is complete, stop and deliver the result instead of continuing by default. Use the attached Gladdis MCP tools for browser work.'
+    nativeWorkLine: buildCursorNativeWorkContract({ includeBrowserWorkLine: true })
   })
 }
 

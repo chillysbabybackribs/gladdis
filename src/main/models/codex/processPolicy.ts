@@ -57,6 +57,32 @@ export const CLAUDE_NATIVE_WORK_GUIDANCE =
 export const CURSOR_NATIVE_WORK_GUIDANCE =
   'Use Cursor native local repo, file, shell, and validation abilities for code work.'
 
+export const CURSOR_NATIVE_VERIFICATION_GUIDANCE =
+  'After editing files, run the narrowest relevant local verification command before claiming success. ' +
+  'If validation fails, fix it or say clearly why it cannot pass.'
+
+export const CURSOR_POST_ACTION_REPAIR_GUIDANCE =
+  'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context, ' +
+  'continue from the same workspace state, and do another validation pass before finishing.'
+
+export const CURSOR_FINISH_AFTER_VALIDATION_GUIDANCE =
+  'Once validation passes and the requested task is complete, stop and deliver the result instead of continuing by default.'
+
+export function buildCursorNativeWorkContract(args?: { includeBrowserWorkLine?: boolean }): string {
+  const segments = [
+    CURSOR_NATIVE_WORK_GUIDANCE,
+    CURSOR_NATIVE_VERIFICATION_GUIDANCE,
+    CURSOR_POST_ACTION_REPAIR_GUIDANCE,
+    CURSOR_FINISH_AFTER_VALIDATION_GUIDANCE
+  ]
+
+  if (args?.includeBrowserWorkLine) {
+    segments.push('Use the attached Gladdis MCP tools for browser work.')
+  }
+
+  return segments.join(' ')
+}
+
 export function buildResumeProcessGuidance(args: { recallTool: string }): string {
   return (
     'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +

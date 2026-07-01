@@ -1,4 +1,4 @@
-import type { PageCapture, ActionNode } from '../../../shared/extraction'
+import type { PageCapture, ActionNode, OverlayInfo } from '../../../shared/extraction'
 
 /**
  * DOM-order orientation wireframe, built from PageExtractor's PageCapture.
@@ -26,6 +26,8 @@ export interface PageWireframe {
   lines: WireframeLine[]
   totalActions: number
   truncated: boolean
+  /** Blocking overlay on top of the page right now, if any. */
+  overlay?: OverlayInfo
 }
 
 const MAX_LINES = 60
@@ -89,13 +91,57 @@ export function buildPageWireframe(cap: PageCapture): PageWireframe {
     headings: (cap.content?.headings ?? []).slice(0, 20),
     lines,
     totalActions: actions.length,
-    truncated: actions.length > lines.length || i < actions.length
+    truncated: actions.length > lines.length || i < actions.length,
+    ...(cap.overlay ? { overlay: cap.overlay } : {})
   }
+}
+
+/**
+ * One-line-per-control banner describing a blocking overlay. Rendered BEFORE the
+ * wireframe so the model reads "a layer is in front, the page underneath is fine,
+ * here's how to dismiss it" before it ever judges whether it's on the right page.
+ */
+export function formatOverlayBanner(ov: OverlayInfo): string {
+  const kindLabel =
+    ov.kind === 'cookie-consent'
+      ? 'cookie/consent wall'
+      : ov.kind === 'dialog'
+        ? 'modal dialog'
+        : ov.kind === 'aria-modal'
+          ? 'modal dialog'
+          : 'blocking overlay'
+  const pct = Math.round(ov.coversViewportPct * 100)
+  const name = ov.name ? ` "${trunc(ov.name, 80)}"` : ''
+  const out: string[] = []
+  out.push(
+    `⚠ ACTIVE OVERLAY: a ${kindLabel}${name} is covering the page (≈${pct}% of the viewport).`
+  )
+  out.push(
+    `  The underlying page loaded correctly — this is a layer ON TOP, not the wrong page. Dismiss or answer this overlay first.`
+  )
+  if (ov.actions.length) {
+    out.push('  Overlay controls:')
+    for (const a of ov.actions.slice(0, 8)) {
+      const cx = a.rect ? Math.round(a.rect.x + a.rect.w / 2) : '?'
+      const cy = a.rect ? Math.round(a.rect.y + a.rect.h / 2) : '?'
+      out.push(`    #${a.idx} ${a.role}: ${trunc((a.name || a.value || '').trim(), 60)}  (${cx}, ${cy})`)
+    }
+  } else {
+    out.push('  (no distinct controls detected — try grep_click on its visible label, press Escape, or click_xy outside it)')
+  }
+  return out.join('\n')
 }
 
 /** Render the wireframe as a compact, document-order text block for the model. */
 export function formatPageWireframe(wire: PageWireframe): string {
   const out: string[] = []
+  // Overlay banner comes FIRST — before anything DOM-ordered — because it is the
+  // one thing whose stacking contradicts DOM order and the usual cause of a
+  // "this looks like the wrong page" misread.
+  if (wire.overlay) {
+    out.push(formatOverlayBanner(wire.overlay))
+    out.push('')
+  }
   if (wire.headings.length) {
     out.push('OUTLINE:')
     for (const h of wire.headings.slice(0, 12)) {

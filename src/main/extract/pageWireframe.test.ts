@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildPageWireframe, formatPageWireframe } from './pageWireframe'
-import type { PageCapture, ActionNode } from '../../../shared/extraction'
+import { buildPageWireframe, formatPageWireframe, formatOverlayBanner } from './pageWireframe'
+import type { PageCapture, ActionNode, OverlayInfo } from '../../../shared/extraction'
 
 function action(idx: number, role: string, name: string, value?: string): ActionNode {
   return {
@@ -78,5 +78,44 @@ describe('pageWireframe (DOM source)', () => {
     expect(text).toContain('482 comments')
     // Footer appears, and after the top story.
     expect(text.indexOf('Claude Sonnet 5')).toBeLessThan(text.indexOf('Guidelines'))
+  })
+})
+
+describe('pageWireframe overlay banner', () => {
+  function cookieOverlay(): OverlayInfo {
+    return {
+      kind: 'cookie-consent',
+      name: 'We value your privacy',
+      coversViewportPct: 0.85,
+      actions: [action(1, 'button', 'Accept all'), action(2, 'button', 'Reject all')]
+    }
+  }
+
+  it('surfaces the overlay banner BEFORE the DOM-order wireframe', () => {
+    const cap = { ...hnCapture(), overlay: cookieOverlay() }
+    const text = formatPageWireframe(buildPageWireframe(cap))
+    // The banner is present, names the overlay, and appears before page content.
+    expect(text).toContain('ACTIVE OVERLAY')
+    expect(text).toContain('We value your privacy')
+    expect(text).toContain('85%')
+    expect(text.indexOf('ACTIVE OVERLAY')).toBeLessThan(text.indexOf('Claude Sonnet 5'))
+  })
+
+  it('tells the model the underlying page is correct and lists overlay controls', () => {
+    const banner = formatOverlayBanner(cookieOverlay())
+    expect(banner).toContain('underlying page loaded correctly')
+    expect(banner).toContain('Accept all')
+    expect(banner).toContain('Reject all')
+  })
+
+  it('omits the banner entirely when no overlay is present', () => {
+    const text = formatPageWireframe(buildPageWireframe(hnCapture()))
+    expect(text).not.toContain('ACTIVE OVERLAY')
+  })
+
+  it('handles an overlay with no detected controls gracefully', () => {
+    const banner = formatOverlayBanner({ kind: 'dialog', name: 'Sign in', coversViewportPct: 0.5, actions: [] })
+    expect(banner).toContain('modal dialog')
+    expect(banner).toContain('no distinct controls detected')
   })
 })

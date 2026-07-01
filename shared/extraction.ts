@@ -33,6 +33,25 @@ export interface ReadableContent {
   wordCount: number
 }
 
+/**
+ * A blocking overlay currently on top of the page: a modal dialog, cookie
+ * consent wall, paywall, or newsletter interstitial. This is the ONE thing whose
+ * visual/interaction stacking (z-index / top layer) deliberately contradicts its
+ * DOM position — a modal is appended at the end of <body> yet covers the top of
+ * the screen. Every other capture field is in DOM order; this field exists so the
+ * model is told "a layer is in front, the page underneath is still correct."
+ */
+export interface OverlayInfo {
+  /** How the overlay was identified. */
+  kind: 'dialog' | 'aria-modal' | 'cookie-consent' | 'fixed-cover'
+  /** Best-effort accessible name / heading of the overlay. */
+  name: string
+  /** Fraction of the viewport (0–1) the overlay's box covers. */
+  coversViewportPct: number
+  /** The overlay's own interactive controls (Accept / Reject / ✕ …), DOM order. */
+  actions: ActionNode[]
+}
+
 /** Everything machine-readable the page advertises about itself. */
 export interface StructuredData {
   meta: Record<string, string>
@@ -54,6 +73,11 @@ export interface PageCapture {
   data: StructuredData
   /** Interactive action surface, ordered by DOM position. */
   actions: ActionNode[]
+  /**
+   * The topmost blocking overlay (modal / cookie wall / paywall), if one is
+   * currently covering the page. Absent when nothing is on top.
+   */
+  overlay?: OverlayInfo
   /** Counts + raw size signals for the deep DOM. */
   dom: {
     nodeCount: number

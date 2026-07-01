@@ -25,6 +25,7 @@
 
 import type { PageCapture, ActionNode } from '../../../shared/types'
 // ActionNode is imported for the rankActions helper — TS uses it structurally.
+import { formatOverlayBanner } from '../extract/pageWireframe'
 
 const CONTENT_CHARS     = 3_000
 const OG_CHARS          = 600
@@ -51,6 +52,15 @@ export interface DigestOptions {
  */
 export function digestPage(cap: PageCapture, opts: DigestOptions = {}): string {
   const sections: string[] = []
+
+  // ── Blocking overlay (FIRST — before anything DOM-ordered) ─────────────────
+  // A modal/cookie-wall/paywall stacks visually on top while living at the end of
+  // the DOM. Reported up front so the model doesn't misread a correct page as the
+  // wrong one just because a layer is covering it.
+  if (cap.overlay) {
+    sections.push(formatOverlayBanner(cap.overlay))
+    sections.push('')
+  }
 
   // ── Identity ─────────────────────────────────────────────────────────────
   sections.push(`URL: ${cap.url}`)

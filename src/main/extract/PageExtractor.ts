@@ -41,6 +41,7 @@ export class PageExtractor {
       content: page.content,
       data: page.data,
       actions: page.actions ?? [],
+      ...(page.overlay ? { overlay: page.overlay } : {}),
       dom: page.dom
     }
   }

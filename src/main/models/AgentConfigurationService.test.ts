@@ -39,7 +39,22 @@ describe('AgentConfigurationService', () => {
       'read_file',
       'edit_file'
     ]))
+    expect(openaiNames).not.toContain('run_command')
     expect(openaiNames).not.toContain('memory_write')
+  })
+
+  it('adds run_command only when the turn explicitly needs shell work', async () => {
+    const { service } = makeConfigService('/home/user/project')
+    const req = {
+      messages: [{ role: 'user', content: 'edit the parser and run typecheck' }]
+    } as any
+
+    const profile = await service.agentToolProfile(req)
+    const names = profile.tools.map((tool: { name: string }) => tool.name)
+
+    expect(profile.name).toContain('filesystem-core')
+    expect(profile.name).toContain('shell')
+    expect(names).toEqual(expect.arrayContaining(['search_files', 'read_file', 'edit_file', 'run_command']))
   })
 
   it('applies saved preferred/disallowed tool constraints to the routed surface', async () => {

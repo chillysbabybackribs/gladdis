@@ -42,7 +42,7 @@ const BROWSER_ADVANCED = [
   'screenshot',
   'screenshot_app'
 ] as const
-const FILESYSTEM_ESSENTIAL = ['search_files', 'read_file', 'edit_file', 'run_command'] as const
+const FILESYSTEM_ESSENTIAL = ['search_files', 'read_file', 'edit_file'] as const
 const FILESYSTEM_EXPANDED = ['write_file', 'list_dir'] as const
 const SHELL_ESSENTIAL = ['run_command'] as const
 const MEMORY_HISTORY = ['recall_history'] as const

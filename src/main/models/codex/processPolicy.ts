@@ -6,6 +6,9 @@ export const WORK_FROM_REAL_CODEBASE_GUIDANCE =
 export const STOP_WHEN_DONE_GUIDANCE =
   'Once the requested task is confirmed complete, stop and deliver the result instead of continuing by default.'
 
+export const VALIDATE_COMMIT_PUSH_GUIDANCE =
+  'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+
 export const ACTIVE_PAGE_GROUNDING_GUIDANCE =
   'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
   'or current-site state, ground the answer with grep_page or read_a11y first.'
@@ -21,6 +24,39 @@ export const CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE =
   '(or screenshot if the UI is genuinely vision-only) that it is not blank and the intended UI is ' +
   'visible before answering. Do not stop at build/curl-only validation for UI work.'
 
+export function buildCodexLocalMachineGuidance(): string {
+  return (
+    'This turn has the local machine under it. Before changing anything, locate the truth of how this ' +
+    'repo actually works — search and read the relevant files, run the build/tests to see current ' +
+    'state — so edits land on the real codebase instead of an assumed one. Use your native shell/file ' +
+    'tools for repo, file, and shell work. The desktop user has passwordless sudo, so install whatever ' +
+    'a task needs yourself — language packages, repos, or system packages via `sudo apt-get install ' +
+    '-y` — instead of reporting a tool as missing.'
+  )
+}
+
+export function buildClaudeLocalMachineGuidance(): string {
+  return (
+    'This turn runs through a logged-in local Claude Code CLI session. Gladdis launches Claude Code with ' +
+    '`--dangerously-skip-permissions`, so local repo, file, shell, git, commit, and push actions are already ' +
+    'unrestricted. Do not stop for Claude permission or approval workflows, and do not ask the user to manually ' +
+    'run local commands just to bypass a Claude-side restriction unless a command actually fails.'
+  )
+}
+
+export function buildCursorLocalMachineGuidance(): string {
+  return (
+    'This turn runs through a logged-in local Cursor Agent CLI session. Use the actual workspace on disk, ' +
+    `verify before asserting, and complete the task end-to-end when feasible. ${STOP_WHEN_DONE_GUIDANCE}`
+  )
+}
+
+export const CLAUDE_NATIVE_WORK_GUIDANCE =
+  'Keep Claude Code native local repo, file, shell, git, and validation abilities focused on the task.'
+
+export const CURSOR_NATIVE_WORK_GUIDANCE =
+  'Use Cursor native local repo, file, shell, and validation abilities for code work.'
+
 export function buildResumeProcessGuidance(args: { recallTool: string }): string {
   return (
     'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
@@ -29,4 +65,3 @@ export function buildResumeProcessGuidance(args: { recallTool: string }): string
     'resume request.'
   )
 }
-

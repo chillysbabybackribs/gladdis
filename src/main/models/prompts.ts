@@ -18,10 +18,16 @@ import {
 } from './codex/dynamicBrowserTools'
 import {
   ACTIVE_PAGE_GROUNDING_GUIDANCE,
+  buildClaudeLocalMachineGuidance,
+  buildCodexLocalMachineGuidance,
+  buildCursorLocalMachineGuidance,
   buildResumeProcessGuidance,
+  CLAUDE_NATIVE_WORK_GUIDANCE,
   CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE,
+  CURSOR_NATIVE_WORK_GUIDANCE,
   STOP_WHEN_DONE_GUIDANCE,
   UI_VISUAL_CONFIRMATION_GUIDANCE,
+  VALIDATE_COMMIT_PUSH_GUIDANCE,
   WORK_FROM_REAL_CODEBASE_GUIDANCE
 } from './codex/processPolicy'
 
@@ -288,12 +294,7 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
   const core =
     `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
     '## Working the code\n' +
-    'This turn has the local machine under it. Before changing anything, locate the truth of how this ' +
-    'repo actually works — search and read the relevant files, run the build/tests to see current ' +
-    'state — so edits land on the real codebase instead of an assumed one. Use your native shell/file ' +
-    'tools for repo, file, and shell work. The desktop user has passwordless sudo, so install whatever ' +
-    'a task needs yourself — language packages, repos, or system packages via `sudo apt-get install ' +
-    '-y` — instead of reporting a tool as missing.\n\n' +
+    `${buildCodexLocalMachineGuidance()}\n\n` +
     'When your done checks are satisfied and validation has passed, stop and deliver the result. Do not ' +
     'keep exploring or run extra work after confirmed completion unless the user asks for it.\n\n' +
     buildResumeProcessGuidance({ recallTool: 'recall_history' })
@@ -304,10 +305,10 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
       `${buildCodexBrowserInstructions(gladdisToolNames)}\n\n` +
       `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
       `${CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE}\n\n` +
-      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+      VALIDATE_COMMIT_PUSH_GUIDANCE
     : core +
       '\n\nUse your native shell/file tools for local repo, package, validation, and coding work. ' +
-      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+      VALIDATE_COMMIT_PUSH_GUIDANCE
 
   CODEX_SYSTEM_CACHE.set(key, result)
   return result
@@ -331,10 +332,7 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
   const core =
     `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
     '## Working the code\n' +
-    'This turn runs through a logged-in local Claude Code CLI session. Gladdis launches Claude Code with ' +
-    '`--dangerously-skip-permissions`, so local repo, file, shell, git, commit, and push actions are already ' +
-    'unrestricted. Do not stop for Claude permission or approval workflows, and do not ask the user to manually ' +
-    'run local commands just to bypass a Claude-side restriction unless a command actually fails.\n\n' +
+    `${buildClaudeLocalMachineGuidance()}\n\n` +
     `${WORK_FROM_REAL_CODEBASE_GUIDANCE} ${STOP_WHEN_DONE_GUIDANCE}\n\n` +
     buildResumeProcessGuidance({ recallTool: 'the attached recall_history MCP helper' })
 
@@ -344,10 +342,9 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
       `${buildClaudeCodeBrowserInstructions(browserToolNames)}\n\n` +
       `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
       `${UI_VISUAL_CONFIRMATION_GUIDANCE}\n\n` +
-      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+      VALIDATE_COMMIT_PUSH_GUIDANCE
     : core +
-      '\n\nKeep Claude Code native local repo, file, shell, git, and validation abilities focused on the task. ' +
-      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+      `\n\n${CLAUDE_NATIVE_WORK_GUIDANCE} ${VALIDATE_COMMIT_PUSH_GUIDANCE}`
 
   CLAUDE_CODE_SYSTEM_CACHE.set(key, result)
   return result
@@ -372,14 +369,13 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
 
   const core =
     `${ABOUT_GLADDIS}\n\n` +
-    'This turn runs through a logged-in local Cursor Agent CLI session. Use the actual workspace on disk, ' +
-    `verify before asserting, and complete the task end-to-end when feasible. ${STOP_WHEN_DONE_GUIDANCE}`
+    buildCursorLocalMachineGuidance()
 
   let result: string
   if (browserToolNames.size === 0) {
     result =
       core +
-      '\n\nUse Cursor native local repo, file, shell, and validation abilities for code work. ' +
+      `\n\n${CURSOR_NATIVE_WORK_GUIDANCE} ` +
       'After editing files, run the narrowest relevant local verification command before claiming success. ' +
       'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context and keep going until you pass validation or can clearly explain the blocker. ' +
       'After validation passes and the task is complete, stop rather than continuing to explore.'

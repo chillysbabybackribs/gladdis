@@ -73,6 +73,14 @@ import { CURSOR_MCP_TOOL_NAMES } from './claudeCode/browserTools'
 const DISPATCHABLE_NAMES = AGENT_TOOLS.map((tool) => tool.name)
 
 describe('tool surface coverage', () => {
+  it('leads the registry with web search and has no tool-discovery verb', () => {
+    const names = AGENT_TOOLS.map((tool) => tool.name)
+    // The full surface is offered every turn, so the search_tool discovery
+    // hatch is retired — there is no routed-away subset to discover.
+    expect(names).not.toContain('search_tool')
+    expect(names[0]).toBe('search')
+  })
+
   it('dispatches every registered tool — no tool resolves to "Unknown tool"', async () => {
     const tools = new BrowserTools({} as any, {} as any, {} as any)
     // A workspace root lets memory_* proceed into their (mocked) store instead

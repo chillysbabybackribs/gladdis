@@ -14,7 +14,7 @@ function makeConfigService(workspaceRoot: string | null = null) {
 }
 
 describe('AgentConfigurationService', () => {
-  it('routes mixed browser + code work onto a compact shared surface', async () => {
+  it('hands every turn the full flat surface, identical across providers', async () => {
     const { service } = makeConfigService('/home/user/project')
     const req = {
       messages: [{ role: 'user', content: 'check the current docs site and then update the parser code' }]
@@ -23,42 +23,45 @@ describe('AgentConfigurationService', () => {
     const anthropic = await service.agentToolProfile(req)
     const openai = await service.agentToolProfile(req, 'openai')
 
-    expect(anthropic.name).toContain('browser-core')
-    expect(anthropic.name).toContain('filesystem-core')
-    expect(openai.name).toBe(anthropic.name)
+    expect(anthropic.name).toBe('full')
+    expect(openai.name).toBe('full')
 
     const anthropicNames = anthropic.tools.map((tool: { name: string }) => tool.name)
     const openaiNames = openai.tools.map((tool: { name: string }) => tool.name)
 
+    // Same list, every domain present in one flat surface (Phase C).
     expect(openaiNames).toEqual(anthropicNames)
     expect(openaiNames).toEqual(expect.arrayContaining([
       'search',
       'navigate',
       'grep_page',
+      'act',
       'search_files',
       'read_file',
-      'edit_file'
+      'edit_file',
+      'run_command',
+      'memory_write'
     ]))
-    expect(openaiNames).not.toContain('act')
-    expect(openaiNames).not.toContain('run_command')
-    expect(openaiNames).not.toContain('memory_write')
+    // The tool-discovery hatch is retired: no subset, so nothing to discover.
+    expect(openaiNames).not.toContain('search_tool')
   })
 
-  it('adds run_command only when the turn explicitly needs shell work', async () => {
+  it('returns the SAME stable array reference across turns so tool caches hit', async () => {
     const { service } = makeConfigService('/home/user/project')
-    const req = {
-      messages: [{ role: 'user', content: 'edit the parser and run typecheck' }]
-    } as any
-
-    const profile = await service.agentToolProfile(req)
-    const names = profile.tools.map((tool: { name: string }) => tool.name)
-
-    expect(profile.name).toContain('filesystem-core')
-    expect(profile.name).toContain('shell')
-    expect(names).toEqual(expect.arrayContaining(['search_files', 'read_file', 'edit_file', 'run_command']))
+    const first = await service.agentToolProfile(
+      { messages: [{ role: 'user', content: 'edit the parser and run typecheck' }] } as any
+    )
+    const second = await service.agentToolProfile(
+      { messages: [{ role: 'user', content: 'now open the docs site' }] } as any,
+      'openai'
+    )
+    // No per-agent policy → both turns get the identical AGENT_TOOLS reference,
+    // which is what the WeakMap-keyed serializers + Anthropic ephemeral
+    // cache_control rely on to avoid re-sending the tool block each turn.
+    expect(second.tools).toBe(first.tools)
   })
 
-  it('applies saved preferred/disallowed tool constraints to the routed surface', async () => {
+  it('applies saved preferred/disallowed tool constraints without mutating the shared surface', async () => {
     const { service } = makeConfigService()
     const baseSurface = await service.agentToolProfile({
       messages: [{ role: 'user', content: 'read src/main/models/ChatService.ts and suggest fixes' }]
@@ -74,38 +77,25 @@ describe('AgentConfigurationService', () => {
     ) as AgentToolSurface
     const names = constrained.tools.map((tool: { name: string }) => tool.name)
 
-    expect(constrained.name).toBe('filesystem-core')
     expect(names).toContain('grep_page')
     expect(names).toContain('run_command')
     expect(names).not.toContain('search_files')
+    // The shared surface is untouched — removal happened on a copy.
+    expect(baseSurface.tools.map((t) => t.name)).toContain('search_files')
   })
 
-  it('keeps browser essentials on a bare continuation', async () => {
-    const { service } = makeConfigService()
-    const req = {
-      messages: [
-        { role: 'user', content: 'click the login button' },
-        { role: 'assistant', content: 'I see it...' },
-        { role: 'user', content: 'do it' }
-      ]
-    } as any
-    const profile = await service.agentToolProfile(req)
-    const names = profile.tools.map((tool: { name: string }) => tool.name)
-    expect(profile.name).toContain('browser-core')
-    expect(names).toEqual(expect.arrayContaining(['search', 'navigate', 'grep_page']))
-    expect(names).not.toContain('act')
-  })
-
-  it('does not let saved preferences reintroduce lone act', async () => {
+  it('drops lone act when saved preferences strip away every companion verb', async () => {
     const { service } = makeConfigService()
     const baseSurface = await service.agentToolProfile({
       messages: [{ role: 'user', content: 'click the login button' }]
     } as any)
 
+    // The full surface ships act WITH its companions; removing all companions
+    // must also drop act (it is never advertised alone).
     const constrained = (service as any).applyAgentToolPolicy(
       {
         agent: {
-          preferredTools: ['act']
+          disallowedTools: ['set_field', 'submit', 'open_result']
         }
       },
       baseSurface
@@ -115,22 +105,13 @@ describe('AgentConfigurationService', () => {
     expect(names).not.toContain('act')
   })
 
-  it('keeps act when saved preferences include a companion browser verb', async () => {
+  it('keeps act alongside its companion browser verbs on the full surface', async () => {
     const { service } = makeConfigService()
     const baseSurface = await service.agentToolProfile({
       messages: [{ role: 'user', content: 'click the login button' }]
     } as any)
 
-    const constrained = (service as any).applyAgentToolPolicy(
-      {
-        agent: {
-          preferredTools: ['act', 'submit']
-        }
-      },
-      baseSurface
-    ) as AgentToolSurface
-
-    const names = constrained.tools.map((tool: { name: string }) => tool.name)
+    const names = baseSurface.tools.map((tool: { name: string }) => tool.name)
     expect(names).toContain('act')
     expect(names).toContain('submit')
   })
@@ -190,5 +171,39 @@ describe('AgentConfigurationService', () => {
     expect(system).toContain('Calibrate the current tool before switching to another one')
     expect(system).toContain('If read_a11y is noisy or incomplete, retry read_a11y first')
     expect(system).toContain('If grep_page misses, keep grep_page and try 2-3 sharper subject-based phrase variations')
+  })
+
+  it('keeps OpenAI browser-capable tool routing aligned with the shared mixed browser + code surface', async () => {
+    const { service } = makeConfigService('/home/user/project')
+    const req = {
+      messages: [{ role: 'user', content: 'check the current docs site and then update the parser code' }]
+    } as any
+
+    const anthropicNames = (await service.agentToolProfile(req)).tools.map((tool) => tool.name)
+    const openaiNames = (await service.agentToolProfile(req, 'openai')).tools.map((tool) => tool.name)
+
+    expect(openaiNames).toEqual(anthropicNames)
+    expect(openaiNames).toEqual(expect.arrayContaining([
+      'navigate',
+      'grep_page',
+      'search_files',
+      'read_file',
+      'edit_file'
+    ]))
+  })
+
+  it('exposes the full suite on an ordinary turn (no explicit request needed)', async () => {
+    const { service } = makeConfigService('/repo')
+    const req = {
+      messages: [{ role: 'user', content: 'poke at something' }]
+    } as any
+
+    const toolNames = (await service.agentToolProfile(req)).tools.map((tool) => tool.name)
+
+    expect(toolNames).not.toContain('search_tool')
+    expect(toolNames).toContain('search')
+    expect(toolNames).toContain('navigate')
+    expect(toolNames).toContain('run_command')
+    expect(toolNames.length).toBeGreaterThan(10)
   })
 })

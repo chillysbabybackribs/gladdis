@@ -4,6 +4,11 @@ import type { ToolDef } from '../browserTools'
  * SEARCH — web search surface. `search` is the SERP+evidence compaction; with
  * `navigate_visible: true` it also loads the best hit in the visible tab. To
  * read a known URL, navigate to it then grep_page — no separate fetch verb.
+ *
+ * There is no `search_tool` (tool-discovery) verb: every turn now receives the
+ * full flat tool surface (Phase C), so there is nothing to discover. The old
+ * discovery hatch only existed to reach tools a per-turn router had pruned, and
+ * OpenAI-family models could not call a tool that was never advertised anyway.
  */
 export const SEARCH_TOOLS: ToolDef[] = [
   {

@@ -3,6 +3,21 @@ import { buildAgentSystem, buildClaudeCodeSystem, buildCodexSystem } from './pro
 import { knownToolByName } from './agentTools'
 
 describe('embedded prompt tool routing', () => {
+  it('does not teach any search_tool discovery flow (the tool is retired)', async () => {
+    // The full flat surface is offered every turn (Phase C), so there is no
+    // routed-away subset and no tool-discovery hatch to teach.
+    expect(knownToolByName('search_tool')).toBeUndefined()
+
+    const prompt = await buildAgentSystem([
+      knownToolByName('search_files')!,
+      knownToolByName('read_file')!
+    ])
+
+    expect(prompt).not.toContain('search_tool')
+    expect(prompt).not.toContain('get stuck on tool selection')
+    expect(prompt).toContain('You receive the full tool surface every turn')
+  })
+
   it('does not advertise act on direct-provider turns when act is not attached', async () => {
     const prompt = await buildAgentSystem([
       knownToolByName('search')!,
@@ -25,8 +40,8 @@ describe('embedded prompt tool routing', () => {
     const prompt = buildClaudeCodeSystem({ browserToolNames: ['search', 'memory_read'] })
 
     expect(prompt).toContain('Attached Gladdis MCP tools this turn: memory_read, search.')
-    expect(prompt).toContain('Attached browser capabilities by category: memory notebook (recover context and keep task state): memory_read | web discovery (find live web sources or open known URLs): search.')
-    expect(prompt).toContain('These attached tools are a routed subset from a broader categorized browser-tool registry; choose tools by capability/domain fit, not just by name similarity.')
+    expect(prompt).toContain('Attached Gladdis MCP tools this turn: memory_read, search.')
+    expect(prompt).toContain('Use `search` for live web lookup')
     expect(prompt).toContain('Use `search` for live web lookup')
     expect(prompt).toContain('memory_read')
     expect(prompt).not.toContain('`act` is the primary action verb')

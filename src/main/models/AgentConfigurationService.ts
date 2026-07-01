@@ -6,6 +6,7 @@ import {
 } from '../../../shared/types'
 import { BrowserTools, type ToolContext } from './browserTools'
 import {
+  AGENT_TOOLS,
   knownToolByName,
   normalizeToolName
 } from './agentTools'
@@ -24,7 +25,15 @@ import type { Provider } from '../../../shared/types'
 import { DIRECT_API_LOCAL_WORK_CONTRACT } from './codex/processPolicy'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 import type { LlmComplete } from './llm'
-import { routeAgentTools } from './toolRouter'
+
+/**
+ * The full flat surface handed to every turn, as a STABLE array reference so the
+ * provider tool caches hit turn-over-turn. This is `AGENT_TOOLS` itself — the
+ * single source of truth — not a per-turn copy. Any policy that mutates the list
+ * (per-agent add/remove) copies first in applyAgentToolPolicy, so this reference
+ * is never mutated in place.
+ */
+const AGENT_TOOL_SURFACE: ToolDef[] = AGENT_TOOLS
 
 const ACT_COMPANION_TOOL_NAMES = new Set(['set_field', 'submit', 'open_result'])
 
@@ -41,8 +50,7 @@ export class AgentConfigurationService {
   constructor(
     private tools: BrowserTools,
     private repoIntelligence: RepoIntelligenceService,
-    private emit: (e: ChatStreamEvent) => void,
-    private routeWithModel?: LlmComplete
+    private emit: (e: ChatStreamEvent) => void
   ) {}
 
   public async codexRepoOverviewBlock(req: ChatRequest, userText: string): Promise<string | null> {
@@ -91,21 +99,29 @@ export class AgentConfigurationService {
   }
 
   /**
-   * Route the turn onto a compact tool surface, then apply any saved
+   * Hand every turn the full flat tool surface, then apply any saved
    * preferred/disallowed-tool policy from the selected agent.
+   *
+   * This is Phase C of the tool-surface plan (docs/tool-surface-reduction-plan.md):
+   * profiles/per-turn routing are retired. All providers — direct API, Codex, and
+   * Claude Code — see the same list, matching the C8 contract asserted in
+   * ChatService.test.ts. The array reference is STABLE across turns (see
+   * AGENT_TOOL_SURFACE), which is what lets the provider tool caches
+   * (WeakMap-keyed serialization + Anthropic ephemeral `cache_control`) actually
+   * hit turn-over-turn instead of re-sending a different subset each time.
+   *
+   * Why not route a subset: a routed subset needs an escape hatch (`search_tool`)
+   * so a model can reach an un-advertised tool. OpenAI-family models only emit
+   * calls for tools in their advertised schema, so that hatch is a dead end for
+   * them — they can't call what they were never shown. Caching makes the full
+   * surface nearly free after the first turn, so the subset bought nothing and
+   * cost reliability.
    */
   public async agentToolProfile(
-    req: ChatRequest,
+    _req: ChatRequest,
     _provider?: Provider
   ): Promise<AgentToolSurface> {
-    const routed = await routeAgentTools({
-      req,
-      provider: _provider,
-      latestUserText: this.latestSubstantiveUserText(req),
-      hasWorkspaceRoot: Boolean(this.tools.getWorkspaceRoot()),
-      llm: this.routeWithModel
-    })
-    return this.applyAgentToolPolicy(req, { name: routed.name, tools: routed.tools })
+    return this.applyAgentToolPolicy(_req, { name: 'full', tools: AGENT_TOOL_SURFACE })
   }
 
   private applyAgentToolPolicy(

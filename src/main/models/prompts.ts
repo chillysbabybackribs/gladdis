@@ -24,6 +24,7 @@ import {
   buildCursorLocalMachineGuidance,
   buildCursorNativeWorkContract,
   buildWorkingTheCodeContract,
+  COMPLETION_VERIFICATION_GUIDANCE,
   CLAUDE_NATIVE_WORK_GUIDANCE,
   CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE,
   STOP_AFTER_VALIDATED_DONE_GUIDANCE,
@@ -50,12 +51,21 @@ const ABOUT_GLADDIS =
 const AGENT_GUIDANCE_BASE =
   'If asked to do work, use tools to execute it; stop only when the underlying goal is actually met. ' +
   'Once the task is confirmed complete, stop there: give the final answer and do not continue searching, validating, or expanding scope unless a remaining done check failed or the user asked for more. ' +
-  'For ambiguous requests, gather one quick fact from code/page/search before deciding intent. You have the ' +
-  'smallest routed tool surface needed for this turn — browser, files, shell, search, and memory are attached only when needed — so act, do not pause ' +
-  'to explain an inability to act. While working, ' +
-  'look for opened doors: capabilities, shortcuts, nearby evidence, or tool combinations the user may not realize ' +
-  'are available. If one materially improves speed, certainty, or quality, use it or surface it briefly. Stay ' +
-  'proactive, but do not silently expand scope into unrelated work.'
+  'For ambiguous requests, gather one quick fact from code/page/search before deciding intent. The tool surface ' +
+  'routed onto this turn is a starting point, not a ceiling: shell/native-command access is the escape hatch, so a ' +
+  'capability you need but do not see attached is almost never a real blocker — shell out to fetch web data in the ' +
+  'background (curl/CLI/API), invoke any tool or script already in the repo, or write and run a small throwaway tool ' +
+  'on the fly to get it done. Keep the visible browser tab primary for anything the user should watch happen; shell ' +
+  'runs alongside it, never as a replacement for live navigation. Do not ' +
+  'stop and report an inability to act because a specific routed tool is absent; only a turn with genuinely no shell ' +
+  'or native-command access can be truly blocked that way, and even then, say exactly what you would run. Fallback ' +
+  'enforcement: a failed or unavailable preferred tool is not a blocker. If a done check remains unmet and you can ' +
+  'identify any concrete next action using another available capability—shell, script, HTTP/API call, alternate site ' +
+  'path, or throwaway automation—you must take that action before reporting the task as blocked or pausing on unmet ' +
+  'checks. In particular, inability to directly drive the visible browser tab never by itself justifies stopping. ' +
+  'While working, look for opened doors: capabilities, shortcuts, nearby evidence, or tool combinations the user may ' +
+  'not realize are available. If one materially improves speed, certainty, or quality, use it or surface it briefly. ' +
+  'Stay proactive, but do not silently expand scope into unrelated work.'
 
 const REASONING_METHOD =
   '## How to Work\n' +
@@ -68,6 +78,7 @@ const REASONING_METHOD =
   '  • web facts: web search for current or dated information\n' +
   '  • machine state: run commands\n' +
   '  • UI: read/drive the visible tab\n\n' +
+  'You receive the full tool surface every turn — there is no hidden or routed-away subset to discover. Every browser, filesystem, shell, and memory tool listed is callable now; pick the one that fits and use it.\n\n' +
   'For codebase inspection, prefer the file tools first: use search_files to find the exact area, then read_file around the relevant hits. Prefer these over broad run_command searches or ad-hoc Node/shell inspection when the goal is understanding the repo. When the file tools can answer the question, do not use run_command just to list files, grep text, cat source, or run throwaway Node/Python snippets.\n\n' +
   'If you do need run_command, keep it narrow and purposeful: use the smallest command that answers the missing shell-only fact, avoid verbose recursive output, and prefer repo/file tools again immediately after the command. Treat large stdout dumps as a last resort, not a default workflow.\n\n' +
   'Act from evidence. If uncertain, verify before asserting. If intent is unclear, ask one sharp question or two options. ' +
@@ -223,7 +234,10 @@ function buildBrowserInteractionGuidance(names: Set<string>): string {
       '  • After each meaningful read/action, grade the result: right entity, right structure, enough coverage. If not, recalibrate the same tool once before switching surfaces.'
     ].join('\n'),
     actionLines.length > 0 ? [`${names.has('act') ? 'Act' : 'Action'} — semantic verbs first, low-level companion actions second:`, ...actionLines].join('\n') : null,
-    lowerLevelLines.length > 0 ? ['Lower-level (only when the layers above cannot express what you need):', ...lowerLevelLines].join('\n') : null
+    lowerLevelLines.length > 0 ? ['Lower-level (only when the layers above cannot express what you need):', ...lowerLevelLines].join('\n') : null,
+    actionLines.length > 0
+      ? 'These action tools ARE interactive browser control — clicking a date grid, opening a result, expanding a menu, filling and submitting a form all happen through them on the visible tab, right now, this turn. When your named next step is a browser interaction (e.g. "click the date cell", "open that itinerary", "click through to the airline"), that interaction IS the next action — perform it. Never defer a browser interaction you can do this turn to a hypothetical future turn, and never ask the user whether an interactive browser surface "will be available next turn": if these tools are attached, it already is.'
+      : null
   ].filter((section): section is string => Boolean(section))
 
   return sections.join('\n\n')
@@ -253,6 +267,7 @@ const MEMORY_OVERVIEW =
 const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: string | ((names: Set<string>) => string) }> = [
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
+  { enabled: () => true, text: COMPLETION_VERIFICATION_GUIDANCE },
   { enabled: (names) => names.has('search') || names.has('navigate') || names.has('grep_page') || names.has('read_a11y') || names.has('set_field') || names.has('submit') || names.has('open_result') || names.has('act'), text: buildBrowserOverview },
   { enabled: (names) => CODEX_INTERACTION_TOOL_NAMES.some((name) => names.has(name)) || names.has('set_field') || names.has('submit') || names.has('open_result'), text: buildBrowserInteractionGuidance },
   { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files'), text: FILESYSTEM_OVERVIEW },
@@ -391,7 +406,7 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
       })
     : core +
       '\n\nUse your native shell/file tools for local repo, package, validation, and coding work. ' +
-      VALIDATE_COMMIT_PUSH_GUIDANCE
+      `${COMPLETION_VERIFICATION_GUIDANCE} ${VALIDATE_COMMIT_PUSH_GUIDANCE}`
 
   CODEX_SYSTEM_CACHE.set(key, result)
   return result
@@ -428,7 +443,7 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
         uiVisualConfirmationGuidance: UI_VISUAL_CONFIRMATION_GUIDANCE
       })
     : core +
-      `\n\n${CLAUDE_NATIVE_WORK_GUIDANCE} ${VALIDATE_COMMIT_PUSH_GUIDANCE}`
+      `\n\n${CLAUDE_NATIVE_WORK_GUIDANCE} ${COMPLETION_VERIFICATION_GUIDANCE} ${VALIDATE_COMMIT_PUSH_GUIDANCE}`
 
   CLAUDE_CODE_SYSTEM_CACHE.set(key, result)
   return result
@@ -459,7 +474,7 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   if (browserToolNames.size === 0) {
     result =
       core +
-      `\n\n${buildCursorNativeWorkContract()}`
+      `\n\n${buildCursorNativeWorkContract()}\n\n${COMPLETION_VERIFICATION_GUIDANCE}`
   } else {
     result =
       core +

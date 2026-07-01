@@ -33,6 +33,7 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
   editfile: 'edit_file',
   listdir: 'list_dir',
   searchfiles: 'search_files',
+  searchtool: 'search_tool',
   recallhistory: 'recall_history',
   memorywrite: 'memory_write',
   memoryread: 'memory_read',

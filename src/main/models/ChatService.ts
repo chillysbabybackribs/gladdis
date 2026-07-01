@@ -91,15 +91,6 @@ const MAX_OUTPUT_TOKENS = 32_000
 const ANTHROPIC_MAX_TOKENS = MAX_OUTPUT_TOKENS
 const DEFAULT_COMPLETE_MAX_OUTPUT_TOKENS = 4_096
 const CURSOR_POST_ACTION_MAX_ATTEMPTS = 2
-const TOOL_ROUTER_MODEL_ORDER = [
-  'gemini-2.5-flash-lite',
-  'gemini-3.1-flash-lite',
-  'gemini-2.5-flash',
-  'openai-gpt-4o-mini',
-  'openai-gpt-4-1-mini',
-  'grok-build-0.1',
-  'claude-haiku-4-5'
-] as const
 
 // The agent loop is NOT capped by a turn count — it runs until the model stops
 // calling tools (goal reached) or the user hits stop (abort signal). Both loops
@@ -250,8 +241,7 @@ export class ChatService {
     this.agentConfig = new AgentConfigurationService(
       this.tools,
       this.repoIntelligence,
-      (e) => this.emit(e),
-      (system, user, options) => this.toolRouterLlm(system, user, options)
+      (e) => this.emit(e)
     )
   }
 
@@ -1154,28 +1144,6 @@ export class ChatService {
           conversationId: options?.conversationId ?? conversationId
         })
     }
-  }
-
-  private toolRouterLlm(
-    system: string,
-    user: string,
-    options?: LlmCompleteOptions
-  ): Promise<string> {
-    const model = this.preferredToolRouterModel()
-    return this.complete(model.id, system, user, options)
-  }
-
-  private preferredToolRouterModel(): ModelOption {
-    const keyStatus = this.keys.status()
-    for (const modelId of TOOL_ROUTER_MODEL_ORDER) {
-      const model = this.model(modelId)
-      if (!model) continue
-      if (model.provider === 'google' && keyStatus.google) return model
-      if (model.provider === 'openai' && keyStatus.openai) return model
-      if (model.provider === 'grok' && keyStatus.grok) return model
-      if (model.provider === 'anthropic' && keyStatus.anthropic) return model
-    }
-    throw new Error('No fast helper model is available for tool routing')
   }
 
   /* ============================ ASK MODE ============================ */

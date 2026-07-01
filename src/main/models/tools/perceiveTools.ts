@@ -5,6 +5,11 @@ import { digestPage } from '../PageDigest'
 import { captureAxSnapshotForTab, digestAxSnapshot } from '../../extract/axTree'
 import type { CapturedNetworkBody, CapturedNetworkRequest } from '../../network/watchNetworkRecorder'
 import type { NetworkFilterSpec } from '../../network/watchNetworkRecorder'
+import {
+  formatDataSourceDiscovery,
+  summarizeDataSourceDiscovery,
+  type NetworkAwarenessState
+} from '../../network/dataSourceDiscovery'
 
 export interface ReadPageCacheEntry {
   pageUrl: string
@@ -48,6 +53,8 @@ export interface PerceiveToolsDeps {
   recordPageCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') => void
   recordA11yCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') => void
 }
+
+const DISCOVER_DATA_SOURCES_CACHE_TTL_MS = 30_000
 
 export async function runReadPage(
   deps: PerceiveToolsDeps,
@@ -1088,6 +1095,62 @@ export async function runWatchNetwork(
   }
 }
 
+export async function runDiscoverDataSources(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string
+): Promise<ToolOutcome> {
+  try {
+    const refresh = args.refresh === true
+    const maxCandidatesInput = typeof args.max_candidates === 'number' ? args.max_candidates : Number(args.max_candidates)
+    const maxCandidates = Number.isFinite(maxCandidatesInput)
+      ? Math.max(1, Math.min(8, Math.floor(maxCandidatesInput)))
+      : 5
+
+    const currentUrl = normalizePageUrl(deps.tabs.getTabUrl(tabId))
+    const cached = !refresh && typeof deps.tabs.getNetworkAwareness === 'function'
+      ? deps.tabs.getNetworkAwareness(tabId)
+      : null
+    if (
+      cached &&
+      normalizePageUrl(cached.pageUrl) === currentUrl &&
+      Date.now() - cached.capturedAt <= DISCOVER_DATA_SOURCES_CACHE_TTL_MS
+    ) {
+      return networkDiscoveryOutcome(cached, { cached: true })
+    }
+
+    const watchArgs = normalizeWatchNetworkArgs({
+      ...args,
+      mode: 'passive',
+      max_bodies: Math.min(maxCandidates, 3)
+    })
+    const result = await deps.tabs.watchNetwork(tabId, {
+      urlFilter: watchArgs.urlFilter,
+      urlFilters: watchArgs.urlFilters,
+      urlRegex: watchArgs.urlRegex,
+      resourceTypes: watchArgs.resourceTypes,
+      statusCodes: watchArgs.statusCodes,
+      statusMin: watchArgs.statusMin,
+      statusMax: watchArgs.statusMax,
+      mimeIncludes: watchArgs.mimeIncludes,
+      includeRequestBody: watchArgs.includeRequestBody,
+      redactSensitive: watchArgs.redactSensitive,
+      windowMs: watchArgs.windowMs,
+      maxBodies: Math.min(watchArgs.maxBodies, Math.min(maxCandidates, 3)),
+      maxBodyChars: watchArgs.maxBodyChars
+    })
+    const summary = summarizeDataSourceDiscovery(result, {
+      pageUrl: currentUrl,
+      observedWindowMs: watchArgs.windowMs,
+      maxCandidates,
+      capturedAt: Date.now()
+    })
+    return networkDiscoveryOutcome(summary, { cached: false })
+  } catch (err: any) {
+    return { ok: false, text: `discover_data_sources error: ${err?.message ?? err}` }
+  }
+}
+
 type WatchNetworkArgSource = Record<string, any>
 
 export function normalizeWatchNetworkArgs(args: WatchNetworkArgSource): {
@@ -1268,6 +1331,32 @@ export function summarizeNetworkCapture(
       filter: capture.filter,
       captured: capture.captured,
       bodies: capture.bodies
+    }
+  }
+}
+
+function networkDiscoveryOutcome(
+  summary: NetworkAwarenessState,
+  opts: { cached: boolean }
+): ToolOutcome {
+  const text = formatDataSourceDiscovery(summary, {
+    label: opts.cached ? 'DATA SOURCE DISCOVERY (cached)' : 'DATA SOURCE DISCOVERY'
+  })
+  return {
+    ok: true,
+    text,
+    structuredContent: {
+      pageUrl: summary.pageUrl,
+      capturedAt: summary.capturedAt,
+      observedWindowMs: summary.observedWindowMs,
+      cache: opts.cached ? 'hit' : 'miss',
+      totalSeen: summary.totalSeen,
+      matchedCount: summary.matchedCount,
+      pageMode: summary.pageMode,
+      botProtectionSuspected: summary.botProtectionSuspected,
+      recommendation: summary.recommendation,
+      filter: summary.filter,
+      candidateApis: summary.candidateApis
     }
   }
 }

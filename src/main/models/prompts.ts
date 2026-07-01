@@ -102,8 +102,15 @@ const BROWSER_INTERACTION_GUIDANCE =
   'cards, comments, and search results once you know the repeated item selector/XPath. Give it one specific ' +
   'record selector plus a small field map; avoid broad selectors like div. This is the right tool when ' +
   'you need many same-shaped rows and `grep_page` would take repeated passes or truncate.\n' +
+  '  • discover_data_sources → quick network intelligence for the current page. It classifies whether the page looks ' +
+  'server-rendered, API-backed, or mixed, ranks likely JSON/GraphQL endpoints, and tells you whether to stay in the DOM ' +
+  'or pivot to network/API extraction.\n' +
   '  • watch_network → when the answer is data the page fetches from an API (lists, prices, search ' +
   'results, feeds), capture the JSON behind the render instead of scraping HTML.\n\n' +
+  'Middle-game discipline for browser tasks:\n' +
+  '  • Before leaving a page you may need later, preserve it now: save the page or extract the exact records you will compare against.\n' +
+  '  • For each subtask, identify the evidence shape you need: one fact, one control, repeated flat records, hierarchical records, or API-backed data.\n' +
+  '  • After each meaningful read/action, grade the result: right entity, right structure, enough coverage. If not, recalibrate the same tool once before switching surfaces.\n\n' +
   'Act — one primary verb:\n' +
   '  • act → click | type | key | select. Target by (preferred) a read_a11y @ref, or a `query` ' +
   '(text / CSS / XPath resolved live), or explicit coords {x,y}. For type pass `text`; for key pass `key` ' +
@@ -150,7 +157,7 @@ const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: s
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
   { enabled: (names) => names.has('search'), text: BROWSER_OVERVIEW },
-  { enabled: (names) => names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
   { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
   { enabled: (names) => names.has('run_command'), text: SHELL_GUIDANCE },
@@ -181,7 +188,7 @@ function guidanceKey(tools: ToolDef[]): GuidanceBit {
   const names = new Set(tools.map((tool) => tool.name))
   let key = 0
   if (names.has('search')) key |= GUIDANCE_BITS.browserSearch
-  if (names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
+  if (names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
   if (names.has('read_file') || names.has('list_dir') || names.has('search_files')) key |= GUIDANCE_BITS.filesystemRead
   if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
   if (names.has('run_command')) key |= GUIDANCE_BITS.shell
@@ -300,7 +307,7 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
   return result
 }
 
-export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Claude Code turns run through the local Claude CLI, preserving Claude's
@@ -348,7 +355,7 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
   return result
 }
 
-export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Cursor turns run through the local Cursor Agent CLI. Keep this lean: Cursor
@@ -393,4 +400,4 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   return result
 }
 
-export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })

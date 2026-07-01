@@ -23,6 +23,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'read_a11y',
   'grep_page',
   'extract_structured',
+  'discover_data_sources',
   'watch_network',
   'screenshot',
   'screenshot_app',
@@ -89,6 +90,7 @@ const CODEX_INTERACTION_TOOL_NAMES = [
   'read_a11y',
   'grep_page',
   'extract_structured',
+  'discover_data_sources',
   'watch_network',
   'screenshot',
   'screenshot_app',
@@ -158,6 +160,12 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
     lines.push(
       '`extract_structured` is for repeated DOM records, not exploration: use it for tables, cards, feed items, comments, or search results once you know the repeated row selector. ' +
       'Pass one specific `item_selector`/`item_xpath` and a small `fields` map. Avoid broad selectors like `div`, and prefer this over many repeated `grep_page` calls when you need multiple same-shaped records.'
+    )
+  }
+
+  if (allowed.has('discover_data_sources')) {
+    lines.push(
+      '`discover_data_sources` is the early network-intelligence pass: use it when repeated records may come from APIs. It classifies the page as server-rendered, API-backed, or mixed, ranks candidate JSON/GraphQL endpoints, and tells you whether to stay in the DOM or pivot to network capture.'
     )
   }
 

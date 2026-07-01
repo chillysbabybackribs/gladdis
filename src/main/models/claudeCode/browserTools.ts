@@ -16,6 +16,7 @@ export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
   'read_a11y',
   'grep_page',
   'extract_structured',
+  'discover_data_sources',
   'watch_network',
   'screenshot',
   'screenshot_app',
@@ -55,6 +56,7 @@ export const CURSOR_MCP_TOOL_NAMES = new Set([
   'read_a11y',
   'grep_page',
   'extract_structured',
+  'discover_data_sources',
   'watch_network',
   'screenshot',
   'screenshot_app',
@@ -97,6 +99,7 @@ const INTERACTION_TOOL_NAMES = [
   'read_a11y',
   'grep_page',
   'extract_structured',
+  'discover_data_sources',
   'watch_network',
   'screenshot',
   'screenshot_app',
@@ -164,6 +167,12 @@ function buildEmbeddedBrowserInstructions(args: {
     lines.push(
       '`extract_structured` is for repeated DOM records, not exploration: use it for tables, cards, feed items, comments, or search results once you know the repeated row selector. ' +
       'Ask for one specific `item_selector`/`item_xpath` plus a SMALL `fields` map. Avoid broad selectors like `div` and prefer this over many repeated `grep_page` calls when you need several records in the same shape.'
+    )
+  }
+
+  if (allowed.has('discover_data_sources')) {
+    lines.push(
+      '`discover_data_sources` is the quick network-intelligence pass: use it early when lists, comments, or tables may be API-backed. It classifies the page, ranks candidate JSON/GraphQL endpoints, and recommends whether to stay in the DOM or pivot to network capture.'
     )
   }
 

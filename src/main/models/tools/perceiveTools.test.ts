@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { normalizeWatchNetworkArgs, runReadPage, runWatchNetwork, type PerceiveToolsDeps } from './perceiveTools'
+import { normalizeWatchNetworkArgs, runDiscoverDataSources, runReadPage, runWatchNetwork, type PerceiveToolsDeps } from './perceiveTools'
 
 function mockPerceiveDeps(overrides: Partial<PerceiveToolsDeps> & Pick<PerceiveToolsDeps, 'tabs'>): PerceiveToolsDeps {
   return {
@@ -303,6 +303,123 @@ describe('runWatchNetwork', () => {
     expect(outcome).toEqual({
       ok: false,
       text: 'watch_network error: watch_network arg "window_ms" must be a finite number'
+    })
+  })
+})
+
+describe('runDiscoverDataSources', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('returns a fresh ranked discovery summary from passive capture', async () => {
+    const watchNetwork = vi.fn(async () => ({
+      totalSeen: 2,
+      captured: [
+        {
+          requestId: 'doc-1',
+          url: 'https://example.com/dashboard',
+          method: 'GET',
+          status: 200,
+          mimeType: 'text/html',
+          type: 'Document',
+          success: true
+        },
+        {
+          requestId: 'req-1',
+          url: 'https://example.com/api/items',
+          method: 'GET',
+          status: 200,
+          mimeType: 'application/json',
+          type: 'Fetch',
+          success: true,
+          durationMs: 120,
+          encodedDataLength: 456
+        }
+      ],
+      bodies: [
+        {
+          requestId: 'req-1',
+          url: 'https://example.com/api/items',
+          status: 200,
+          mimeType: 'application/json',
+          body: '{"items":[{"id":1,"name":"One"}]}',
+          truncated: false
+        }
+      ]
+    }))
+
+    const outcome = await runDiscoverDataSources(
+      mockPerceiveDeps({
+        tabs: {
+          watchNetwork,
+          getTabUrl: () => 'https://example.com/dashboard',
+          getNetworkAwareness: () => null
+        } as any
+      }),
+      { window_ms: 1200, max_candidates: 3 },
+      'tab-1'
+    )
+
+    expect(watchNetwork).toHaveBeenCalledWith(
+      'tab-1',
+      expect.objectContaining({
+        windowMs: 1_200,
+        maxBodies: 3
+      })
+    )
+    expect(outcome.ok).toBe(true)
+    expect(outcome.text).toContain('mixed')
+    expect(outcome.text).toContain('api/items')
+    expect(outcome.structuredContent).toMatchObject({
+      cache: 'miss',
+      pageMode: 'mixed',
+      botProtectionSuspected: false
+    })
+  })
+
+  it('reuses a recent cached awareness summary when refresh is false', async () => {
+    const watchNetwork = vi.fn(async () => {
+      throw new Error('should not watch when cache is hot')
+    })
+    const cached = {
+      pageUrl: 'https://example.com/dashboard',
+      capturedAt: Date.now(),
+      totalSeen: 1,
+      matchedCount: 1,
+      pageMode: 'api_backed',
+      botProtectionSuspected: false,
+      recommendation: 'Use the API.',
+      candidateApis: [
+        {
+          url: 'https://example.com/api/items',
+          method: 'GET',
+          status: 200,
+          type: 'Fetch',
+          mimeType: 'application/json',
+          kind: 'json',
+          auth: 'none',
+          score: 80
+        }
+      ]
+    }
+
+    const outcome = await runDiscoverDataSources(
+      mockPerceiveDeps({
+        tabs: {
+          watchNetwork,
+          getTabUrl: () => 'https://example.com/dashboard',
+          getNetworkAwareness: () => cached
+        } as any
+      }),
+      {},
+      'tab-1'
+    )
+
+    expect(watchNetwork).not.toHaveBeenCalled()
+    expect(outcome.ok).toBe(true)
+    expect(outcome.text).toContain('cached')
+    expect(outcome.structuredContent).toMatchObject({
+      cache: 'hit',
+      pageMode: 'api_backed'
     })
   })
 })

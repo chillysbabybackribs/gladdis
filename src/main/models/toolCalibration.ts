@@ -30,6 +30,7 @@ export function toolSurfaceForName(name: string): ToolSurface | null {
     name === 'read_page' ||
     name === 'read_a11y' ||
     name === 'extract_structured' ||
+    name === 'discover_data_sources' ||
     name === 'watch_network' ||
     name === 'screenshot' ||
     name === 'screenshot_app' ||
@@ -123,9 +124,12 @@ export function buildToolCalibrationBlock(args: {
     'Refine the current tool before switching:',
   )
   if (surfaces.has('browser')) {
+    lines.push('- Before leaving a page you may need later, preserve the current evidence shape now: save the page or extract the exact records you will compare against.')
+    lines.push('- For the next browser subtask, name the evidence shape you need: single fact, control target, repeated flat records, hierarchical records, or API-backed data.')
     lines.push('- If read_a11y is noisy or incomplete, retry read_a11y first with a better focus, viewportOnly, or interactiveOnly setting to get the right slice.')
     lines.push('- If grep_page misses, keep grep_page and try 2-3 sharper phrase variations or a precise selector/XPath before abandoning it.')
     lines.push('- If extract_structured is wrong, tighten the item selector/XPath, field selectors, or scope before switching tools.')
+    lines.push('- If discover_data_sources says the page is server-rendered, stay in DOM/a11y tools; if it surfaces strong JSON/GraphQL candidates, prefer those before broad scraping.')
     lines.push('- If act misses its target, refresh the page state with read_a11y or a phrased grep_page, then retry act with a fresh ref/query.')
   }
   if (surfaces.has('filesystem')) {
@@ -137,6 +141,7 @@ export function buildToolCalibrationBlock(args: {
     'Mid-turn recalibration triggers:',
     '- Any tool returns ok:false.',
     '- A tool changes state: browser navigation/DOM actions, file edits/writes, shell commands, or memory writes.',
+    '- The tool returns the wrong shape even if the content looks relevant (missing order, hierarchy, pairing, or enough coverage).',
     '- When triggered, retry the same tool with a tighter scope/query/parameter set if it can express the need. Switch tools only when the current tool cannot.'
   )
 
@@ -217,6 +222,9 @@ function recalibrationHint(name: string, surface: ToolSurface, staleReason?: str
   }
   if (name === 'extract_structured') {
     return `${prefix}keep extract_structured and narrow the item selector/XPath, field selectors, or field scope before switching tools.`
+  }
+  if (name === 'discover_data_sources') {
+    return `${prefix}retry discover_data_sources with a tighter filter or a fresh passive window, or arm watch_network before the next action if the page is currently idle.`
   }
   if (name === 'act') {
     return `${prefix}refresh targeting with read_a11y or a phrased grep_page, then retry act with a fresh ref/query instead of jumping sideways.`

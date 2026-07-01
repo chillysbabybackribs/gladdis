@@ -22,6 +22,10 @@ import {
   type NetworkFilterSpec,
   type WatchNetworkOptions
 } from './network/watchNetworkRecorder'
+import {
+  summarizeDataSourceDiscovery,
+  type NetworkAwarenessState
+} from './network/dataSourceDiscovery'
 import type { CdpEventPayload, ExecResult, TabInfo, ViewBounds } from '../../shared/types'
 
 const NETWORK_CAPTURE_POLL_MS = 50
@@ -106,6 +110,7 @@ export class TabManager {
   private zoomFactor = 1
   private onPageNavigation?: (tabId: string) => void
   private pendingNetworkCapture = new Map<string, PendingNetworkCaptureArm>()
+  private networkAwareness = new Map<string, NetworkAwarenessState>()
 
   constructor(
     private readonly win: BaseWindow,
@@ -162,6 +167,7 @@ export class TabManager {
     wc.on('did-start-navigation', (_e, _url, _inPage, isMainFrame) => {
       if (isMainFrame) {
         tab.favicon = null
+        this.networkAwareness.delete(id)
         this.notifyPageNavigation(id)
         this.onChange()
       }
@@ -251,6 +257,7 @@ export class TabManager {
     this.win.contentView.removeChildView(tab.view)
     tab.view.webContents.close()
     this.tabs.delete(id)
+    this.networkAwareness.delete(id)
     if (idx !== -1) this.order.splice(idx, 1)
 
     // gladdis always keeps at least one tab open on the homepage.
@@ -436,6 +443,7 @@ export class TabManager {
       await tab.cdp.send('Network.enable', {})
       await new Promise((resolve) => setTimeout(resolve, opts.windowMs))
       const result = await recorder.finalize()
+      this.recordNetworkAwareness(id, { ...result, filter }, opts.windowMs)
       return { ...result, filter }
     } finally {
       dbg.removeListener('message', onMessage)
@@ -515,6 +523,7 @@ export class TabManager {
 
       await new Promise((resolve) => setTimeout(resolve, armed.windowMs))
       const result = await recorder.finalize()
+      this.recordNetworkAwareness(id, { ...result, filter }, armed.windowMs)
       return { value, network: { ...result, filter } }
     } finally {
       dbg.removeListener('message', onMessage)
@@ -595,6 +604,7 @@ export class TabManager {
       const result = networkEnabled
         ? await recorder.finalize()
         : { captured: [], totalSeen: 0, bodies: [] }
+      this.recordNetworkAwareness(id, { ...result, filter }, quietWindowMs)
       return { ...result, filter }
     } finally {
       dbg.removeListener('message', onMessage)
@@ -658,6 +668,11 @@ export class TabManager {
     return tab.view.webContents.getURL()
   }
 
+  getNetworkAwareness(tabId: string): NetworkAwarenessState | null {
+    const awareness = this.networkAwareness.get(tabId)
+    return awareness ? { ...awareness, candidateApis: awareness.candidateApis.map((item) => ({ ...item })) } : null
+  }
+
   /**
    * Resolve a guaranteed-usable visible tab id, creating one if needed.
    *
@@ -687,6 +702,22 @@ export class TabManager {
 
   snapshot(): { tabs: TabInfo[]; activeTabId: string | null } {
     return { tabs: this.list(), activeTabId: this.activeTabId }
+  }
+
+  private recordNetworkAwareness(
+    tabId: string,
+    capture: NetworkCaptureResult,
+    observedWindowMs?: number
+  ): void {
+    const pageUrl = this.getTabUrl(tabId)
+    this.networkAwareness.set(
+      tabId,
+      summarizeDataSourceDiscovery(capture, {
+        pageUrl,
+        observedWindowMs,
+        capturedAt: Date.now()
+      })
+    )
   }
 
   private info(tab: Tab): TabInfo {

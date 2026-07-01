@@ -44,7 +44,7 @@ interface ActiveTransport {
 
 const MCP_PATH = '/mcp'
 const GUARDRAIL_GUIDANCE =
-  'Use the Gladdis MCP tools for browser work: search, navigate, read_page, read_a11y, watch_network, ' +
+  'Use the Gladdis MCP tools for browser work: search, navigate, read_page, read_a11y, discover_data_sources, watch_network, ' +
   'grep_page, screenshot, screenshot_app, act, grep_click, grep_type, execute_in_browser, or cdp_command. ' +
   'Never use native shell/CLI browser commands (google-chrome, chromium, playwright, puppeteer, xdg-open on URLs, ' +
   'curl/wget against localhost:9222) - they bypass Gladdis and the user cannot see them.'

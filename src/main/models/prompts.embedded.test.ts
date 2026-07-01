@@ -28,4 +28,11 @@ describe('embedded prompt tool routing', () => {
     expect(prompt).toContain('Attached Gladdis tools this turn: extract_structured.')
     expect(prompt).toContain('`extract_structured` is for repeated DOM records')
   })
+
+  it('teaches discover_data_sources when that tool is attached', () => {
+    const prompt = buildCodexSystem({ gladdisToolNames: ['discover_data_sources'] })
+
+    expect(prompt).toContain('Attached Gladdis tools this turn: discover_data_sources.')
+    expect(prompt).toContain('`discover_data_sources` is the early network-intelligence pass')
+  })
 })

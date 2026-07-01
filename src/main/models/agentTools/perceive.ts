@@ -299,6 +299,114 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
     }
   },
   {
+    name: 'discover_data_sources',
+    description:
+      'Quickly classify whether the current page looks server-rendered, API-backed, or mixed by observing a short bounded network window and ranking candidate JSON/GraphQL endpoints. ' +
+      'Use this early when repeated records might come from APIs (feeds, search results, comments, tables, dashboards) and you want to decide between DOM extraction and network capture before spending turns scraping. ' +
+      'Returns page mode, bot-protection suspicion, top candidate endpoints, and a recommended next move.',
+    parameters: {
+      type: 'object',
+      properties: {
+        refresh: {
+          type: 'boolean',
+          description: 'If true, ignore any recent cached network-awareness summary and run a fresh bounded observation.'
+        },
+        url_filter: {
+          type: 'string',
+          description: 'Optional case-insensitive substring to keep only matching request URLs.'
+        },
+        url_filters: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional list of URL substrings; a request is kept if any entry matches.'
+        },
+        url_regex: {
+          type: 'string',
+          description: 'Optional case-insensitive regex pattern applied to request URLs.'
+        },
+        resource_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional resource types to keep, e.g. ["xhr", "fetch", "document"].'
+        },
+        mime_includes: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional case-insensitive substrings that must match the response mime type.'
+        },
+        status_codes: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Optional exact HTTP statuses to keep.'
+        },
+        status_min: {
+          type: 'number',
+          description: 'Optional minimum HTTP status to keep.'
+        },
+        status_max: {
+          type: 'number',
+          description: 'Optional maximum HTTP status to keep.'
+        },
+        include_request_body: {
+          type: 'boolean',
+          description: 'If true, include bounded request payload previews when available to help spot GraphQL or query schemas.'
+        },
+        redact_sensitive: {
+          type: 'boolean',
+          description: 'If false, disables the default redaction of sensitive headers and payload fields.'
+        },
+        window_ms: {
+          type: 'number',
+          description: 'How long to observe, in ms. Default 4000, max 15000.'
+        },
+        max_candidates: {
+          type: 'number',
+          description: 'Maximum ranked candidate endpoints to return. Default 5, max 8.'
+        },
+        max_body_chars: {
+          type: 'number',
+          description: 'Per-body character cap used when sampling response bodies for schema hints.'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        pageUrl: { type: 'string' },
+        capturedAt: { type: 'number' },
+        observedWindowMs: { type: 'number' },
+        cache: { type: 'string', enum: ['hit', 'miss'] },
+        totalSeen: { type: 'number' },
+        matchedCount: { type: 'number' },
+        pageMode: { type: 'string', enum: ['server_rendered', 'api_backed', 'mixed', 'unknown'] },
+        botProtectionSuspected: { type: 'boolean' },
+        recommendation: { type: 'string' },
+        candidateApis: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              url: { type: 'string' },
+              method: { type: 'string' },
+              status: { type: 'number' },
+              type: { type: 'string' },
+              mimeType: { type: 'string' },
+              kind: { type: 'string', enum: ['json', 'graphql', 'html', 'other'] },
+              auth: { type: 'string', enum: ['none', 'cookie', 'header', 'unknown'] },
+              score: { type: 'number' },
+              durationMs: { type: 'number' },
+              encodedDataLength: { type: 'number' },
+              sampleKeys: { type: 'array', items: { type: 'string' } },
+              requestKeys: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['url', 'method', 'status', 'type', 'mimeType', 'kind', 'auth', 'score']
+          }
+        }
+      },
+      required: ['pageUrl', 'capturedAt', 'cache', 'totalSeen', 'matchedCount', 'pageMode', 'botProtectionSuspected', 'recommendation', 'candidateApis']
+    }
+  },
+  {
     name: 'watch_network',
     description:
       'Read the structured data a page is built from — the JSON behind the render, ' +

@@ -32,7 +32,18 @@ import {
   runSearchFiles,
   runWriteFile
 } from './tools/fsTools'
-import { type ReadPageCacheEntry, type ReadA11yCacheEntry, runExtractStructured, runGrepPage, runReadA11y, runReadPage, runScreenshot, runScreenshotApp, runWatchNetwork } from './tools/perceiveTools'
+import {
+  type ReadPageCacheEntry,
+  type ReadA11yCacheEntry,
+  runDiscoverDataSources,
+  runExtractStructured,
+  runGrepPage,
+  runReadA11y,
+  runReadPage,
+  runScreenshot,
+  runScreenshotApp,
+  runWatchNetwork
+} from './tools/perceiveTools'
 import { runSearchTool } from './tools/searchTools'
 import { runShellCommand } from './tools/shellTools'
 import { runRecallHistory } from './tools/historyTools'
@@ -364,6 +375,9 @@ export class BrowserTools {
           break
         case 'watch_network':
           outcome = await runWatchNetwork(this.perceiveDeps(), args, ctx.tabId)
+          break
+        case 'discover_data_sources':
+          outcome = await runDiscoverDataSources(this.perceiveDeps(), args, ctx.tabId)
           break
         case 'screenshot':
           outcome = await runScreenshot(this.perceiveDeps(), args, ctx.tabId)

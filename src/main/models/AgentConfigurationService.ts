@@ -7,10 +7,16 @@ import {
 import { BrowserTools, type ToolContext } from './browserTools'
 import {
   AGENT_TOOLS,
-  selectAgentToolProfile,
   knownToolByName,
   normalizeToolName
 } from './agentTools'
+import type { ToolDef } from './browserTools'
+
+/** A turn's tool surface: the full primitive set, after per-agent user policy. */
+export interface AgentToolSurface {
+  name: 'full'
+  tools: ToolDef[]
+}
 import { stripActivePagePreamble } from './routing'
 import { taskIdForRequest } from './loopStateEmitter'
 import { buildAgentSystem } from './prompts'
@@ -71,39 +77,24 @@ export class AgentConfigurationService {
     }
   }
 
+  /**
+   * The tool surface for a turn. The full primitive surface is offered every
+   * turn (profiles + request_tools were retired — the surface is small enough
+   * not to ration), then per-agent user policy (preferred/disallowed tools)
+   * narrows or extends it. `provider` is unused now that no provider gets a
+   * special promotion, but kept for call-site compatibility.
+   */
   public agentToolProfile(
     req: ChatRequest,
-    provider?: Provider
-  ): ReturnType<typeof selectAgentToolProfile> {
-    const baseText = this.latestSubstantiveUserText(req)
-    let profile = selectAgentToolProfile(baseText, {
-      hasWorkspaceFolder: !!this.tools.getWorkspaceRoot()
-    })
-    profile = this.applyProviderToolPolicy(profile, provider)
-    return this.applyAgentToolPolicy(req, profile)
-  }
-
-  private applyProviderToolPolicy(
-    profile: ReturnType<typeof selectAgentToolProfile>,
-    provider?: Provider
-  ): ReturnType<typeof selectAgentToolProfile> {
-    if (provider !== 'openai' || !this.tools.getWorkspaceRoot()) return profile
-
-    // OpenAI's direct API path does not have a separate native CLI runtime
-    // like Codex/Cursor/Claude Code. On workspace turns, promote browser /
-    // research profiles to a workshop-style surface so OpenAI can inspect and
-    // edit local code without first burning a request_tools round-trip.
-    if (profile.name !== 'browser' && profile.name !== 'research') return profile
-
-    const requestTools = knownToolByName('request_tools')
-    const tools = requestTools ? [...AGENT_TOOLS, requestTools] : [...AGENT_TOOLS]
-    return { name: 'full', tools }
+    _provider?: Provider
+  ): AgentToolSurface {
+    return this.applyAgentToolPolicy(req, { name: 'full', tools: [...AGENT_TOOLS] })
   }
 
   private applyAgentToolPolicy(
     req: ChatRequest,
-    baseProfile: ReturnType<typeof selectAgentToolProfile>
-  ): ReturnType<typeof selectAgentToolProfile> {
+    baseProfile: AgentToolSurface
+  ): AgentToolSurface {
     const agent = req.agent
     if (!agent) return baseProfile
 
@@ -112,7 +103,6 @@ export class AgentConfigurationService {
 
     const withPolicy = [...baseProfile.tools]
     const used = new Set(withPolicy.map((tool) => tool.name))
-    const keepRequestTools = withPolicy.some((tool) => tool.name === 'request_tools')
 
     for (const name of requested.toAdd) {
       if (used.has(name)) continue
@@ -125,14 +115,10 @@ export class AgentConfigurationService {
     if (requested.toRemove.length) {
       for (let i = withPolicy.length - 1; i >= 0; i--) {
         const tool = withPolicy[i]
-        if (tool && requested.toRemove.includes(tool.name) && tool.name !== 'request_tools') {
+        if (tool && requested.toRemove.includes(tool.name)) {
           withPolicy.splice(i, 1)
         }
       }
-    }
-    if (!withPolicy.some((tool) => tool.name === 'request_tools') && keepRequestTools) {
-      const requestTools = knownToolByName('request_tools')
-      if (requestTools) withPolicy.push(requestTools)
     }
 
     return { ...baseProfile, tools: withPolicy }
@@ -230,12 +216,9 @@ export class AgentConfigurationService {
     return [base, providerBlock, custom].filter(Boolean).join('\n\n')
   }
 
-  public workspaceSystemBlock(profile?: ReturnType<typeof selectAgentToolProfile>): string | null {
+  public workspaceSystemBlock(_profile?: AgentToolSurface): string | null {
     const folder = this.tools.getWorkspaceRoot()
     if (!folder) return null
-    if (profile && profile.name !== 'filesystem' && profile.name !== 'full') {
-      return `Workspace: ${folder}\nUse request_tools("filesystem") for repo and shell work.`
-    }
     return `Workspace: ${folder}`
   }
 }
@@ -244,11 +227,11 @@ const DIRECT_API_WORKSHOP_BLOCK =
   '## Direct API local-work contract\n' +
   'This direct API turn does local repo, file, edit, validation, and shell work through Gladdis tools. ' +
   'Use them as your primary local environment for this turn.\n\n' +
-  'For codebase inspection, stay surgical: prefer repo_overview for orientation, then search_repo or repo_grep_task to locate the exact area before any raw reads. ' +
-  'Use read_spans only as the follow-up bounded read once search has identified the relevant windows. Batch related file windows into one read_spans({items:[...]}) call when possible instead of ' +
-  'many sequential one-off reads. When you do use read_spans, prefer the multi-span items form over repeated single-path calls. ' +
-  'When you do use read_file, prefer explicit start_line/end_line windows and avoid ' +
-  'full:true unless the file is small, config-like, or the user explicitly asked for the whole file.\n\n' +
-  'For local work, use run_command for commands, edit_file for exact patches, write_file only when creating or ' +
-  'fully replacing a file, and verify_change for validation. Keep Gladdis browser tools first-class for web search ' +
-  'and page work inside the visible Chromium tab; do not treat shell/browser commands as substitutes for web tasks.'
+  'For codebase inspection, stay surgical: use search_files to locate the exact area before any raw reads, then ' +
+  'read_file with explicit start_line/end_line windows. Avoid full:true unless the file is small, config-like, or ' +
+  'the user explicitly asked for the whole file.\n\n' +
+  'For local work, prefer the narrowest tool that matches the job: search_files/read_file for inspection, edit_file for exact patches, ' +
+  'write_file only when creating or fully replacing a file, and verify_change or run_validation for validation when available. Treat ' +
+  'run_command as a fallback for explicit shell tasks like git/package/install/dev-server work, not as the default path for checks or ' +
+  'codebase reading. Keep Gladdis browser tools first-class for web search and page work inside the visible Chromium tab; do not treat ' +
+  'shell/browser commands as substitutes for web tasks.'

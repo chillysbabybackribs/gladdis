@@ -1,15 +1,15 @@
 import type { ToolDef } from '../browserTools'
 
 /**
- * FS — local filesystem + clipboard + shell + publish + audit_codebase.
- * Anything that touches the OS user's local environment lives here, except
- * the repo-intel tools (REPO_TOOLS) which go through the CapabilityBroker.
+ * FS — local filesystem + shell.
+ * Anything that touches the OS user's local environment lives here. Validation,
+ * publish, dev-server, and clipboard are all expressible through run_command.
  */
 export const FS_TOOLS: ToolDef[] = [
   {
     name: 'read_file',
     description:
-      'Read a UTF-8 file with optional line bounds. Prefer repo_overview/search_repo/repo_grep_task/search_files first, then use read_spans or line-bounded reads as follow-up; ' +
+      'Read a UTF-8 file with optional line bounds. Prefer search_files first to locate, ' +
       'then use start_line/end_line for surgical reads. Small files return whole; large files return a bounded preview plus metadata.',
     parameters: {
       type: 'object',
@@ -87,79 +87,9 @@ export const FS_TOOLS: ToolDef[] = [
     }
   },
   {
-    name: 'run_validation',
-    description:
-      'Compatibility alias. Prefer verify_change where possible.',
-    parameters: {
-      type: 'object',
-      properties: {
-        check: {
-          type: 'string',
-          enum: ['typecheck', 'test', 'build', 'check'],
-          description: 'Validation command to run: typecheck, test, build, or check.'
-        }
-      },
-      required: ['check']
-    }
-  },
-  {
-    name: 'read_clipboard',
-    description:
-      'Read OS clipboard text.',
-    parameters: {
-      type: 'object',
-      properties: {
-        selection: {
-          type: 'string',
-          enum: ['clipboard', 'primary'],
-          description: 'Selection to read. Defaults to "clipboard".'
-        }
-      }
-    }
-  },
-  {
-    name: 'write_clipboard',
-    description:
-      'Write plain text to the OS clipboard.',
-    parameters: {
-      type: 'object',
-      properties: {
-        text: { type: 'string', description: 'Clipboard text.' },
-        selection: {
-          type: 'string',
-          enum: ['clipboard', 'primary'],
-          description: 'Selection to write. Defaults to "clipboard".'
-        }
-      },
-      required: ['text']
-    }
-  },
-  {
-    name: 'publish_changes',
-    description:
-      'Commit and push local changes after validation.',
-    parameters: {
-      type: 'object',
-      properties: {
-        message: {
-          type: 'string',
-          description: 'Short commit message. Defaults to "Update Gladdis app".'
-        },
-        remote: {
-          type: 'string',
-          description: 'Git remote to push. Defaults to origin.'
-        },
-        branch: {
-          type: 'string',
-          description: 'Branch to push. Defaults to the current branch.'
-        }
-      }
-    }
-  },
-  {
     name: 'run_command',
     description:
-      'Run a shell command and return combined stdout/stderr output.',
+      'Last-resort shell escape hatch for explicit command-line tasks; returns combined stdout/stderr output after the command exits.',
     parameters: {
       type: 'object',
       properties: {
@@ -177,68 +107,6 @@ export const FS_TOOLS: ToolDef[] = [
         }
       },
       required: ['command']
-    }
-  },
-  {
-    name: 'audit_codebase',
-    description:
-      'Run only on explicit audit requests. Pass the user’s audit objective in "goal" so the report shape follows the request instead of a fixed template.',
-    parameters: {
-      type: 'object',
-      properties: {
-        goal: {
-          type: 'string',
-          description: 'The specific audit objective to answer, ideally preserving the user request.'
-        },
-        focusPath: {
-          type: 'string',
-          description: 'Optional folder/file path to focus the audit.'
-        },
-        model: {
-          type: 'string',
-          description:
-            'Optional model override (e.g. "gemini-2.5-pro").'
-        }
-      }
-    }
-  },
-  {
-    name: 'launch_web_dev_server',
-    description:
-      'Launch and monitor a local dev/preview server.',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          description: 'Action: "start", "stop", "status", or "restart".',
-          enum: ['start', 'stop', 'status', 'restart']
-        },
-        command: {
-          type: 'string',
-          description: 'Server command (e.g. npm run dev). Auto-detect if omitted.'
-        },
-        cwd: {
-          type: 'string',
-          description: 'Working directory for the server command.'
-        },
-        port: {
-          type: 'number',
-          description: 'Expected port to wait on.'
-        },
-        url: {
-          type: 'string',
-          description: 'Expected URL/health endpoint to poll.'
-        },
-        open_browser: {
-          type: 'boolean',
-          description: 'Open ready URL in a new tab when true.'
-        },
-        timeout_ms: {
-          type: 'number',
-          description: 'Milliseconds to wait for readiness.'
-        }
-      }
     }
   }
 ]

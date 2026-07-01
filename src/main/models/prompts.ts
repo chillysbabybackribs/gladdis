@@ -18,9 +18,9 @@ const ABOUT_GLADDIS =
 /** How to behave + the operating constraints that are not obvious from a schema. */
 const AGENT_GUIDANCE_BASE =
   'If asked to do work, use tools to execute it; stop only when the underlying goal is actually met. ' +
-  'For ambiguous requests, gather one quick fact from code/page/search before deciding intent. You start with ' +
-  'a lean toolset. If something is missing, call request_tools with group ("filesystem", "browser", ' +
-  '"research") or exact tool names and continue, not pause to explain an inability to act. While working, ' +
+  'For ambiguous requests, gather one quick fact from code/page/search before deciding intent. You have the ' +
+  'full tool surface available every turn — browser, files, shell, search, and memory — so act, do not pause ' +
+  'to explain an inability to act. While working, ' +
   'look for opened doors: capabilities, shortcuts, nearby evidence, or tool combinations the user may not realize ' +
   'are available. If one materially improves speed, certainty, or quality, use it or surface it briefly. Stay ' +
   'proactive, but do not silently expand scope into unrelated work.'
@@ -30,13 +30,13 @@ const REASONING_METHOD =
   'Start by reading the request and defining what "done" means in 2–4 concrete checks. Each check must be answered ' +
   'from a live source, not memory.\n\n' +
   'Complexity rule: for medium-to-complex tasks — multi-step requests, debugging, coding, research, browser workflows, or anything likely to take multiple tool calls — begin with a short visible organize step. Write `Done means:` with 2–4 concrete completion checks, then `Plan:` with a short ordered list of the next steps. For very simple one-step tasks, you may skip the visible organize block and act directly.\n\n' +
-  'Running task memory rule: for medium-to-complex tasks, create a task memory scope early with memory_create_task, store the working plan/checklist in task memory with memory_write, and update it as steps are completed so the task has a running checked-off record. Use brief status wording the human can follow. For short simple tasks, task memory is optional.\n\n' +
+  'Running task memory rule: for medium-to-complex tasks, if memory_* tools are attached, create a task scope early and store/update the working plan/checklist there so the task has a running checked-off record. If memory tools are not attached, keep the same plan visible inline in your reply and update it as steps complete. Use brief status wording the human can follow. For short simple tasks, this is optional.\n\n' +
   'Use these sources:\n' +
   '  • repo/code: search + read files\n' +
   '  • web facts: web search for current or dated information\n' +
   '  • machine state: run commands\n' +
   '  • UI: read/drive the visible tab\n\n' +
-  'For codebase inspection, prefer repo-native discovery first: use repo_overview for orientation, then search_repo or repo_grep_task to find the exact area. Treat read_spans as a follow-up tool for bounded windows only after search has identified what matters. Prefer these over broad run_command searches or ad-hoc Node/shell inspection when the goal is understanding the repo. When repo-native tools can answer the question, do not use run_command just to list files, grep text, cat source, or run throwaway Node/Python snippets.\n\n' +
+  'For codebase inspection, prefer the file tools first: use search_files to find the exact area, then read_file around the relevant hits. Prefer these over broad run_command searches or ad-hoc Node/shell inspection when the goal is understanding the repo. When the file tools can answer the question, do not use run_command just to list files, grep text, cat source, or run throwaway Node/Python snippets.\n\n' +
   'If you do need run_command, keep it narrow and purposeful: use the smallest command that answers the missing shell-only fact, avoid verbose recursive output, and prefer repo/file tools again immediately after the command. Treat large stdout dumps as a last resort, not a default workflow.\n\n' +
   'Act from evidence. If uncertain, verify before asserting. If intent is unclear, ask one sharp question or two options. ' +
   'For pure text-edit tasks, you can proceed without extra fact gathering.\n\n' +
@@ -55,28 +55,66 @@ const BROWSER_OVERVIEW =
   `${GLADDIS_WEB_TOOLS_RULE}\n\n` +
   'All browser actions act on the VISIBLE tab the user is watching — they see the page change. ' +
   'Use your own judgment about which tool fits; there is no fixed script.\n\n' +
-  '  • search → finds web results and, for browser-oriented tasks, opens the best hit in the visible tab while returning ranked evidence.\n' +
-  '  • search_open → runs search and opens a likely direct URL in parallel when you want both paths at once.\n' +
-  '  • fetch_page → read a known URL deeply.\n' +
-  '  • screenshot/screenshot_app → visual confirmation only.\n\n' +
-  'Start with grep_*, read_page, or read_a11y before interactions. Prefer grep_page or read_a11y for precise targeting, then act, then re-read. ' +
-  'Prefer finishing the user goal over literal wording and ask one clarifying option if still ambiguous.'
+  '  • search → web search. By default it returns ranked SERP hits + a few live-evidence digests ' +
+  'WITHOUT changing the visible tab. Pass navigate_visible: true (or rely on the auto-trigger when ' +
+  'the user explicitly asked to "open / visit / navigate to" a result) to also load the best hit.\n' +
+  '  • navigate → load a known URL in the visible tab. The result already includes a clustered page ' +
+  'map with @refs, so on most pages you can act() next without a separate read.\n\n' +
+  'For targeting on a page that is already loaded, use grep_page (distinctive multi-word phrases, ' +
+  'not single common words) or read_a11y (control discovery via @aN refs), then act. After an act, ' +
+  'use the returned `after` field instead of re-reading. Prefer finishing the user goal over literal ' +
+  'wording; ask one clarifying option if still ambiguous.'
 
 const BROWSER_INTERACTION_GUIDANCE =
   '## Browser interaction\n' +
-  '  • grep_page → primary tool to find text/elements on a page; grep the words near the answer ' +
-  '(type text/regex) and read the returned context, or use type selector for a specific CSS selector/XPath target. Avoid broad tag selectors (a/div/img), they dump the page.\n' +
-  '  • grep_click → discover and click in one step; after read_a11y you can click @aN refs directly.\n' +
-  '  • grep_type → discover, focus, and type in one step; after read_a11y you can target @aN refs directly.\n' +
-  '  • read_page → high-level digest (structure + actions); use for orientation, not targeting.\n' +
-  '  • read_a11y → compact CDP accessibility tree (role + name + @refs + coordinates); use for control discovery on component-heavy UIs.\n' +
-  '  • click_xy → trusted click at x,y or a read_a11y @aN ref.\n' +
-  '  • navigate/type_text/press_key/execute_in_browser/cdp_command → other page actions.'
+  'Three layers — orient, target, act. Use the smallest one that answers the question, ' +
+  'and READ the result before deciding the next step instead of immediately re-reading the page.\n\n' +
+  'Orient (re-use what is already in the result; do not re-read for free):\n' +
+  '  • navigate → the result IS the orientation. It returns the effective URL after any redirect, ' +
+  'readyState, a page-text size hint, AND a clustered MAP of the page\'s primary handles ' +
+  '(search box, nav, main actions) with @refs you can pass straight to act. Only call read_page / ' +
+  'read_a11y after navigate if the map is genuinely not enough.\n' +
+  '  • read_page → bounded structural digest (summary + ACTIONS table). Use only when you DID NOT just ' +
+  'navigate. It is orientation, not targeting.\n' +
+  '  • read_a11y → CDP accessibility tree with stable @aN refs + live coordinates. Reach for it on ' +
+  'component-heavy UIs whose CSS selectors churn but whose controls have accessible names — buttons, ' +
+  'inputs, tabs, menus. The @aN refs returned go straight into act.\n\n' +
+  'Target (precise, cheap — beats screenshots for "what is X / where is X"):\n' +
+  '  • grep_page → SURGICAL, NOT exploratory. Search a distinctive multi-word PHRASE pulled from what ' +
+  'the user actually wants — "released on 14 March 2026", "Pro plan $20 per user", "rate limit exceeded" — ' +
+  'never a single common word like "price" / "date" / "Germany" (those flood with dozens of noise hits ' +
+  'and answer nothing). If the first phrasing misses, run 2–3 variations of the same meaning instead of ' +
+  'broadening to a single word. Each match returns surrounding context, so the answer is read in-place ' +
+  'without a follow-up call. A genuinely rare token (proper noun, error code, identifier) is fine; ' +
+  'common words are the trap. Use type "selector" ONLY with a specific CSS selector or XPath; never with ' +
+  'bare tag names (a / div / img / script dump the page).\n' +
+  '  • watch_network → when the answer is data the page fetches from an API (lists, prices, search ' +
+  'results, feeds), capture the JSON behind the render instead of scraping HTML.\n\n' +
+  'Act — one primary verb:\n' +
+  '  • act → click | type | key | select. Target by (preferred) a read_a11y @ref, or a `query` ' +
+  '(text / CSS / XPath resolved live), or explicit coords {x,y}. For type pass `text`; for key pass `key` ' +
+  '(Enter / Tab / Escape / Arrow*) with no target; for select pass `option`. To load a URL use navigate() — ' +
+  'never pass a URL as an act query (act targets on-page elements, not link addresses).\n' +
+  '  • READ the act result before the next move — IT IS THE POST-ACTION READ. The text channel ends ' +
+  'with " Now at {url} — {title} ({readyState}) focus={...}". The structured `after` object has ' +
+  '{url, title, readyState, activeElement, bodyTextChars, navigated, elements?}. When ' +
+  '`after.navigated` is true the act crossed pages and `after.elements` is a digest of the NEW page\'s ' +
+  'top clickable targets with {tag, role, label, x, y} — act on those directly. Do NOT call ' +
+  'read_page / read_a11y immediately after a navigating act; the digest you need is already in your ' +
+  'hand. When act returns ok:false with "no visible element matched …", treat that as a re-orient ' +
+  'signal: run read_a11y or a phrased grep_page and target a fresh @ref — do not retry the same query.\n\n' +
+  'Lower-level (only when the layers above cannot express what you need):\n' +
+  '  • execute_in_browser, cdp_command → targeted DOM mutations, network interception, raw CDP.\n' +
+  '  • grep_click / grep_type → legacy split verbs. They find + act but return NO fresh state, so ' +
+  'you would have to read separately. Prefer act.\n' +
+  '  • screenshot / screenshot_app → vision LAST resort, for canvas / charts / unlabeled icon-buttons ' +
+  'with no accessible name, or to confirm a UI is not blank. Not for "what does this say" — grep_page ' +
+  'and read_a11y are more precise (literal node + literal coordinate vs. pixels you must infer).'
 
 const FILESYSTEM_OVERVIEW =
   '## Filesystem\n' +
   'Locate before you read: search_files first, then read_file around relevant hits. If nothing matches, try close spellings before concluding absence. ' +
-  'Read full files only when small, config-like, or explicitly requested. For local repo work, prefer repo_overview plus search_repo/repo_grep_task first, and use read_spans only for bounded follow-up windows instead of as the default starting point.'
+  'Read full files only when small, config-like, or explicitly requested.'
 
 const FILESYSTEM_EDITING =
   '## Filesystem editing\n' +
@@ -84,17 +122,11 @@ const FILESYSTEM_EDITING =
 
 const SHELL_GUIDANCE =
   '## Shell & installing tools\n' +
-  'Use run_command for shell tasks; if a required tool/repo/package is missing, install it directly (`npm`, `pip`, `git`, ' +
-  '`sudo apt-get install -y`, passwordless). Prefer the smallest command that works. Use read_clipboard / write_clipboard for text capture.'
-
-const VALIDATION_GUIDANCE =
-  '## Validation\n' +
-  'For source/config/package edits, run verify_change (or run_validation) before finishing. Choose the narrowest needed check first: typecheck, test, build, then check. If it fails, fix and rerun.'
-
-const PUBLISH_GUIDANCE =
-  '## GitHub publishing\n' +
-  'After passing validation, run publish_changes before your final response with a short, descriptive commit message. ' +
-  'Do not ask the user to handle git, commit, push, or GitHub manually unless publish_changes fails or they block it.'
+  'Treat run_command as a last-resort shell escape hatch, not the default way to inspect or verify work. Prefer structured tools first ' +
+  '(search_files/read_file for repo inspection, and verify_change or run_validation for checks when available). Use run_command only for ' +
+  'genuinely shell-only tasks such as explicit git/package/install/dev-server/OS work, or when no narrower tool can do the job. If a ' +
+  'required tool/repo/package is missing, install it directly (`npm`, `pip`, `git`, `sudo apt-get install -y`, passwordless). Prefer the ' +
+  'smallest command that works and avoid long-running or low-signal commands.'
 
 const MEMORY_OVERVIEW =
   '## Memory\n' +
@@ -103,13 +135,11 @@ const MEMORY_OVERVIEW =
 const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: string }> = [
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
-  { enabled: (names) => names.has('search') || names.has('deep_search') || names.has('fetch_page'), text: BROWSER_OVERVIEW },
-  { enabled: (names) => names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
-  { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('repo_grep_task') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier'), text: FILESYSTEM_OVERVIEW },
+  { enabled: (names) => names.has('search'), text: BROWSER_OVERVIEW },
+  { enabled: (names) => names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
-  { enabled: (names) => names.has('run_command') || names.has('launch_web_dev_server'), text: SHELL_GUIDANCE },
-  { enabled: (names) => names.has('run_validation') || names.has('verify_change'), text: VALIDATION_GUIDANCE },
-  { enabled: (names) => names.has('publish_changes'), text: PUBLISH_GUIDANCE },
+  { enabled: (names) => names.has('run_command'), text: SHELL_GUIDANCE },
   { enabled: (names) => names.has('recall_history') || names.has('memory_write') || names.has('memory_read') || names.has('memory_list') || names.has('memory_forget') || names.has('memory_create_task'), text: MEMORY_OVERVIEW },
 ]
 
@@ -128,9 +158,7 @@ const GUIDANCE_BITS = {
   filesystemRead: 1 << 2,
   filesystemWrite: 1 << 3,
   shell: 1 << 4,
-  validation: 1 << 5,
-  publish: 1 << 6,
-  memory: 1 << 7,
+  memory: 1 << 5,
 } as const
 
 type GuidanceBit = (typeof GUIDANCE_BITS)[keyof typeof GUIDANCE_BITS]
@@ -138,13 +166,11 @@ type GuidanceBit = (typeof GUIDANCE_BITS)[keyof typeof GUIDANCE_BITS]
 function guidanceKey(tools: ToolDef[]): GuidanceBit {
   const names = new Set(tools.map((tool) => tool.name))
   let key = 0
-  if (names.has('search') || names.has('deep_search') || names.has('fetch_page')) key |= GUIDANCE_BITS.browserSearch
-  if (names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('screenshot') || names.has('screenshot_app') || names.has('navigate') || names.has('click_xy') || names.has('type_text') || names.has('press_key') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
-  if (names.has('read_file') || names.has('list_dir') || names.has('search_files') || names.has('repo_overview') || names.has('repo_grep_task') || names.has('search_repo') || names.has('read_spans') || names.has('research_dossier')) key |= GUIDANCE_BITS.filesystemRead
+  if (names.has('search')) key |= GUIDANCE_BITS.browserSearch
+  if (names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
+  if (names.has('read_file') || names.has('list_dir') || names.has('search_files')) key |= GUIDANCE_BITS.filesystemRead
   if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
-  if (names.has('run_command') || names.has('launch_web_dev_server')) key |= GUIDANCE_BITS.shell
-  if (names.has('run_validation') || names.has('verify_change')) key |= GUIDANCE_BITS.validation
-  if (names.has('publish_changes')) key |= GUIDANCE_BITS.publish
+  if (names.has('run_command')) key |= GUIDANCE_BITS.shell
   if (names.has('recall_history') || names.has('memory_write') || names.has('memory_read') || names.has('memory_list') || names.has('memory_forget') || names.has('memory_create_task')) key |= GUIDANCE_BITS.memory
   return key
 }
@@ -228,10 +254,11 @@ export const CODEX_SYSTEM =
   'resume request.\n\n' +
   `${CODEX_BROWSER_INSTRUCTIONS}\n\n` +
   'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-  'or current-site state, ground the answer with read_page or read_a11y first.\n\n' +
+  'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
   'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
-  'launching the local dev server, open the rendered page with screenshot and/or read_page/read_a11y and confirm ' +
-  'it is not blank and the intended UI is visible before answering. Do not stop at build/curl-only ' +
+  'launching the local dev server, open the rendered page and confirm with grep_page and/or read_a11y ' +
+  '(or screenshot if the UI is genuinely vision-only) that it is not blank and the intended UI is ' +
+  'visible before answering. Do not stop at build/curl-only ' +
   'validation for UI work.\n\n' +
   'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
 
@@ -256,7 +283,7 @@ export const CLAUDE_CODE_SYSTEM =
   'work from a bare resume request.\n\n' +
   `${CLAUDE_CODE_BROWSER_INSTRUCTIONS}\n\n` +
   'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-  'or current-site state, ground the answer with read_page or read_a11y first.\n\n' +
+  'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
   'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
   'launching the local dev server, use the attached Gladdis browser tools to confirm the page is not blank ' +
   'and the intended UI is visible before finishing.\n\n' +
@@ -293,7 +320,7 @@ export function buildCursorSystem(options: { enableBrowserTools: boolean }): str
       '\n\n' +
       `${CURSOR_BROWSER_INSTRUCTIONS}\n\n` +
       'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, or ' +
-      'current-site state, ground the answer with read_page or read_a11y first.\n\n' +
+      'current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
       'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and launching ' +
       'the local dev server, use the attached Gladdis browser tools to confirm the page is not blank and the ' +
       'intended UI is visible before finishing.'

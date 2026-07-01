@@ -186,7 +186,7 @@ describe('routeServerRequest error handling', () => {
         {
           id: 7,
           method: 'item/tool/call',
-          params: { namespace: 'gladdis', tool: 'fetch_page', arguments: { url: 'https://example.com' }, itemId: 'call-1' }
+          params: { namespace: 'gladdis', tool: 'grep_page', arguments: { query: 'example' }, itemId: 'call-1' }
         } as any,
         ctx
       )
@@ -213,7 +213,7 @@ describe('routeServerRequest error handling', () => {
       {
         id: 9,
         method: 'item/tool/call',
-        params: { namespace: 'gladdis', tool: 'fetch_page', arguments: { url: 'https://example.com' }, itemId: 'call-2' }
+        params: { namespace: 'gladdis', tool: 'grep_page', arguments: { query: 'example' }, itemId: 'call-2' }
       } as any,
       ctx
     )

@@ -45,6 +45,7 @@ import {
   runReadPage,
   runScreenshot,
   runScreenshotApp,
+  runWaitForLoad,
   runWatchNetwork
 } from './tools/perceiveTools'
 import { runSearchTool } from './tools/searchTools'
@@ -269,20 +270,28 @@ export class BrowserTools {
     return resolveAxRef(store!.nodes, query)
   }
 
+  /**
+   * The page-save closure navigate/wait_for_load use to write a captured page to
+   * disk. Undefined when no store dir is configured (so saving is skipped).
+   */
+  private savePageFn():
+    | ((cap: PageCapture, conversationId: string | null | undefined) => Promise<SavedPage>)
+    | undefined {
+    if (!this.pageStoreBaseDir) return undefined
+    const baseDir = this.pageStoreBaseDir
+    return async (cap: PageCapture, conversationId: string | null | undefined): Promise<SavedPage> => {
+      const config: PageStoreConfig = { baseDir }
+      return savePageCapture(cap, conversationId || 'default', config)
+    }
+  }
+
   // Bound dep bundles for each tool module.
   private driveDeps() {
     return {
       tabs: this.tabs,
       resolveAxRef: (tabId: string, query: string) => this.resolveAxRef(tabId, query),
       extractor: this.extractor,
-      // navigate captures the cleaned page and writes it to disk so later reads
-      // are local. Returns null (no save) when no store dir is configured.
-      savePage: this.pageStoreBaseDir
-        ? async (cap: PageCapture, conversationId: string | null | undefined): Promise<SavedPage> => {
-            const config: PageStoreConfig = { baseDir: this.pageStoreBaseDir! }
-            return savePageCapture(cap, conversationId || 'default', config)
-          }
-        : undefined
+      savePage: this.savePageFn()
     }
   }
 
@@ -307,7 +316,8 @@ export class BrowserTools {
       recordPageCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') =>
         this.recordPageCacheEvent(event),
       recordA11yCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') =>
-        this.recordA11yCacheEvent(event)
+        this.recordA11yCacheEvent(event),
+      savePage: this.savePageFn()
     }
   }
 
@@ -366,6 +376,9 @@ export class BrowserTools {
         // ── Perceive ────────────────────────────────────────────────────────
         case 'read_page':
           outcome = await runReadPage(this.perceiveDeps(), args, ctx.tabId)
+          break
+        case 'wait_for_load':
+          outcome = await runWaitForLoad(this.perceiveDeps(), args, ctx.tabId, ctx.conversationId)
           break
         case 'read_a11y':
           outcome = await runReadA11y(this.perceiveDeps(), args, ctx.tabId)

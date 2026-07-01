@@ -37,6 +37,7 @@ vi.mock('./tools/perceiveTools', () => ({
   runGrepPage: vi.fn(ack),
   runReadA11y: vi.fn(ack),
   runReadPage: vi.fn(ack),
+  runWaitForLoad: vi.fn(ack),
   runScreenshot: vi.fn(ack),
   runScreenshotApp: vi.fn(ack),
   runWatchNetwork: vi.fn(ack)

@@ -753,7 +753,13 @@ export class ChatService {
       this.dreamer = new Dreamer({
         chats: this.chats,
         complete: (modelId, system, user) => this.complete(modelId, system, user, { stage: 'dream' }),
-        getKeyStatus: () => this.keys.status(),
+        getKeyStatus: async () => {
+          const [base, cx] = await Promise.all([
+            this.keys.status(),
+            this.codex().status().catch(() => ({ authenticated: false }))
+          ])
+          return { ...base, codex: cx.authenticated }
+        },
         getDynamicCodexModels: () => this.codexModels().catch(() => [] as ModelOption[]),
         emitProgress: this.sendDreamProgress
       })

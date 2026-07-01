@@ -26,6 +26,7 @@ describe('buildCursorSystem', () => {
         'search',
         'navigate',
         'read_page',
+        'wait_for_load',
         'read_a11y',
         'grep_page',
         'extract_structured',

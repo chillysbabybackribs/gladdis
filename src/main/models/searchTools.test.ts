@@ -15,7 +15,7 @@ vi.mock('./unifiedSearch', () => ({
     text: [
       `SEARCH "${options.query}" | 1 hits | 1 pass | 1 live`,
       '',
-      'INDEX (fetch_page url for deeper read):',
+      'INDEX (use navigate to open a result, then read_page/read_a11y for a deeper read):',
       '*90 First hit | https://example.com/a | best match',
       '',
       'EVIDENCE (query-scored excerpts from live tab; * = probed):',
@@ -31,11 +31,8 @@ vi.mock('./unifiedSearch', () => ({
 import { BrowserTools } from './browserTools'
 import { runUnifiedSearch } from './unifiedSearch'
 
-function makeTools(options?: {
-  readinessSequence?: Array<{ url: string; readyState: string }>
-}) {
+function makeTools() {
   let currentUrl = 'https://start.test/'
-  const readinessSequence = [...(options?.readinessSequence ?? [])]
   const navigate = vi.fn((_id: string, url: string) => {
     currentUrl = url
     return Promise.resolve()
@@ -52,12 +49,10 @@ function makeTools(options?: {
     takeArmedNetworkCapture: vi.fn(() => null),
     cdpSend: vi.fn(async () => ({
       result: {
-        value:
-          readinessSequence.shift() ??
-          {
-            url: currentUrl,
-            readyState: 'complete'
-          }
+        value: {
+          url: currentUrl,
+          readyState: 'complete'
+        }
       }
     })),
     list: () => [{ id: 'tab-1', url: currentUrl, loading: false }],
@@ -128,69 +123,9 @@ describe('unified search tool', () => {
     })
   })
 
-  it('fetch_page opens the URL in the visible tab and returns a digest', async () => {
-    const { tools, navigateWithNetworkCapture, extractor } = makeTools()
-    const out = await tools.run('fetch_page', { url: 'https://example.com/a' }, { tabId: 'tab-1' })
-
-    expect(navigateWithNetworkCapture).toHaveBeenCalledWith(
-      'tab-1',
-      'https://example.com/a',
-      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 350 })
-    )
-    expect(extractor.run).toHaveBeenCalledWith('tab-1')
-    expect(out.ok).toBe(true)
-    expect(out.text).toContain('the page body')
-    expect(out.structuredContent).toEqual(
-      expect.objectContaining({
-        requestedUrl: 'https://example.com/a',
-        finalUrl: 'https://example.com/a',
-        pageUrl: 'https://example.com/a'
-      })
-    )
-  })
-
-  it('search_open runs web search and direct page fetch together', async () => {
-    const { tools, navigateWithNetworkCapture, extractor } = makeTools()
-    vi.mocked(runUnifiedSearch).mockClear()
-
-    const out = await tools.run(
-      'search_open',
-      { query: 'electron docs', url: 'https://electronjs.org/docs/latest/' },
-      { tabId: 'tab-1' }
-    )
-
-    expect(vi.mocked(runUnifiedSearch).mock.calls[0]?.[1]).toMatchObject({
-      query: 'electron docs',
-      navigateVisible: false
-    })
-    expect(navigateWithNetworkCapture).toHaveBeenCalledWith(
-      'tab-1',
-      'https://electronjs.org/docs/latest/',
-      expect.objectContaining({ timeoutMs: 10000, quietWindowMs: 350 })
-    )
-    expect(extractor.run).toHaveBeenCalledWith('tab-1')
-    expect(out.ok).toBe(true)
-    expect(out.text).toContain('DIRECT PAGE:')
-    expect(out.text).toContain('WEB SEARCH:')
-    expect(out.structuredContent).toEqual(
-      expect.objectContaining({
-        query: 'electron docs',
-        url: 'https://electronjs.org/docs/latest/',
-        search: expect.objectContaining({
-          results: [expect.objectContaining({ url: 'https://example.com/a' })]
-        }),
-        page: expect.objectContaining({
-          requestedUrl: 'https://electronjs.org/docs/latest/'
-        })
-      })
-    )
-  })
-
   it('rejects empty/invalid input cleanly without throwing', async () => {
     const { tools } = makeTools()
     expect((await tools.run('search', {}, { tabId: 'tab-1' })).ok).toBe(false)
-    expect((await tools.run('search_open', { query: 'x' }, { tabId: 'tab-1' })).ok).toBe(false)
-    expect((await tools.run('fetch_page', { url: 'not-a-url' }, { tabId: 'tab-1' })).ok).toBe(false)
   })
 
   it('does not re-run an identical search within the same task — reuses results', async () => {
@@ -206,17 +141,6 @@ describe('unified search tool', () => {
     expect(second.text).toMatch(/already searched/i)
   })
 
-  it('does not re-navigate/re-extract a URL already opened this task', async () => {
-    const { tools, navigateWithNetworkCapture, extractor } = makeTools()
-    const ctx = { tabId: 'tab-1', conversationId: 'conv-1' }
-
-    await tools.run('fetch_page', { url: 'https://example.com/a' }, ctx)
-    await tools.run('fetch_page', { url: 'https://example.com/a/' }, ctx)
-
-    expect(navigateWithNetworkCapture).toHaveBeenCalledTimes(1)
-    expect(extractor.run).toHaveBeenCalledTimes(1)
-  })
-
   it('keeps per-task memory separate across different conversations', async () => {
     const { tools } = makeTools()
     vi.mocked(runUnifiedSearch).mockClear()
@@ -225,15 +149,5 @@ describe('unified search tool', () => {
     await tools.run('search', { query: 'shared query' }, { tabId: 'tab-1', conversationId: 'conv-B' })
 
     expect(vi.mocked(runUnifiedSearch)).toHaveBeenCalledTimes(2)
-  })
-
-  it('fetch_page does not fall back to an extra settle wait after navigation already looks readable', async () => {
-    const { tools, tabs } = makeTools({
-      readinessSequence: [{ url: 'https://example.com/a', readyState: 'complete' }]
-    })
-
-    await tools.run('fetch_page', { url: 'https://example.com/a' }, { tabId: 'tab-1' })
-
-    expect(tabs.waitForNavigationSettled).not.toHaveBeenCalled()
   })
 })

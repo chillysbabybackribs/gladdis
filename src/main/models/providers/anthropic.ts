@@ -2,7 +2,6 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
 import type { LlmComplete } from '../llm'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
-import { resolveTurnTools } from '../agentTools'
 import {
   continueAfterToolCalls,
   createToolValidationState,
@@ -235,12 +234,10 @@ export async function runAnthropicToolLoop(args: {
     system.push({ type: 'text', text: args.workspaceBlock, cache_control: { type: 'ephemeral' } })
   }
 
-  // Rebuilt each step because request_tools can grow the granted set mid-turn.
-  // The cache_control marker sits on the last tool, so the prompt cache naturally
-  // invalidates exactly when (and only when) the tool list actually changes.
-  const buildTools = () =>
-    toAnthropicTools(resolveTurnTools(args.toolDefs, args.ctx.grantedTools)) as Anthropic.MessageCreateParams['tools']
-  let anthropicTools = buildTools()
+  // The full tool surface is fixed for the whole turn (no profile escalation),
+  // so the tool list is built once. The cache_control marker sits on the last
+  // tool, so the prompt cache stays stable across the turn.
+  const anthropicTools = toAnthropicTools(args.toolDefs) as Anthropic.MessageCreateParams['tools']
 
   const messages = toAnthropicMessages(args.req)
   const resultBlocks: Anthropic.ToolResultBlockParam[] = []
@@ -255,7 +252,6 @@ export async function runAnthropicToolLoop(args: {
     if (queuedContext) messages.push({ role: 'user', content: queuedContext })
     args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
-    anthropicTools = buildTools() // pick up tools granted via request_tools last step
     applyRollingCache(messages)
     const call = args.audit.begin({
       requestId: args.req.requestId,

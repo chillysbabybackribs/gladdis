@@ -20,6 +20,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'search',
   'navigate',
   'read_page',
+  'wait_for_load',
   'read_a11y',
   'grep_page',
   'extract_structured',
@@ -120,6 +121,7 @@ export const CODEX_MEMORY_TOOL_NAMES = [
 export const CODEX_INTERACTION_TOOL_NAMES = [
   'navigate',
   'read_page',
+  'wait_for_load',
   'read_a11y',
   'grep_page',
   'extract_structured',
@@ -136,6 +138,239 @@ export const CODEX_INTERACTION_TOOL_NAMES = [
   'execute_in_browser',
   'cdp_command'
 ] as const
+
+export const BROWSER_TOOL_CATEGORY_ORDER = [
+  'memory',
+  'discovery',
+  'orientation',
+  'targeting',
+  'structured-data',
+  'network-intelligence',
+  'semantic-actions',
+  'advanced-actions',
+  'visual-fallback'
+] as const
+
+export type BrowserToolCategory = (typeof BROWSER_TOOL_CATEGORY_ORDER)[number]
+
+const BROWSER_TOOL_CATEGORY_LABELS: Record<BrowserToolCategory, string> = {
+  memory: 'memory notebook',
+  discovery: 'web discovery',
+  orientation: 'page orientation',
+  targeting: 'precise targeting',
+  'structured-data': 'structured extraction',
+  'network-intelligence': 'network/data discovery',
+  'semantic-actions': 'semantic actions',
+  'advanced-actions': 'advanced browser control',
+  'visual-fallback': 'visual fallback'
+}
+
+const BROWSER_TOOL_CATEGORY_CAPABILITIES: Record<BrowserToolCategory, string> = {
+  memory: 'recover context and keep task state',
+  discovery: 'find live web sources or open known URLs',
+  orientation: 'understand the visible page before acting',
+  targeting: 'pinpoint the exact control or text to use',
+  'structured-data': 'extract repeated records into fields',
+  'network-intelligence': 'inspect API-backed pages and fetched data',
+  'semantic-actions': 'fill, submit, and open results at the intent level',
+  'advanced-actions': 'drive complex widgets or raw browser internals when needed',
+  'visual-fallback': 'inspect pixel-only or unlabeled UI as a last resort'
+}
+
+const BROWSER_TOOL_CATEGORY_MEMBERS: Record<BrowserToolCategory, readonly string[]> = {
+  memory: CODEX_MEMORY_TOOL_NAMES,
+  discovery: ['search', 'navigate'],
+  orientation: ['read_page', 'wait_for_load', 'read_a11y'],
+  targeting: ['grep_page'],
+  'structured-data': ['extract_structured'],
+  'network-intelligence': ['discover_data_sources', 'watch_network'],
+  'semantic-actions': ['set_field', 'submit', 'open_result'],
+  'advanced-actions': ['act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command'],
+  'visual-fallback': ['screenshot', 'screenshot_app']
+}
+
+export function categorizeBrowserTools(toolNames: Iterable<string>): Array<{
+  category: BrowserToolCategory
+  label: string
+  capability: string
+  tools: string[]
+}> {
+  const allowed = new Set(toolNames)
+  return BROWSER_TOOL_CATEGORY_ORDER
+    .map((category) => {
+      const tools = BROWSER_TOOL_CATEGORY_MEMBERS[category].filter((name) => allowed.has(name))
+      if (tools.length === 0) return null
+      return {
+        category,
+        label: BROWSER_TOOL_CATEGORY_LABELS[category],
+        capability: BROWSER_TOOL_CATEGORY_CAPABILITIES[category],
+        tools
+      }
+    })
+    .filter((entry): entry is {
+      category: BrowserToolCategory
+      label: string
+      capability: string
+      tools: string[]
+    } => entry != null)
+}
+
+export function summarizeBrowserToolCategories(toolNames: Iterable<string>): string | null {
+  const categories = categorizeBrowserTools(toolNames)
+  if (categories.length === 0) return null
+  return categories
+    .map(({ label, capability, tools }) => `${label} (${capability}): ${tools.join(', ')}`)
+    .join(' | ')
+}
+
+export interface BrowserToolRegistryEntry {
+  name: string
+  category: BrowserToolCategory
+  label: string
+  capability: string
+  domains: string[]
+  capabilities: string[]
+  whenToUse: string
+  prerequisites: string[]
+}
+
+export interface BrowserToolDiscoveryQuery {
+  query?: string
+  categories?: BrowserToolCategory[]
+  domains?: string[]
+  names?: string[]
+}
+
+export interface BrowserToolDiscoveryMatch extends BrowserToolRegistryEntry {
+  score: number
+  reasons: string[]
+}
+
+const BROWSER_TOOL_CATEGORY_BY_NAME: Record<string, BrowserToolCategory> = Object.fromEntries(
+  Object.entries(BROWSER_TOOL_CATEGORY_MEMBERS).flatMap(([category, names]) =>
+    names.map((name) => [name, category as BrowserToolCategory])
+  )
+)
+
+export const BROWSER_TOOL_REGISTRY: BrowserToolRegistryEntry[] = CODEX_BROWSER_TOOL_NAMES.map((name) => {
+  const category = BROWSER_TOOL_CATEGORY_BY_NAME[name] ?? 'advanced-actions'
+  return {
+    name,
+    category,
+    label: BROWSER_TOOL_CATEGORY_LABELS[category],
+    capability: BROWSER_TOOL_CATEGORY_CAPABILITIES[category],
+    domains: inferBrowserToolDomains(name),
+    capabilities: inferBrowserToolCapabilities(name),
+    whenToUse: inferBrowserToolWhenToUse(name),
+    prerequisites: inferBrowserToolPrerequisites(name)
+  }
+})
+
+export function discoverBrowserTools(query: BrowserToolDiscoveryQuery = {}): BrowserToolDiscoveryMatch[] {
+  const normalizedQuery = (query.query ?? '').trim().toLowerCase()
+  const queryTokens = normalizedQuery.split(/[^a-z0-9]+/i).filter(Boolean)
+  const requestedCategories = new Set(query.categories ?? [])
+  const requestedDomains = new Set((query.domains ?? []).map((value) => value.toLowerCase()))
+  const requestedNames = new Set((query.names ?? []).map((value) => value.toLowerCase()))
+
+  return BROWSER_TOOL_REGISTRY
+    .map((entry) => {
+      let score = 0
+      const reasons: string[] = []
+
+      if (requestedNames.size > 0 && requestedNames.has(entry.name.toLowerCase())) {
+        score += 10
+        reasons.push('explicitly requested by name')
+      }
+      if (requestedCategories.size > 0 && requestedCategories.has(entry.category)) {
+        score += 6
+        reasons.push(`matches requested category ${entry.category}`)
+      }
+      const matchedDomains = entry.domains.filter((domain) => requestedDomains.has(domain.toLowerCase()))
+      if (matchedDomains.length > 0) {
+        score += matchedDomains.length * 4
+        reasons.push(`matches domain ${matchedDomains.join(', ')}`)
+      }
+      if (queryTokens.length > 0) {
+        const haystacks = [
+          entry.name,
+          entry.category,
+          entry.label,
+          entry.capability,
+          ...entry.domains,
+          ...entry.capabilities,
+          entry.whenToUse,
+          ...entry.prerequisites
+        ].map((value) => value.toLowerCase())
+        const matchedTokens = queryTokens.filter((token) => haystacks.some((value) => value.includes(token)))
+        if (matchedTokens.length > 0) {
+          score += matchedTokens.length
+          reasons.push(`query matched ${matchedTokens.join(', ')}`)
+        }
+      }
+
+      return { ...entry, score, reasons }
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+}
+
+export function summarizeBrowserToolDiscovery(matches: Iterable<BrowserToolDiscoveryMatch>): string | null {
+  const list = [...matches]
+  if (list.length === 0) return null
+  return list
+    .map((match) => `${match.name} [${match.label.toLowerCase()}; domains: ${match.domains.join(', ')}]`)
+    .join(' | ')
+}
+
+function inferBrowserToolDomains(name: string): string[] {
+  if (name.startsWith('memory_')) return ['memory', 'task-state']
+  if (['search', 'navigate'].includes(name)) return ['web', 'research', 'discovery']
+  if (['read_page', 'wait_for_load', 'read_a11y'].includes(name)) return ['web', 'page-understanding']
+  if (['grep_page'].includes(name)) return ['web', 'targeting']
+  if (['extract_structured'].includes(name)) return ['web', 'data-extraction', 'verification']
+  if (['discover_data_sources', 'watch_network'].includes(name)) return ['web', 'data-extraction', 'verification', 'dynamic-ui']
+  if (['set_field', 'submit', 'open_result'].includes(name)) return ['web', 'automation', 'forms']
+  if (['act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command'].includes(name)) return ['web', 'automation', 'advanced-automation']
+  if (['screenshot', 'screenshot_app'].includes(name)) return ['web', 'visual-debugging']
+  return ['web']
+}
+
+function inferBrowserToolCapabilities(name: string): string[] {
+  if (name === 'search') return ['find live web sources', 'open known URLs']
+  if (name === 'navigate') return ['open the chosen page', 'move to a result URL']
+  if (['read_page', 'wait_for_load', 'read_a11y'].includes(name)) return ['understand the visible page', 'capture state before acting']
+  if (name === 'grep_page') return ['pinpoint exact text or controls', 'act on a surgically matched target']
+  if (name === 'extract_structured') return ['extract repeated DOM records', 'normalize listing results']
+  if (['discover_data_sources', 'watch_network'].includes(name)) return ['inspect app-backed data sources', 'read network/API payloads structurally']
+  if (['set_field', 'submit', 'open_result'].includes(name)) return ['perform semantic actions', 'drive forms/results at intent level']
+  if (['act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command'].includes(name)) return ['perform advanced actions', 'fallback when standard actions are insufficient']
+  if (name.startsWith('memory_')) return ['recover context', 'persist task state']
+  if (['screenshot', 'screenshot_app'].includes(name)) return ['capture visual state', 'debug non-text UI state']
+  return ['specialized browser action']
+}
+
+function inferBrowserToolWhenToUse(name: string): string {
+  if (name === 'search') return 'When current web facts or candidate URLs are needed.'
+  if (name === 'navigate') return 'When you already know which page to open.'
+  if (['read_page', 'wait_for_load', 'read_a11y'].includes(name)) return 'When you need orientation on the current page before deciding the next action.'
+  if (name === 'grep_page') return 'When exploratory reading is done and you need precise page targeting.'
+  if (name === 'extract_structured') return 'When the page shows repeated cards, rows, or listing records to normalize.'
+  if (['discover_data_sources', 'watch_network'].includes(name)) return 'When the page is dynamic and underlying data may be easier to inspect than the DOM.'
+  if (['set_field', 'submit', 'open_result'].includes(name)) return 'When you know the intent and want a higher-level action primitive.'
+  if (['act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command'].includes(name)) return 'When standard interaction tools are insufficient and a controlled advanced fallback is required.'
+  if (name.startsWith('memory_')) return 'When multi-step work needs continuity across turns.'
+  if (['screenshot', 'screenshot_app'].includes(name)) return 'When the visible UI state matters and textual extraction is insufficient.'
+  return 'When this specialized tool is attached and relevant.'
+}
+
+function inferBrowserToolPrerequisites(name: string): string[] {
+  if (name === 'navigate') return ['known URL or chosen search result']
+  if (['grep_page', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type'].includes(name)) return ['visible page loaded', 'target identified']
+  if (['extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app'].includes(name)) return ['relevant page open']
+  if (['execute_in_browser', 'cdp_command'].includes(name)) return ['standard browser tools were insufficient or too lossy']
+  return []
+}
 
 export function describeSemanticVerbPreference(allowed: ReadonlySet<string>): string | null {
   if (!allowed.has('set_field') && !allowed.has('submit') && !allowed.has('open_result')) return null
@@ -178,6 +413,12 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
     GLADDIS_WEB_TOOLS_RULE,
     `Attached Gladdis tools this turn: ${describeToolList(allowed)}.`
   ]
+
+  const categorySummary = summarizeBrowserToolCategories(allowed)
+  if (categorySummary) {
+    lines.push(`Attached browser capabilities by category: ${categorySummary}.`)
+    lines.push('These attached tools are a routed subset from a broader categorized browser-tool registry; choose tools by capability/domain fit, not just by name similarity.')
+  }
 
   if (allowed.has('search')) {
     lines.push('Use `search` for live web lookup, and use `navigate` to load a known URL in the visible tab when you already know where to go.')

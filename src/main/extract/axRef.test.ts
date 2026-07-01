@@ -18,7 +18,6 @@ const sampleNodes: AxSnapshotNode[] = [
     name: 'Sign in',
     states: [],
     inViewport: true,
-    score: 10,
     bounds: { x: 120, y: 40, width: 80, height: 32, top: 24, left: 80 }
   }
 ]

@@ -3,8 +3,10 @@ import {
   buildCodexBrowserTools,
   CODEX_BROWSER_INSTRUCTIONS,
   CODEX_BROWSER_TOOLS,
+  discoverBrowserTools,
   selectCodexDynamicToolNames,
-  respondToCodexBrowserToolCall
+  respondToCodexBrowserToolCall,
+  summarizeBrowserToolDiscovery
 } from './dynamicBrowserTools'
 
 describe('Codex Gladdis dynamic tools', () => {
@@ -80,6 +82,20 @@ describe('Codex Gladdis dynamic tools', () => {
 
     const tools = buildCodexBrowserTools(allowed) as Array<{ name: string }>
     expect(tools.map((tool) => tool.name).sort()).toEqual(['act', 'grep_page', 'memory_read', 'set_field'])
+  })
+
+  it('discovers optional browser tools by category, domain, and query semantics', () => {
+    const matches = discoverBrowserTools({
+      query: 'dynamic travel verification with repeated result cards',
+      categories: ['structured-data', 'network-intelligence'],
+      domains: ['verification', 'data-extraction']
+    })
+
+    expect(matches.slice(0, 3).map((match) => match.name)).toEqual(
+      expect.arrayContaining(['extract_structured', 'discover_data_sources', 'watch_network'])
+    )
+    expect(matches[0]?.score ?? 0).toBeGreaterThan(0)
+    expect(summarizeBrowserToolDiscovery(matches.slice(0, 2))).toContain('domains:')
   })
 
   it('runs recall_history with the current Gladdis conversation id', async () => {

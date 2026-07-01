@@ -1,7 +1,6 @@
 import type { ChatRequest, ChatStreamEvent } from '../../../../shared/types'
 import type { LlmComplete } from '../llm'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
-import { resolveTurnTools } from '../agentTools'
 import {
   continueAfterToolCalls,
   createToolValidationState,
@@ -421,9 +420,8 @@ export async function runGrokToolLoop(args: {
 }): Promise<void> {
   // OpenAI tools take a JSON Schema directly, which is exactly what ToolDef.parameters
   // already is — no per-field type mapping needed (unlike the Gemini adapter).
-  // Rebuilt each step because request_tools can grow the granted set mid-turn.
-  const buildTools = () => toOpenAiFunctionTools(resolveTurnTools(args.toolDefs, args.ctx.grantedTools))
-  let tools = buildTools()
+  // The full tool surface is fixed for the turn, so this is built once.
+  const tools = toOpenAiFunctionTools(args.toolDefs)
 
   const systemText = args.workspaceBlock
     ? `${args.agentSystem}\n\n${args.workspaceBlock}`
@@ -443,7 +441,6 @@ export async function runGrokToolLoop(args: {
     if (queuedContext) messages.push({ role: 'user', content: queuedContext })
     args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
-    tools = buildTools() // pick up any tools granted via request_tools last step
     const call = args.audit.begin({
       requestId: args.req.requestId,
       conversationId: args.req.conversationId,

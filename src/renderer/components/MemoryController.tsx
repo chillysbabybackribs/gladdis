@@ -170,6 +170,10 @@ export function MemoryController() {
   useEffect(() => {
     const off = window.gladdis.dream.auto.onNotification((event) => {
       if (folder && event.workspaceRoot !== folder) return
+      if (!event.ok) {
+        console.error('[auto-dream]', event.message)
+        return
+      }
       setToast(event)
       clearToastTimer()
       toastTimerRef.current = window.setTimeout(() => {

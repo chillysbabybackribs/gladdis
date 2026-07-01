@@ -185,6 +185,15 @@ export async function runNavigate(
   const savedText = saved
     ? `\nSaved full page: ${saved.markdownPath} · ${saved.actionsPath} (read/grep locally, no re-fetch).`
     : ''
+  // Thin/loading capture (client-rendered SPA whose real content hasn't rendered
+  // yet). Point the model at wait_for_load instead of letting it give up.
+  const looksUnrendered =
+    shouldWait &&
+    ((typeof pageTextChars === 'number' && pageTextChars < 200) ||
+      /^\s*loading\b/i.test(wireframe?.lines?.[0] && wireframe.lines[0].kind === 'action' ? wireframe.lines[0].name : ''))
+  const thinHint = looksUnrendered
+    ? '\n⚠ This page looks like it is still rendering (very little text / a loading shell). If you need its content, call wait_for_load, then read/grep — do not give up.'
+    : ''
   const wireframeText = wireframe ? `\n${formatPageWireframe(wireframe)}` : ''
   const dataSourceDiscovery = network ? deps.tabs.getNetworkAwareness(ctx.tabId) : null
   const dataSourceText = dataSourceDiscovery
@@ -194,7 +203,7 @@ export async function runNavigate(
   return withOptionalNetworkCapture(
     {
       ok: true,
-      text: `${header}${sizeHint}${savedText}${wireframeText}${dataSourceText}`,
+      text: `${header}${sizeHint}${thinHint}${savedText}${wireframeText}${dataSourceText}`,
       structuredContent: {
         url: landedUrl,
         requestedUrl: parsedUrl,
@@ -203,6 +212,7 @@ export async function runNavigate(
         wait: shouldWait,
         timeoutMs,
         pageTextChars,
+        ...(looksUnrendered ? { looksUnrendered: true } : {}),
         ...(saved ? { savedMarkdownPath: saved.markdownPath, savedActionsPath: saved.actionsPath } : {}),
         ...(wireframe ? { wireframe } : {}),
         ...(dataSourceDiscovery ? { dataSourceDiscovery } : {})

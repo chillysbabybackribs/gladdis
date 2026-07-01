@@ -1,5 +1,6 @@
-import { BaseWindow } from 'electron'
+import { BaseWindow, app } from 'electron'
 import type { WebContentsView } from 'electron'
+import { join } from 'path'
 import { TabManager } from './TabManager'
 import { KeyStore } from './models/KeyStore'
 import { WorkspaceStore } from './fs/WorkspaceStore'
@@ -111,6 +112,8 @@ export class ServiceRegistry {
       })
       this._tools.setWorkspaceRoot(this.workspace.get().folder)
       this._tools.setAppCapture(this.captureAppWindowPng)
+      // navigate persists captured pages here so later reads/greps are local.
+      this._tools.setPageStoreBaseDir(join(app.getPath('userData'), 'gladdis-pages'))
     }
     return this._tools
   }

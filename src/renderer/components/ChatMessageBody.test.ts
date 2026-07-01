@@ -88,7 +88,7 @@ describe('buildTraceDebugPayload', () => {
       [
         {
           callId: 'call-1',
-          tool: 'fetch_page',
+          tool: 'navigate',
           args: { url: 'https://docs.example/' },
           status: 'ok',
           startedAt: 1000,
@@ -117,9 +117,9 @@ describe('buildTraceDebugPayload', () => {
         toolCalls: 1,
         totalDurationMs: 2250,
         totalDurationLabel: '2.3s',
-        slowestTool: 'fetch_page',
+        slowestTool: 'navigate',
         slowestDurationMs: 2250,
-        slowestLabel: 'fetch_page 2.3s',
+        slowestLabel: 'navigate 2.3s',
         searchCalls: 0,
         fetchCalls: 1,
         duplicateSearches: 0,
@@ -132,7 +132,7 @@ describe('buildTraceDebugPayload', () => {
       executedTools: [
         {
           callId: 'call-1',
-          tool: 'fetch_page',
+          tool: 'navigate',
           args: { url: 'https://docs.example/' },
           status: 'ok',
           startedAt: 1000,
@@ -151,7 +151,7 @@ describe('deriveExecutionSummary', () => {
     const summary = deriveExecutionSummary([
       {
         callId: 'fetch-1',
-        tool: 'fetch_page',
+        tool: 'navigate',
         args: { url: 'https://platform.openai.com/docs/api-reference/responses-streaming' },
         status: 'ok',
         durationMs: 25_000,
@@ -159,7 +159,7 @@ describe('deriveExecutionSummary', () => {
       },
       {
         callId: 'fetch-2',
-        tool: 'fetch_page',
+        tool: 'navigate',
         args: { url: 'https://developers.openai.com/api/docs/guides/streaming-responses' },
         status: 'ok',
         durationMs: 468,
@@ -170,6 +170,6 @@ describe('deriveExecutionSummary', () => {
     expect(summary.duplicateFetches).toBe(0)
     expect(summary.duplicateFinalFetches).toBe(1)
     expect(summary.duplicateLabel).toContain('1 same final page')
-    expect(summary.brief).toContain('slowest fetch_page 25s')
+    expect(summary.brief).toContain('slowest navigate 25s')
   })
 })

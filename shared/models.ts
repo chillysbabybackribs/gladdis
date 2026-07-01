@@ -1,3 +1,12 @@
+/**
+ * Done means:
+ * 1. 
+ * 2. 
+ *
+ * Plan:
+ * 1. 
+ * 2. 
+ */
 // 'openai' is a key slot for the text-to-speech feature (audible replies)
 // and now also a fully supported chat model provider for modern OpenAI models.
 // 'grok' (xAI) is a real chat provider, reached over xAI's OpenAI-compatible API.
@@ -20,6 +29,14 @@ export interface ModelOption {
 }
 
 /**
+ * Done means:
+ * 1. ...
+ * 2. ...
+ *
+ * Plan:
+ * 1. ...
+ * 2. ...
+ *
  * Fallback selectable models. Codex entries are replaced at runtime by the live
  * CLI catalog when available, so they don't need an availability annotation.
  *

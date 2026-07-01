@@ -2,7 +2,6 @@ import type { ChatMessage, ChatRequest, ChatStreamEvent } from '../../../../shar
 import * as nodePath from 'node:path'
 import type { LlmComplete } from '../llm'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
-import { resolveTurnTools } from '../agentTools'
 import {
   continueAfterToolCalls,
   createToolValidationState,
@@ -45,10 +44,6 @@ type ModelAudit = {
 
 const STUB_PREFIX = '[trimmed]'
 const OPENAI_REPO_PRIMER_TOOLS = new Set([
-  'repo_overview',
-  'search_repo',
-  'repo_grep_task',
-  'read_spans',
   'search_files',
   'list_dir'
 ])
@@ -168,11 +163,9 @@ function openAiReadPolicyOutcome(pathLike: string): { ok: false; text: string } 
     text:
       `OpenAI local-work policy: do not start with a broad read_file on ${clean}. ` +
       'Locate the relevant region first to save tokens, then read only that window. ' +
-      `Use search_repo({"query":"symbol_or_phrase"${scopedPath}}) or ` +
-      `repo_grep_task({"task":"what you need to inspect"${scopedPath}}) as the first step, then follow the suggested ` +
-      `read_spans call only if you still need code windows. Batch related windows into one read_spans({"items":[...]}) call instead of making a long chain of single-span reads. ` +
-      `If you already know the area, call read_spans({"items":[{"path":${JSON.stringify(clean)},"start_line":1,"end_line":80}]}) ` +
-      'or read_file with explicit start_line/end_line.'
+      `Use search_files({"query":"symbol_or_phrase"${scopedPath}}) as the first step to find the exact lines, then ` +
+      `read_file with explicit start_line/end_line for just those windows. ` +
+      `If you already know the area, call read_file({"path":${JSON.stringify(clean)},"start_line":1,"end_line":80}) directly.`
   }
 }
 
@@ -186,7 +179,7 @@ function shouldGateOpenAiRead(
   if (name !== 'read_file') return false
   if (!ctx.workspaceRoot) return false
   if (state.hasRepoPrimer) return false
-  if (!toolDefs.some((tool) => tool.name === 'search_repo') || !toolDefs.some((tool) => tool.name === 'read_spans')) {
+  if (!toolDefs.some((tool) => tool.name === 'search_files')) {
     return false
   }
   const pathLike = String(toolArgs.path ?? '').trim()
@@ -633,8 +626,8 @@ export async function runOpenAiToolLoop(args: {
   /** Returns one queued user note to apply before the next model step. */
   getQueuedContext?: () => string | null
 }): Promise<void> {
-  const buildTools = () => toOpenAiFunctionTools(resolveTurnTools(args.toolDefs, args.ctx.grantedTools))
-  let tools = buildTools()
+  // The full tool surface is fixed for the turn, so this is built once.
+  const tools = toOpenAiFunctionTools(args.toolDefs)
 
   const systemText = args.workspaceBlock
     ? `${args.agentSystem}\n\n${args.workspaceBlock}`
@@ -658,7 +651,6 @@ export async function runOpenAiToolLoop(args: {
     if (queuedContext) messages.push({ role: 'user', content: queuedContext })
     args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
-    tools = buildTools()
 
     const call = args.audit.begin({
       requestId: args.req.requestId,

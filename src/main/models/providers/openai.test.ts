@@ -375,8 +375,7 @@ describe('runOpenAiToolLoop', () => {
       },
       toolDefs: [
         { name: 'read_file', description: 'read file', parameters: { type: 'object', properties: {} } },
-        { name: 'search_repo', description: 'search repo', parameters: { type: 'object', properties: {} } },
-        { name: 'read_spans', description: 'read spans', parameters: { type: 'object', properties: {} } }
+        { name: 'search_files', description: 'search files', parameters: { type: 'object', properties: {} } }
       ],
       agentSystem: 'sys',
       workspaceBlock: null,
@@ -388,16 +387,14 @@ describe('runOpenAiToolLoop', () => {
     const toolResult = events.find((evt) => evt.type === 'tool_result')
     expect(toolResult?.ok).toBe(false)
     expect(toolResult?.preview).toContain('OpenAI local-work policy')
-    expect(toolResult?.preview).toContain('search_repo')
-    expect(toolResult?.preview).toContain('read_spans')
+    expect(toolResult?.preview).toContain('search_files')
     expect(toolResult?.preview).toContain('as the first step')
-    expect(toolResult?.preview).toContain('only if you still need code windows')
-    expect(toolResult?.preview).toContain('Batch related windows into one read_spans')
+    expect(toolResult?.preview).toContain('explicit start_line/end_line')
   })
 
-  it('allows direct read_file after search_repo has already narrowed the task', async () => {
+  it('allows direct read_file after search_files has already narrowed the task', async () => {
     const frames = [
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_search","type":"function","function":{"name":"search_repo","arguments":"{\\"query\\":\\"runOpenAiToolLoop\\"}"}}]}}]}\n' +
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_search","type":"function","function":{"name":"search_files","arguments":"{\\"query\\":\\"runOpenAiToolLoop\\"}"}}]}}]}\n' +
         'data: [DONE]\n',
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"src/main/models/providers/openai.ts\\"}"}}]}}]}\n' +
         'data: [DONE]\n',
@@ -432,8 +429,7 @@ describe('runOpenAiToolLoop', () => {
       },
       toolDefs: [
         { name: 'read_file', description: 'read file', parameters: { type: 'object', properties: {} } },
-        { name: 'search_repo', description: 'search repo', parameters: { type: 'object', properties: {} } },
-        { name: 'read_spans', description: 'read spans', parameters: { type: 'object', properties: {} } }
+        { name: 'search_files', description: 'search files', parameters: { type: 'object', properties: {} } }
       ],
       agentSystem: 'sys',
       workspaceBlock: null,
@@ -442,7 +438,7 @@ describe('runOpenAiToolLoop', () => {
     })
 
     expect(run).toHaveBeenCalledTimes(2)
-    expect(run.mock.calls[0][0]).toBe('search_repo')
+    expect(run.mock.calls[0][0]).toBe('search_files')
     expect(run.mock.calls[1][0]).toBe('read_file')
   })
 })
@@ -453,19 +449,19 @@ describe('stubOldOpenAiResults', () => {
       {
         role: 'tool' as const,
         tool_call_id: 'call_search',
-        name: 'search_repo',
+        name: 'search_files',
         content:
           'src/main/models/providers/openai.ts:785 export function stubOldOpenAiResults\n' +
           'src/main/models/providers/openai.ts:723 stubOldOpenAiResults(resultMsgs, args.keepResults)\n' +
           'src/main/models/providers/google.ts:539 export async function stubOldGoogleResults'
       },
-      { role: 'tool' as const, tool_call_id: 'call_fresh', name: 'read_spans', content: 'fresh result' }
+      { role: 'tool' as const, tool_call_id: 'call_fresh', name: 'read_file', content: 'fresh result' }
     ]
 
     stubOldOpenAiResults(msgs, 1)
 
     expect(msgs[0].content).toContain('[trimmed]')
-    expect(msgs[0].content).toContain('search_repo result summarized')
+    expect(msgs[0].content).toContain('search_files result summarized')
     expect(msgs[0].content).toContain('openai.ts:785')
     expect(msgs[0].content).toContain('"call_search"')
     expect(msgs[1].content).toBe('fresh result')
@@ -493,7 +489,7 @@ describe('stubOldOpenAiResults', () => {
   })
 
   it('is idempotent once a result has already been trimmed', () => {
-    const msgs = [{ role: 'tool' as const, tool_call_id: 'call_once', name: 'search_repo', content: 'alpha\nbeta' }]
+    const msgs = [{ role: 'tool' as const, tool_call_id: 'call_once', name: 'search_files', content: 'alpha\nbeta' }]
     stubOldOpenAiResults(msgs, 0)
     const once = msgs[0].content
     stubOldOpenAiResults(msgs, 0)

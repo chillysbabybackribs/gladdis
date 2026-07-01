@@ -93,7 +93,6 @@ async function getOrCreateGeminiCache(args: {
 }
 import type { LlmComplete } from '../llm'
 import type { BrowserTools, ToolContext, ToolDef } from '../browserTools'
-import { resolveTurnTools } from '../agentTools'
 
 type FinishUsage = { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }
 type ActiveAuditCall = {

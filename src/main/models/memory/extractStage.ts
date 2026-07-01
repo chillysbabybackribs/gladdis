@@ -105,8 +105,10 @@ export async function runExtractStage(
 ): Promise<ExtractStageOutput> {
   const user = buildExtractUserPrompt(input)
   const raw = await deps.complete(input.modelId, EXTRACT_SYSTEM, user)
+  console.log('[dream:extract] raw response (first 2000 chars):', JSON.stringify(raw.slice(0, 2000)))
   const parsed = extractJsonObject<{ candidates?: unknown }>(raw)
   if (!parsed) {
+    console.log('[dream:extract] parseFailed — full raw:', JSON.stringify(raw))
     return { candidates: [], rawResponse: raw, parseFailed: true }
   }
   const candidates = sanitizeCandidates(parsed.candidates)

@@ -23,7 +23,7 @@ export function resolveAxRef(nodes: AxSnapshotNode[], query: string): AxSnapshot
 }
 
 export function axRefTargetError(query: string, reason: string): string {
-  return `No accessibility ref "${query}" is available (${reason}). Call read_a11y on this tab first, then grep_click/grep_type/click_xy with type "ref", click_xy ref, or the @aN ref directly.`
+  return `No accessibility ref "${query}" is available (${reason}). Call read_a11y on this tab first; only @aN refs from the current tab snapshot are valid, then use act on the @aN ref directly or grep_click/grep_type with type "ref".`
 }
 
 export type AxRefStore = {

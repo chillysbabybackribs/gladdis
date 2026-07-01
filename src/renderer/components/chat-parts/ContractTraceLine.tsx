@@ -198,6 +198,7 @@ export interface TraceExecutionSummary {
   slowestDurationMs: number | null
   slowestLabel: string
   searchCalls: number
+  /** Includes current `navigate` calls and legacy `fetch_page` history items. */
   fetchCalls: number
   duplicateSearches: number
   duplicateFetches: number
@@ -236,7 +237,7 @@ export function deriveExecutionSummary(tools: ToolActivity[]): TraceExecutionSum
       if (key && seenSearches.has(key)) duplicateSearches += 1
       if (key) seenSearches.add(key)
     }
-    if (name === 'fetch_page') {
+    if (name === 'navigate' || name === 'fetch_page') {
       fetchCalls += 1
       const key = normalizeDisplayUrl(String(args.url ?? ''))
       if (key && seenFetches.has(key)) duplicateFetches += 1

@@ -402,7 +402,7 @@ function formatCompactSearchOutput(
   ]
 
   const hitBudget = OUTPUT_CHAR_BUDGET - (digests.length * (EVIDENCE_PER_PAGE[digests.length] ?? EVIDENCE_DEFAULT)) - 200
-  lines.push('', 'INDEX (use fetch_page for a deeper read):')
+  lines.push('', 'INDEX (use navigate to open a result, then read_page/read_a11y for a deeper read):')
   let hitChars = 0
   let shown = 0
   for (const r of ranked) {
@@ -431,7 +431,7 @@ function formatCompactSearchOutput(
   }
   const walled = digests.filter((d) => d.wallDetected)
   if (walled.length) {
-    lines.push('', `BLOCKED PAGES (${walled.map((d) => `${d.url} [${d.wallDetected}]`).join(', ')}): use fetch_page with authenticated session or try next result.`)
+    lines.push('', `BLOCKED PAGES (${walled.map((d) => `${d.url} [${d.wallDetected}]`).join(', ')}): navigate there with an authenticated session or try the next result.`)
   }
 
   return trunc(lines.join('\n'), OUTPUT_CHAR_BUDGET)

@@ -14,6 +14,7 @@ import {
   EXTRACT_STRUCTURED_GUIDANCE,
   CODEX_BROWSER_INSTRUCTIONS,
   GLADDIS_WEB_TOOLS_RULE,
+  summarizeBrowserToolCategories,
   stripNamedToolLead
 } from './codex/dynamicBrowserTools'
 import {
@@ -109,10 +110,13 @@ function buildBrowserOverview(names: Set<string>): string {
   const afterLine = names.has('act') || semanticVerbs.length > 0
     ? ' After an action, use the returned `after` field instead of re-reading.'
     : ''
+  const categorySummary = summarizeBrowserToolCategories(names)
 
   return [
     '## Browser tools',
     GLADDIS_WEB_TOOLS_RULE,
+    categorySummary ? `Attached browser capabilities by category: ${categorySummary}.` : null,
+    categorySummary ? 'These attached tools are a routed subset from a broader categorized browser-tool registry; choose tools by capability/domain fit, not just by name similarity.' : null,
     '',
     'All browser actions act on the VISIBLE tab the user is watching — they see the page change. Use your own judgment about which tool fits; there is no fixed script.',
     '',
@@ -393,7 +397,7 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
   return result
 }
 
-export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Claude Code turns run through the local Claude CLI, preserving Claude's
@@ -430,7 +434,7 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
   return result
 }
 
-export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Cursor turns run through the local Cursor Agent CLI. Keep this lean: Cursor
@@ -471,4 +475,4 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   return result
 }
 
-export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })

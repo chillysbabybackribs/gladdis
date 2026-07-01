@@ -1,7 +1,7 @@
 /**
  * Deterministic, query-focused page compression for search tool results.
  *
- * Unlike read_page / fetch_page (which need action tables and broad context),
+ * Unlike read_page / navigate-driven inspection (which need action tables and broad context),
  * search only needs evidence the model can synthesize from — scored excerpts,
  * matching headings, structured-data nuggets, and relevant code. No LLM.
  */

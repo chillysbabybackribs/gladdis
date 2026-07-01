@@ -36,7 +36,7 @@ export async function runReadFile(deps: FsToolsDeps, args: Record<string, any>):
   const window = renderLineWindow(r.startLine, r.endLine, r.totalLines, r.defaultWindow)
   const next =
     r.defaultWindow && r.totalLines != null && r.totalLines > r.endLine
-      ? `\nPrefer search_repo/search_files or read_spans before reading more. Next narrow range: read_file({"path":${JSON.stringify(r.path)},"start_line":${r.endLine + 1},"end_line":${Math.min(r.endLine + 120, r.totalLines)}}). Use full:true only when the whole file is genuinely needed.`
+      ? `\nPrefer search_files or a narrower read_file window before reading more. Next narrow range: read_file({"path":${JSON.stringify(r.path)},"start_line":${r.endLine + 1},"end_line":${Math.min(r.endLine + 120, r.totalLines)}}). Use full:true only when the whole file is genuinely needed.`
       : ''
   const header = `${r.path} — ${window}${r.truncated ? ' (truncated)' : ''}${next}`
   return { ok: true, text: cap(`${header}\n\n${r.content}`, 30_000) }

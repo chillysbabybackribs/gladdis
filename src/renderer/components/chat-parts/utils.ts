@@ -56,7 +56,7 @@ export function sanitizeToolArgs(args: unknown): unknown {
 }
 
 /**
- * Pull the "Final URL" line out of a fetch_page preview so we can dedup on
+ * Pull the resolved URL line out of a page-open preview so we can dedup on
  * the post-redirect URL rather than the originally requested one.
  */
 export function extractDigestUrl(preview: string | null | undefined): string | null {

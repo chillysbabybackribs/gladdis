@@ -3,6 +3,10 @@ import type { PageExtractor } from '../../extract/PageExtractor'
 import type { ToolOutcome } from '../browserTools'
 import { digestPage } from '../PageDigest'
 import { captureAxSnapshotForTab, digestAxSnapshot } from '../../extract/axTree'
+import { buildPageWireframe, formatPageWireframe } from '../../extract/pageWireframe'
+import type { PageCapture } from '../../../../shared/extraction'
+import type { SavedPage } from '../../extract/pageStore'
+import { sleep } from './toolUtils'
 import type { CapturedNetworkBody, CapturedNetworkRequest } from '../../network/watchNetworkRecorder'
 import type { NetworkFilterSpec } from '../../network/watchNetworkRecorder'
 import {
@@ -52,6 +56,8 @@ export interface PerceiveToolsDeps {
   getA11yCacheStats: () => ReadPageCacheStats
   recordPageCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') => void
   recordA11yCacheEvent: (event: 'hit' | 'miss' | 'expired' | 'evicted') => void
+  /** Persist a re-captured page after wait_for_load, mirroring navigate's save. */
+  savePage?: (cap: PageCapture, conversationId: string | null | undefined) => Promise<SavedPage>
 }
 
 const DISCOVER_DATA_SOURCES_CACHE_TTL_MS = 30_000
@@ -123,6 +129,100 @@ export async function runReadPage(
         capturedAt: nowCaptured,
         ...deps.getPageCacheStats()
       }
+    }
+  }
+}
+
+/**
+ * wait_for_load — content-stabilize, then re-capture.
+ *
+ * navigate captures at readyState:complete, which for a client-rendered SPA
+ * (Google Maps, etc.) is the empty "Loading" shell — the real content renders
+ * seconds later. When a capture looks thin/loading, the model calls this: it
+ * polls document.body.innerText.length until it STOPS GROWING across a few
+ * samples (or a max timeout), then re-runs the extractor and returns a fresh
+ * document-order wireframe + re-saves the page. Static pages return almost
+ * immediately (text is already stable); SPAs get the extra second they need.
+ */
+export async function runWaitForLoad(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string,
+  conversationId?: string | null
+): Promise<ToolOutcome> {
+  const maxMs = Math.min(Math.max(Number(args.timeout_ms) || 6_000, 1_000), 15_000)
+  const deadline = Date.now() + maxMs
+  const readTextLen = async (): Promise<number> => {
+    try {
+      const res = await deps.tabs.executeJavaScript(
+        tabId,
+        'return (document.body && document.body.innerText) ? document.body.innerText.length : 0'
+      )
+      return res.success && typeof res.result === 'number' ? res.result : 0
+    } catch {
+      return 0
+    }
+  }
+
+  // Poll until the text length is stable across STABLE_SAMPLES consecutive reads
+  // (allowing tiny jitter), or the deadline passes.
+  const STABLE_SAMPLES = 3
+  const JITTER = 8 // chars of noise we treat as "unchanged"
+  let last = await readTextLen()
+  let stableCount = 0
+  let stabilized = false
+  while (Date.now() < deadline) {
+    await sleep(300)
+    const now = await readTextLen()
+    if (Math.abs(now - last) <= JITTER) {
+      stableCount += 1
+      if (stableCount >= STABLE_SAMPLES && now > 0) {
+        stabilized = true
+        break
+      }
+    } else {
+      stableCount = 0
+    }
+    last = now
+  }
+
+  const finalLen = last
+  // Re-capture the now-settled page (fresh wireframe + re-save to disk).
+  let wireframe: ReturnType<typeof buildPageWireframe> | null = null
+  let saved: SavedPage | null = null
+  try {
+    const cap: PageCapture = await deps.extractor.run(tabId)
+    wireframe = buildPageWireframe(cap)
+    if (deps.savePage) {
+      try {
+        saved = await deps.savePage(cap, conversationId)
+      } catch {
+        saved = null
+      }
+    }
+  } catch {
+    wireframe = null
+  }
+
+  const status = stabilized
+    ? `Content settled (~${finalLen.toLocaleString()} chars).`
+    : finalLen > 0
+      ? `Content did not fully stabilize before ${maxMs}ms, but the page now has ~${finalLen.toLocaleString()} chars — re-captured its current state.`
+      : `Page still appears empty after ${maxMs}ms; it may require interaction, be blocked, or genuinely have no text content.`
+  const savedText = saved
+    ? `\nSaved full page: ${saved.markdownPath} · ${saved.actionsPath} (read/grep locally).`
+    : ''
+  const wireframeText = wireframe ? `\n${formatPageWireframe(wireframe)}` : ''
+
+  return {
+    ok: true,
+    text: `${status}${savedText}${wireframeText}`,
+    structuredContent: {
+      stabilized,
+      bodyTextChars: finalLen,
+      timeoutMs: maxMs,
+      ...(saved ? { savedMarkdownPath: saved.markdownPath, savedActionsPath: saved.actionsPath } : {}),
+      ...(wireframe ? { wireframe } : {})
     }
   }
 }

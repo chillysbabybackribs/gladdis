@@ -35,7 +35,6 @@ export type AxSnapshotNode = {
   backendDOMNodeId?: number
   bounds?: AxBounds
   inViewport: boolean
-  score: number
   frameId?: string
   frameLabel?: string
 }
@@ -152,19 +151,13 @@ function isInterestingNode(node: CdpAxNode, interactiveOnly: boolean): boolean {
   return !!(name || value)
 }
 
-function scoreNode(node: Pick<AxSnapshotNode, 'role' | 'name' | 'states' | 'inViewport'>, focus?: string): number {
-  let score = 0
-  if (node.inViewport) score += 4
-  if (!node.states.includes('disabled')) score += 3
-  if (node.name) score += 2
-  if (INTERACTIVE_ROLES.has(node.role.toLowerCase())) score += 2
-  if (focus) {
-    const needle = focus.toLowerCase()
-    if (node.name.toLowerCase().includes(needle)) score += 5
-    if (node.role.toLowerCase().includes(needle)) score += 2
-  }
-  return score
-}
+// Ranking was removed deliberately. The a11y tree arrives in DOCUMENT ORDER —
+// which is the page's own order and the only thing that means "top" — so we
+// keep that order and never re-sort. Any importance judgment ("which is the top
+// story") belongs to the model, which has the user's prompt; a capture-time
+// score can only guess, and its guesses were wrong (it ranked HN's #1 story
+// below a longer mid-page headline). `focus` still exists as an optional filter
+// hint, but it no longer reorders.
 
 export function boxFromContentQuad(model: number[] | undefined): AxBounds | null {
   if (!Array.isArray(model) || model.length < 8) return null
@@ -222,15 +215,13 @@ export function flattenAxNodes(
       states,
       backendDOMNodeId: node.backendDOMNodeId,
       inViewport: true,
-      score: 0,
       frameId: tagged.frameId,
       frameLabel: tagged.frameLabel
     }
-    entry.score = scoreNode(entry, opts.focus)
     candidates.push(entry)
   }
 
-  candidates.sort((a, b) => b.score - a.score || a.role.localeCompare(b.role) || a.name.localeCompare(b.name))
+  // NO SORT. Nodes stay in document order — the page's own order, top to bottom.
   return { entries: candidates, totalSeen }
 }
 
@@ -282,20 +273,59 @@ function collectFrames(root: FrameTreeNode | undefined, out: Array<{ id: string;
   walk(root, true)
 }
 
+
+function orderAxNodes(nodes: CdpAxNode[]): CdpAxNode[] {
+  if (!nodes || nodes.length === 0) return []
+  const map = new Map<string, CdpAxNode>()
+  for (const node of nodes) {
+    if (node.nodeId) map.set(node.nodeId, node)
+  }
+  const root = nodes[0]
+  if (!root || !root.nodeId) return nodes
+
+  const result: CdpAxNode[] = []
+  const seen = new Set<string>()
+
+  function traverse(nodeId: string) {
+    if (seen.has(nodeId)) return
+    seen.add(nodeId)
+    const node = map.get(nodeId)
+    if (!node) return
+    result.push(node)
+    if (node.childIds) {
+      for (const childId of node.childIds) {
+        traverse(childId)
+      }
+    }
+  }
+
+  traverse(root.nodeId)
+
+  if (result.length < nodes.length) {
+    for (const node of nodes) {
+      if (node.nodeId && !seen.has(node.nodeId)) {
+        result.push(node)
+      }
+    }
+  }
+
+  return result
+}
+
 async function loadTaggedAxNodes(send: CdpSend): Promise<TaggedAxNode[]> {
   const tree = (await send('Page.getFrameTree', {})) as { frameTree?: FrameTreeNode }
   const frames: Array<{ id: string; url?: string; name?: string; isMain: boolean }> = []
   collectFrames(tree.frameTree, frames)
   if (frames.length === 0) {
     const response = (await send('Accessibility.getFullAXTree', {})) as { nodes?: CdpAxNode[] }
-    return (response.nodes ?? []).map((node) => ({ node }))
+    return orderAxNodes(response.nodes ?? []).map((node) => ({ node }))
   }
 
   const tagged: TaggedAxNode[] = []
   for (const frame of frames) {
     const response = (await send('Accessibility.getFullAXTree', { frameId: frame.id })) as { nodes?: CdpAxNode[] }
     const label = frameLabelFromUrl(frame.url, frame.name, frame.isMain)
-    for (const node of response.nodes ?? []) {
+    for (const node of orderAxNodes(response.nodes ?? [])) {
       tagged.push({
         node,
         frameId: frame.isMain ? undefined : frame.id,
@@ -309,8 +339,7 @@ async function loadTaggedAxNodes(send: CdpSend): Promise<TaggedAxNode[]> {
 async function attachBounds(
   send: CdpSend,
   entries: AxSnapshotNode[],
-  viewport: { width: number; height: number },
-  focus?: string
+  viewport: { width: number; height: number }
 ): Promise<void> {
   const targets = entries.filter((node) => typeof node.backendDOMNodeId === 'number')
 
@@ -327,7 +356,6 @@ async function attachBounds(
         if (!bounds) continue
         node.bounds = bounds
         node.inViewport = isBoundsInViewport(bounds, viewport)
-        node.score = scoreNode(node, focus)
       } catch {
         /* skip nodes Chromium cannot box-model */
       }
@@ -359,17 +387,19 @@ async function captureAxSnapshot(
     const boundsTargets = flattened.entries.slice(0, MAX_BOUNDS_FETCHES)
 
     if (includeBounds && boundsTargets.length > 0) {
-      await attachBounds(send, boundsTargets, viewport, opts.focus)
+      await attachBounds(send, boundsTargets, viewport)
     }
 
-    let ranked = includeBounds ? [...flattened.entries] : flattened.entries
-    ranked.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    // NO SORT — keep document order (the page's own top-to-bottom order, which
+    // is what "top story" means). viewportOnly still filters, and we still cap,
+    // but neither reorders: @a1 is the first node in the page, not a "winner".
+    let ordered = flattened.entries
     if (opts.viewportOnly) {
-      ranked = ranked.filter((node) => node.inViewport)
+      ordered = ordered.filter((node) => node.inViewport)
     }
     const maxNodes = Math.min(Math.max(opts.maxNodes ?? MAX_NODES_DEFAULT, 1), 120)
-    const truncated = ranked.length > maxNodes
-    const selected = ranked.slice(0, maxNodes)
+    const truncated = ordered.length > maxNodes
+    const selected = ordered.slice(0, maxNodes)
     selected.forEach((node, index) => {
       node.ref = `@a${index + 1}`
     })
@@ -451,3 +481,9 @@ export function digestAxSnapshot(snapshot: AxSnapshot, opts: AxDigestOptions = {
   }
   return output
 }
+
+// NOTE: navigate's orientation wireframe now comes from the DOM (PageExtractor →
+// src/main/extract/pageWireframe.ts), NOT the a11y tree — the a11y tree fails on
+// table-heavy pages (empty `row` nodes, footer-first). read_a11y still uses the
+// capture above for control-heavy component UIs; it just no longer feeds a
+// wireframe. The old a11y buildWireframe/formatWireframe were removed as dead.

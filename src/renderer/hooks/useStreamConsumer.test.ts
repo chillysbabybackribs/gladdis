@@ -174,7 +174,7 @@ describe('applyStreamEventToMessages', () => {
       requestId: 'req-a',
       assistantMessageId: 'assistant-a',
       type: 'tool_call',
-      tool: 'fetch_page',
+      tool: 'navigate',
       args: { url: 'https://example.com' },
       callId: 'call-1',
       startedAt: 1000
@@ -195,7 +195,7 @@ describe('applyStreamEventToMessages', () => {
         kind: 'tool',
         tool: {
           callId: 'call-1',
-          tool: 'fetch_page',
+          tool: 'navigate',
           args: { url: 'https://example.com' },
           status: 'ok',
           startedAt: 1000,

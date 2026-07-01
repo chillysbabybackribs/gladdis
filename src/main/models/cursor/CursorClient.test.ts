@@ -309,6 +309,21 @@ Tip: use --model <id> to switch.
     ).toBe('Page title: Example Domain URL: https://example.com')
   })
 
+  it('summarizes Gladdis act results through the current MCP surface', () => {
+    expect(
+      cursorToolPreview({
+        mcpToolCall: {
+          serverName: 'gladdis',
+          toolName: 'act',
+          args: { kind: 'click', query: 'Sign in' },
+          result: {
+            content: [{ type: 'text', text: 'act(click): clicked Sign in. Now at https://example.com/login' }]
+          }
+        }
+      })
+    ).toBe('act(click): clicked Sign in. Now at https://example.com/login')
+  })
+
   it('surfaces failed Gladdis MCP tool results as actionable tool errors', () => {
     expect(
       cursorToolPreview({

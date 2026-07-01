@@ -26,6 +26,17 @@ import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
 import type { LlmComplete } from './llm'
 import { routeAgentTools } from './toolRouter'
 
+const ACT_COMPANION_TOOL_NAMES = new Set(['set_field', 'submit', 'open_result'])
+
+function enforceActCompanionPolicy(tools: ToolDef[]): ToolDef[] {
+  const names = new Set(tools.map((tool) => tool.name))
+  if (!names.has('act')) return tools
+  for (const companion of ACT_COMPANION_TOOL_NAMES) {
+    if (names.has(companion)) return tools
+  }
+  return tools.filter((tool) => tool.name !== 'act')
+}
+
 export class AgentConfigurationService {
   constructor(
     private tools: BrowserTools,
@@ -127,7 +138,7 @@ export class AgentConfigurationService {
       }
     }
 
-    return { ...baseProfile, tools: withPolicy }
+    return { ...baseProfile, tools: enforceActCompanionPolicy(withPolicy) }
   }
 
   public agentBlueprintToolConstraints(blueprint: OptimizeAgentResult | ChatAgentSelection): {

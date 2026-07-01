@@ -96,6 +96,45 @@ describe('AgentConfigurationService', () => {
     expect(names).not.toContain('act')
   })
 
+  it('does not let saved preferences reintroduce lone act', async () => {
+    const { service } = makeConfigService()
+    const baseSurface = await service.agentToolProfile({
+      messages: [{ role: 'user', content: 'click the login button' }]
+    } as any)
+
+    const constrained = (service as any).applyAgentToolPolicy(
+      {
+        agent: {
+          preferredTools: ['act']
+        }
+      },
+      baseSurface
+    ) as AgentToolSurface
+
+    const names = constrained.tools.map((tool: { name: string }) => tool.name)
+    expect(names).not.toContain('act')
+  })
+
+  it('keeps act when saved preferences include a companion browser verb', async () => {
+    const { service } = makeConfigService()
+    const baseSurface = await service.agentToolProfile({
+      messages: [{ role: 'user', content: 'click the login button' }]
+    } as any)
+
+    const constrained = (service as any).applyAgentToolPolicy(
+      {
+        agent: {
+          preferredTools: ['act', 'submit']
+        }
+      },
+      baseSurface
+    ) as AgentToolSurface
+
+    const names = constrained.tools.map((tool: { name: string }) => tool.name)
+    expect(names).toContain('act')
+    expect(names).toContain('submit')
+  })
+
   it('attaches the workspace block when a folder is selected', () => {
     const { service } = makeConfigService('/home/user/project')
     expect(service.workspaceSystemBlock()).toBe('Workspace: /home/user/project')

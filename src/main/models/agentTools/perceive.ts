@@ -53,6 +53,38 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
     }
   },
   {
+    name: 'wait_for_load',
+    description:
+      'Wait for a still-rendering page to finish, then re-capture it. Call this when a page ' +
+      'looks like a loading shell — very little text, a "Loading" body, or a navigate result ' +
+      'that flagged it as still rendering (common on client-rendered apps like maps, dashboards, ' +
+      'and single-page apps whose real content appears a moment after the URL settles). ' +
+      'It polls the page text until it stops growing (or a timeout), then returns a fresh ' +
+      'document-order wireframe and re-saves the page to disk. Do NOT give up on an empty capture — ' +
+      'call this first. Static pages return almost instantly.',
+    parameters: {
+      type: 'object',
+      properties: {
+        timeout_ms: {
+          type: 'number',
+          description: 'Max time to wait for content to stabilize (1000–15000, default 6000).'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        stabilized: { type: 'boolean' },
+        bodyTextChars: { type: 'number' },
+        timeoutMs: { type: 'number' },
+        savedMarkdownPath: { type: 'string' },
+        savedActionsPath: { type: 'string' },
+        wireframe: { type: 'object' }
+      },
+      required: ['stabilized', 'bodyTextChars', 'timeoutMs']
+    }
+  },
+  {
     name: 'read_a11y',
     description:
       'Read a compact accessibility-tree snapshot of the active tab via CDP ' +

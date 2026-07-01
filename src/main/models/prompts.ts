@@ -16,6 +16,14 @@ import {
   GLADDIS_WEB_TOOLS_RULE,
   stripNamedToolLead
 } from './codex/dynamicBrowserTools'
+import {
+  ACTIVE_PAGE_GROUNDING_GUIDANCE,
+  buildResumeProcessGuidance,
+  CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE,
+  STOP_WHEN_DONE_GUIDANCE,
+  UI_VISUAL_CONFIRMATION_GUIDANCE,
+  WORK_FROM_REAL_CODEBASE_GUIDANCE
+} from './codex/processPolicy'
 
 /**
  * Operating brief for gladdis. Not a persona — orientation and stance, not a
@@ -288,21 +296,14 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
     '-y` — instead of reporting a tool as missing.\n\n' +
     'When your done checks are satisfied and validation has passed, stop and deliver the result. Do not ' +
     'keep exploring or run extra work after confirmed completion unless the user asks for it.\n\n' +
-    'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
-    'call recall_history, summarize the relevant saved chat context, and stop for the next concrete ' +
-    'instruction. Do not edit files, run validations, navigate pages, or continue old work from a bare ' +
-    'resume request.'
+    buildResumeProcessGuidance({ recallTool: 'recall_history' })
 
   const result = gladdisToolNames.size > 0
     ? core +
       '\n\n' +
       `${buildCodexBrowserInstructions(gladdisToolNames)}\n\n` +
-      'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-      'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
-      'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
-      'launching the local dev server, open the rendered page and confirm with grep_page and/or read_a11y ' +
-      '(or screenshot if the UI is genuinely vision-only) that it is not blank and the intended UI is ' +
-      'visible before answering. Do not stop at build/curl-only validation for UI work.\n\n' +
+      `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
+      `${CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE}\n\n` +
       'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
     : core +
       '\n\nUse your native shell/file tools for local repo, package, validation, and coding work. ' +
@@ -334,24 +335,15 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
     '`--dangerously-skip-permissions`, so local repo, file, shell, git, commit, and push actions are already ' +
     'unrestricted. Do not stop for Claude permission or approval workflows, and do not ask the user to manually ' +
     'run local commands just to bypass a Claude-side restriction unless a command actually fails.\n\n' +
-    'Use the actual workspace on disk, verify before asserting, and complete the task end-to-end when feasible. ' +
-    'Once the requested task is confirmed complete, stop and deliver the result instead of continuing by default. ' +
-    'Before changing anything, search/read the relevant files and run the build/tests so edits land on the real ' +
-    'codebase, not assumptions. Install missing local packages or tools directly when needed.\n\n' +
-    'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
-    'use the attached recall_history MCP helper, summarize the relevant saved chat context, and stop for ' +
-    'the next concrete instruction. Do not edit files, run validations, navigate pages, or continue old ' +
-    'work from a bare resume request.'
+    `${WORK_FROM_REAL_CODEBASE_GUIDANCE} ${STOP_WHEN_DONE_GUIDANCE}\n\n` +
+    buildResumeProcessGuidance({ recallTool: 'the attached recall_history MCP helper' })
 
   const result = browserToolNames.size > 0
     ? core +
       '\n\n' +
       `${buildClaudeCodeBrowserInstructions(browserToolNames)}\n\n` +
-      'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-      'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
-      'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
-      'launching the local dev server, use the attached Gladdis browser tools to confirm the page is not blank ' +
-      'and the intended UI is visible before finishing.\n\n' +
+      `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
+      `${UI_VISUAL_CONFIRMATION_GUIDANCE}\n\n` +
       'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
     : core +
       '\n\nKeep Claude Code native local repo, file, shell, git, and validation abilities focused on the task. ' +
@@ -381,8 +373,7 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   const core =
     `${ABOUT_GLADDIS}\n\n` +
     'This turn runs through a logged-in local Cursor Agent CLI session. Use the actual workspace on disk, ' +
-    'verify before asserting, and complete the task end-to-end when feasible. Once the requested task is ' +
-    'confirmed complete, stop and deliver the result instead of continuing by default.'
+    `verify before asserting, and complete the task end-to-end when feasible. ${STOP_WHEN_DONE_GUIDANCE}`
 
   let result: string
   if (browserToolNames.size === 0) {
@@ -397,11 +388,8 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
       core +
       '\n\n' +
       `${buildCursorBrowserInstructions(browserToolNames)}\n\n` +
-      'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, or ' +
-      'current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
-      'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and launching ' +
-      'the local dev server, use the attached Gladdis browser tools to confirm the page is not blank and the ' +
-      'intended UI is visible before finishing.'
+      `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
+      UI_VISUAL_CONFIRMATION_GUIDANCE
   }
 
   CURSOR_SYSTEM_CACHE.set(key, result)

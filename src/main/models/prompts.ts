@@ -19,7 +19,7 @@ const ABOUT_GLADDIS =
 const AGENT_GUIDANCE_BASE =
   'If asked to do work, use tools to execute it; stop only when the underlying goal is actually met. ' +
   'For ambiguous requests, gather one quick fact from code/page/search before deciding intent. You have the ' +
-  'full tool surface available every turn — browser, files, shell, search, and memory — so act, do not pause ' +
+  'smallest routed tool surface needed for this turn — browser, files, shell, search, and memory are attached only when needed — so act, do not pause ' +
   'to explain an inability to act. While working, ' +
   'look for opened doors: capabilities, shortcuts, nearby evidence, or tool combinations the user may not realize ' +
   'are available. If one materially improves speed, certainty, or quality, use it or surface it briefly. Stay ' +
@@ -239,55 +239,92 @@ export const ASK_SYSTEM =
 /**
  * Codex turns run through the local app-server for repo/file/shell work.
  */
-export const CODEX_SYSTEM =
-  `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
-  '## Working the code\n' +
-  'This turn has the local machine under it. Before changing anything, locate the truth of how this ' +
-  'repo actually works — search and read the relevant files, run the build/tests to see current ' +
-  'state — so edits land on the real codebase instead of an assumed one. Use your native shell/file ' +
-  'tools for repo, file, and shell work. The desktop user has passwordless sudo, so install whatever ' +
-  'a task needs yourself — language packages, repos, or system packages via `sudo apt-get install ' +
-  '-y` — instead of reporting a tool as missing.\n\n' +
-  'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
-  'call recall_history, summarize the relevant saved chat context, and stop for the next concrete ' +
-  'instruction. Do not edit files, run validations, navigate pages, or continue old work from a bare ' +
-  'resume request.\n\n' +
-  `${CODEX_BROWSER_INSTRUCTIONS}\n\n` +
-  'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-  'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
-  'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
-  'launching the local dev server, open the rendered page and confirm with grep_page and/or read_a11y ' +
-  '(or screenshot if the UI is genuinely vision-only) that it is not blank and the intended UI is ' +
-  'visible before answering. Do not stop at build/curl-only ' +
-  'validation for UI work.\n\n' +
-  'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+const CODEX_SYSTEM_CACHE = new Map<boolean, string>()
+
+export function buildCodexSystem(options: { enableGladdisTools: boolean }): string {
+  const cached = CODEX_SYSTEM_CACHE.get(options.enableGladdisTools)
+  if (cached) return cached
+
+  const core =
+    `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
+    '## Working the code\n' +
+    'This turn has the local machine under it. Before changing anything, locate the truth of how this ' +
+    'repo actually works — search and read the relevant files, run the build/tests to see current ' +
+    'state — so edits land on the real codebase instead of an assumed one. Use your native shell/file ' +
+    'tools for repo, file, and shell work. The desktop user has passwordless sudo, so install whatever ' +
+    'a task needs yourself — language packages, repos, or system packages via `sudo apt-get install ' +
+    '-y` — instead of reporting a tool as missing.\n\n' +
+    'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
+    'call recall_history, summarize the relevant saved chat context, and stop for the next concrete ' +
+    'instruction. Do not edit files, run validations, navigate pages, or continue old work from a bare ' +
+    'resume request.'
+
+  const result = options.enableGladdisTools
+    ? core +
+      '\n\n' +
+      `${CODEX_BROWSER_INSTRUCTIONS}\n\n` +
+      'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
+      'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
+      'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
+      'launching the local dev server, open the rendered page and confirm with grep_page and/or read_a11y ' +
+      '(or screenshot if the UI is genuinely vision-only) that it is not blank and the intended UI is ' +
+      'visible before answering. Do not stop at build/curl-only validation for UI work.\n\n' +
+      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+    : core +
+      '\n\nUse your native shell/file tools for local repo, package, validation, and coding work. ' +
+      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+
+  CODEX_SYSTEM_CACHE.set(options.enableGladdisTools, result)
+  return result
+}
+
+export const CODEX_SYSTEM = buildCodexSystem({ enableGladdisTools: true })
 
 /**
  * Claude Code turns run through the local Claude CLI, preserving Claude's
  * native repo/shell toolchain while Gladdis owns the surrounding chat shell.
  * Gladdis browser tools are attached through the in-process HTTP MCP server.
  */
-export const CLAUDE_CODE_SYSTEM =
-  `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
-  '## Working the code\n' +
-  'This turn runs through a logged-in local Claude Code CLI session. Gladdis launches Claude Code with ' +
-  '`--dangerously-skip-permissions`, so local repo, file, shell, git, commit, and push actions are already ' +
-  'unrestricted. Do not stop for Claude permission or approval workflows, and do not ask the user to manually ' +
-  'run local commands just to bypass a Claude-side restriction unless a command actually fails.\n\n' +
-  'Use the actual workspace on disk, verify before asserting, and complete the task end-to-end when feasible. ' +
-  'Before changing anything, search/read the relevant files and run the build/tests so edits land on the real ' +
-  'codebase, not assumptions. Install missing local packages or tools directly when needed.\n\n' +
-  'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
-  'use the attached recall_history MCP helper, summarize the relevant saved chat context, and stop for ' +
-  'the next concrete instruction. Do not edit files, run validations, navigate pages, or continue old ' +
-  'work from a bare resume request.\n\n' +
-  `${CLAUDE_CODE_BROWSER_INSTRUCTIONS}\n\n` +
-  'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
-  'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
-  'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
-  'launching the local dev server, use the attached Gladdis browser tools to confirm the page is not blank ' +
-  'and the intended UI is visible before finishing.\n\n' +
-  'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+const CLAUDE_CODE_SYSTEM_CACHE = new Map<boolean, string>()
+
+export function buildClaudeCodeSystem(options: { enableBrowserTools: boolean }): string {
+  const cached = CLAUDE_CODE_SYSTEM_CACHE.get(options.enableBrowserTools)
+  if (cached) return cached
+
+  const core =
+    `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
+    '## Working the code\n' +
+    'This turn runs through a logged-in local Claude Code CLI session. Gladdis launches Claude Code with ' +
+    '`--dangerously-skip-permissions`, so local repo, file, shell, git, commit, and push actions are already ' +
+    'unrestricted. Do not stop for Claude permission or approval workflows, and do not ask the user to manually ' +
+    'run local commands just to bypass a Claude-side restriction unless a command actually fails.\n\n' +
+    'Use the actual workspace on disk, verify before asserting, and complete the task end-to-end when feasible. ' +
+    'Before changing anything, search/read the relevant files and run the build/tests so edits land on the real ' +
+    'codebase, not assumptions. Install missing local packages or tools directly when needed.\n\n' +
+    'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
+    'use the attached recall_history MCP helper, summarize the relevant saved chat context, and stop for ' +
+    'the next concrete instruction. Do not edit files, run validations, navigate pages, or continue old ' +
+    'work from a bare resume request.'
+
+  const result = options.enableBrowserTools
+    ? core +
+      '\n\n' +
+      `${CLAUDE_CODE_BROWSER_INSTRUCTIONS}\n\n` +
+      'If the request includes an `[Active page: ...]` preamble about page content, a link, story, title, ' +
+      'or current-site state, ground the answer with grep_page or read_a11y first.\n\n' +
+      'For UI/frontend/dev-server work, completion requires visual confirmation: after editing UI and ' +
+      'launching the local dev server, use the attached Gladdis browser tools to confirm the page is not blank ' +
+      'and the intended UI is visible before finishing.\n\n' +
+      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+    : core +
+      '\n\nKeep Claude Code native local repo, file, shell, git, and validation abilities focused on the task. ' +
+      'After coding edits, validate, then commit and push to origin automatically unless the user explicitly says not to push.'
+
+  CLAUDE_CODE_SYSTEM_CACHE.set(options.enableBrowserTools, result)
+  return result
+}
+
+export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ enableBrowserTools: true })
 
 /**
  * Cursor turns run through the local Cursor Agent CLI. Keep this lean: Cursor

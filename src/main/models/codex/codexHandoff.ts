@@ -1,18 +1,18 @@
 import { isBareContinuation, type ChatRequest, type ModelOption } from '../../../../shared/types'
 import { createTurnSupervisor } from '../turnSupervisor'
-import { CODEX_SYSTEM } from '../prompts'
+import { buildCodexSystem } from '../prompts'
 import { openCodexLocalPreviewIfRequested } from '../localPreviewBridge'
 import type { CodexClient } from './CodexClient'
 import type { ModelCallLedger } from '../ModelCallLedger'
 import type { BrowserTools } from '../browserTools'
-import type { AgentToolProfile } from '../agentTools'
-import type { AgentConfigurationService } from '../AgentConfigurationService'
+import type { AgentConfigurationService, AgentToolSurface } from '../AgentConfigurationService'
+import { selectCodexDynamicToolNames } from './dynamicBrowserTools'
 
 export async function runCodexHandoff(
   req: ChatRequest,
   model: ModelOption,
   actionableText: string,
-  initialProfile: AgentToolProfile,
+  initialProfile: AgentToolSurface,
   controller: AbortController,
   codex: CodexClient,
   audit: ModelCallLedger,
@@ -38,15 +38,22 @@ export async function runCodexHandoff(
     input: req.messages
   })
   try {
+    const dynamicToolNames = selectCodexDynamicToolNames(initialProfile.tools.map((tool) => tool.name))
     const wsBlock = agentConfig.workspaceSystemBlock(initialProfile)
     const repoBlock = await agentConfig.codexRepoOverviewBlock(req, actionableText)
-    const codexSystem = [CODEX_SYSTEM, agentConfig.customAgentSystemBlock(req), wsBlock, repoBlock].filter(Boolean).join('\n\n')
+    const codexSystem = [
+      buildCodexSystem({ enableGladdisTools: dynamicToolNames.size > 0 }),
+      agentConfig.customAgentSystemBlock(req),
+      wsBlock,
+      repoBlock
+    ].filter(Boolean).join('\n\n')
     logSystemPrompt('codex', 'codex', codexSystem)
     const output = await codex.send(
       req,
       controller.signal,
       codexSystem,
-      true
+      true,
+      dynamicToolNames
     )
     await openCodexLocalPreviewIfRequested({
       req,

@@ -22,6 +22,8 @@ describe('ClaudeCodeBridgeServer', () => {
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_write for durable decisions/constraints/identifiers')
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('use memory_create_task for task-specific notes')
     expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('Store concise, reusable facts rather than large transcript dumps')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).toContain('act is the primary action verb')
+    expect(CLAUDE_CODE_BROWSER_INSTRUCTIONS).not.toContain('fetch_page')
   })
 
   it('exposes Claude browser tools over direct HTTP MCP', async () => {
@@ -46,13 +48,13 @@ describe('ClaudeCodeBridgeServer', () => {
         text: 'tool ok',
         imageBase64: null,
         structuredContent: {
-          workspaceRoot: '/tmp/workspace',
-          packageManager: 'npm',
-          packageName: 'demo',
-          scripts: ['build', 'test'],
-          keyFiles: ['package.json'],
-          topDirectories: ['src'],
-          entryPoints: ['src/main.ts']
+          query: 'tool ok',
+          type: 'text',
+          caseSensitive: false,
+          contextLines: 2,
+          totalMatches: 1,
+          truncated: false,
+          matches: [{ type: 'text', selector: '#hit', matchedLine: 'tool ok' }]
         }
       }
     })
@@ -100,8 +102,31 @@ describe('ClaudeCodeBridgeServer', () => {
     await client.connect(transport)
 
     const tools = await client.listTools()
-    expect(tools.tools.map((tool) => tool.name)).toContain('read_page')
-    expect(tools.tools.map((tool) => tool.name)).toContain('read_a11y')
+    const exposedNames = tools.tools.map((tool) => tool.name)
+    // The reduced 15-name surface: web/page perception+drive, search, and the
+    // memory_* notebook. Removed repo/read_page/screenshot/etc. must stay off.
+    expect(exposedNames).toEqual(
+      expect.arrayContaining([
+        'recall_history',
+        'memory_write',
+        'memory_read',
+        'memory_list',
+        'memory_forget',
+        'memory_create_task',
+        'search',
+        'navigate',
+        'read_page',
+        'read_a11y',
+        'grep_page',
+        'watch_network',
+        'act',
+        'grep_click',
+        'grep_type',
+        'execute_in_browser',
+        'cdp_command'
+      ])
+    )
+    expect(exposedNames).not.toContain('repo_overview')
     expect(tools.tools.find((tool) => tool.name === 'recall_history')).toEqual(
       expect.objectContaining({
         outputSchema: expect.objectContaining({
@@ -124,26 +149,26 @@ describe('ClaudeCodeBridgeServer', () => {
         })
       })
     )
-    expect(tools.tools.find((tool) => tool.name === 'repo_overview')).toEqual(
+    expect(tools.tools.find((tool) => tool.name === 'grep_page')).toEqual(
       expect.objectContaining({
         outputSchema: expect.objectContaining({
           type: 'object',
           properties: expect.objectContaining({
-            workspaceRoot: expect.objectContaining({ type: 'string' }),
-            packageName: expect.anything()
+            query: expect.objectContaining({ type: 'string' }),
+            matches: expect.anything()
           })
         })
       })
     )
 
     const result = await client.callTool({
-      name: 'repo_overview',
-      arguments: { focus: 'bridge test' }
+      name: 'grep_page',
+      arguments: { query: 'tool ok' }
     })
 
     expect(run).toHaveBeenCalledWith(
-      'repo_overview',
-      { focus: 'bridge test' },
+      'grep_page',
+      { query: 'tool ok' },
       expect.objectContaining({
         tabId: 'tab-1',
         conversationId: 'conv-1',
@@ -153,13 +178,13 @@ describe('ClaudeCodeBridgeServer', () => {
     )
     expect(result.content).toEqual([{ type: 'text', text: 'tool ok' }])
     expect(result.structuredContent).toEqual({
-      workspaceRoot: '/tmp/workspace',
-      packageManager: 'npm',
-      packageName: 'demo',
-      scripts: ['build', 'test'],
-      keyFiles: ['package.json'],
-      topDirectories: ['src'],
-      entryPoints: ['src/main.ts']
+      query: 'tool ok',
+      type: 'text',
+      caseSensitive: false,
+      contextLines: 2,
+      totalMatches: 1,
+      truncated: false,
+      matches: [{ type: 'text', selector: '#hit', matchedLine: 'tool ok' }]
     })
 
     const memoryResult = await client.callTool({
@@ -302,24 +327,66 @@ describe('ClaudeCodeBridgeServer', () => {
 
     const tools = await client.listTools()
     const names = tools.tools.map((tool) => tool.name)
+    // The reduced Cursor surface is exactly the 15 web/page + memory tools.
+    expect([...names].sort()).toEqual([...CURSOR_MCP_TOOL_NAMES].sort())
     expect(names).toContain('read_page')
     expect(names).toContain('read_a11y')
+    expect(names).toContain('grep_page')
+    expect(names).toContain('act')
+    expect(names).toContain('search')
     expect(names).toContain('memory_read')
-    // Gladdis-native repo intelligence is now attached (it is not redundant with
-    // Cursor's native grep — it returns bounded, architecture-aware digests).
-    expect(names).toContain('repo_overview')
-    expect(names).toContain('search_repo')
-    expect(names).toContain('verify_change')
-    // Raw FS/shell stays off this surface — the CLI runtime supplies it natively.
+    expect(names).toContain('execute_in_browser')
+    expect(names).toContain('cdp_command')
+    // Repo intelligence and raw FS/shell are off this surface — Cursor's CLI
+    // runtime supplies code/repo work natively. (screenshot IS on the surface
+    // as the vision fallback.)
+    expect(names).not.toContain('repo_overview')
+    expect(names).not.toContain('search_repo')
+    expect(names).not.toContain('verify_change')
     expect(names).not.toContain('read_file')
     expect(names).not.toContain('run_command')
 
+    // read_file is genuinely off the Cursor surface (native CLI supplies it),
+    // so calling it must be rejected before reaching the dispatcher.
     const result = await client.callTool({
       name: 'read_file',
-      arguments: { path: 'should-not-be-exposed.ts' }
+      arguments: { path: 'should-not-be-exposed' }
     })
     expect(result.isError).toBe(true)
     expect(run).not.toHaveBeenCalled()
+
+    await transport.close()
+    registration.dispose()
+  })
+
+  it('honors an explicit empty allowlist instead of falling back to the full bridge surface', async () => {
+    const bridge = new ClaudeCodeBridgeServer(
+      {
+        run: vi.fn(async () => ({ ok: true, text: 'tool ok', imageBase64: null })),
+        tabs: { activeTabId: 'tab-1', create: () => ({ id: 'tab-created' }) },
+        getWorkspaceRoot: () => '/tmp/workspace'
+      } as any,
+      vi.fn()
+    )
+    servers.add(bridge)
+
+    const registration = await bridge.registerSession({
+      conversationId: 'conv-1',
+      modelId: 'claude-code',
+      requestId: 'req-1',
+      allowedToolNames: new Set(),
+      browserLlm: vi.fn()
+    })
+
+    const server = JSON.parse(registration.mcpConfig).mcpServers[CLAUDE_CODE_BROWSER_TOOL_SERVER_NAME]
+    const client = new Client({ name: 'vitest-client', version: '1.0.0' })
+    const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: { headers: server.headers }
+    })
+    await client.connect(transport)
+
+    const tools = await client.listTools()
+    expect(tools.tools).toEqual([])
 
     await transport.close()
     registration.dispose()

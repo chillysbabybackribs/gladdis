@@ -51,6 +51,7 @@ export interface ActiveTurn {
   error: Error | null
   toolItems: Map<string, { tool: string }>
   blockedItems: Set<string>
+  allowedToolNames?: ReadonlySet<string>
 }
 
 export interface NotificationContext {
@@ -281,7 +282,7 @@ function blockPolicyViolation(
  * UnhandledPromiseRejectionWarning) and must always send exactly one response to
  * `msg.id`. The Codex app server blocks the turn until it gets that response, so a
  * handler that throws mid-flight — e.g. `Unknown tab` when a tab closes during a
- * fetch_page — would otherwise both crash the process warning AND hang the turn.
+ * page navigation tool call — would otherwise both crash the process warning AND hang the turn.
  * On any error we respond with a tool-error envelope so the turn can proceed.
  */
 export async function routeServerRequest(msg: ServerRequest, ctx: ServerRequestContext): Promise<void> {
@@ -292,7 +293,7 @@ export async function routeServerRequest(msg: ServerRequest, ctx: ServerRequestC
   } catch (err) {
     // Only the `item/tool/call` branch awaits work that can throw, and it does so
     // BEFORE its single respond() (e.g. `Unknown tab` while a tab closes during a
-    // fetch_page) — so no response has gone out yet and this cannot double-respond.
+    // page navigation tool call) — so no response has gone out yet and this cannot double-respond.
     // We answer with a tool-error envelope so the blocked Codex turn proceeds.
     const text = err instanceof Error ? err.message : String(err)
     server.respond(msg.id, codexDynamicToolResponse({ ok: false, text: `Gladdis browser tool failed: ${text}` }))
@@ -327,6 +328,7 @@ async function respondToBrowserTool(msg: ServerRequest, ctx: ServerRequestContex
     llm: turn ? (system, user) => ctx.completeWithModel(turn.modelId, system, user) : null,
     conversationId: turn?.conversationId ?? null,
     requestId: turn && !turn.silent ? turn.requestId : undefined,
+    allowedToolNames: turn?.allowedToolNames,
     emit: ctx.emit
   })
 }

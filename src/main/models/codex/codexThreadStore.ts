@@ -3,6 +3,7 @@ import type { CodexAppServer } from './CodexAppServer'
 import type { ThreadCompactor } from './ThreadCompactor'
 import { resolveCodexPosture, type CodexPosture } from './posture'
 import {
+  buildCodexBrowserTools,
   CODEX_BROWSER_TOOLS,
   CODEX_DISABLED_NATIVE_CONFIG
 } from './dynamicBrowserTools'
@@ -72,7 +73,8 @@ export class CodexThreadStore {
   async ensureThread(
     req: ChatRequest,
     system?: string,
-    useWorkspace = true
+    useWorkspace = true,
+    dynamicToolNames?: ReadonlySet<string>
   ): Promise<ThreadResolution> {
     const conversationId = req.conversationId ?? null
     const key = this.threadKey(conversationId, useWorkspace)
@@ -84,7 +86,7 @@ export class CodexThreadStore {
       return { threadId: cached, canRetryFresh: !!conversationId }
     }
     if (!conversationId) {
-      const threadId = await this.startThread(null, req.modelId, system, false, useWorkspace)
+      const threadId = await this.startThread(null, req.modelId, system, false, useWorkspace, dynamicToolNames)
       return { threadId, canRetryFresh: false }
     }
 
@@ -98,12 +100,13 @@ export class CodexThreadStore {
         persisted,
         req.modelId,
         system,
-        useWorkspace
+        useWorkspace,
+        dynamicToolNames
       )
       return { threadId, canRetryFresh: true }
     }
 
-    const threadId = await this.startThread(conversationId, req.modelId, system, false, useWorkspace)
+    const threadId = await this.startThread(conversationId, req.modelId, system, false, useWorkspace, dynamicToolNames)
     return { threadId, canRetryFresh: false }
   }
 
@@ -116,7 +119,8 @@ export class CodexThreadStore {
     modelId: string,
     system?: string,
     ephemeral = false,
-    useWorkspace = true
+    useWorkspace = true,
+    dynamicToolNames?: ReadonlySet<string>
   ): Promise<string> {
     const server = await this.deps.ensureServer()
     const p = this.posture(useWorkspace)
@@ -127,7 +131,7 @@ export class CodexThreadStore {
       approvalPolicy: p.approvalPolicy,
       sandbox: p.sandbox,
       config: await this.codexConfig(modelId),
-      dynamicTools: CODEX_BROWSER_TOOLS,
+      dynamicTools: dynamicToolNames ? buildCodexBrowserTools(dynamicToolNames) : CODEX_BROWSER_TOOLS,
       ...(serviceTier ? { serviceTier } : {}),
       ephemeral,
       // gladdis's identity for the thread. Without it, the codex CLI falls
@@ -149,7 +153,8 @@ export class CodexThreadStore {
     threadId: string,
     modelId: string,
     system?: string,
-    useWorkspace = true
+    useWorkspace = true,
+    dynamicToolNames?: ReadonlySet<string>
   ): Promise<string> {
     const server = await this.deps.ensureServer()
     const p = this.posture(useWorkspace)
@@ -161,7 +166,7 @@ export class CodexThreadStore {
       approvalPolicy: p.approvalPolicy,
       sandbox: p.sandbox,
       config: await this.codexConfig(modelId),
-      dynamicTools: CODEX_BROWSER_TOOLS,
+      dynamicTools: dynamicToolNames ? buildCodexBrowserTools(dynamicToolNames) : CODEX_BROWSER_TOOLS,
       ...(serviceTier ? { serviceTier } : {}),
       ...(system ? { developerInstructions: system } : {})
     }

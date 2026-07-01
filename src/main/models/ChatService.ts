@@ -27,7 +27,7 @@ import { ChatStore } from './ChatStore'
 import { CodexClient } from './codex/CodexClient'
 import { ClaudeCodeBridgeServer } from './claudeCode/ClaudeCodeBridgeServer'
 import { ClaudeCodeClient } from './claudeCode/ClaudeCodeClient'
-import { CURSOR_MCP_TOOL_NAMES } from './claudeCode/browserTools'
+import { selectEmbeddedMcpToolNames } from './claudeCode/browserTools'
 import { CursorClient } from './cursor/CursorClient'
 import { CapabilityBroker } from './capabilities/CapabilityBroker'
 import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
@@ -35,7 +35,7 @@ import { ResearchDossierService } from './capabilities/ResearchDossierService'
 import { ValidationService } from './capabilities/ValidationService'
 import type { LlmComplete, LlmCompleteOptions } from './llm'
 import type { ModelCallLedger } from './ModelCallLedger'
-import { ASK_SYSTEM, CLAUDE_CODE_SYSTEM, CODEX_SYSTEM, buildAgentSystem, buildCursorSystem } from './prompts'
+import { ASK_SYSTEM, buildAgentSystem, buildClaudeCodeSystem, buildCursorSystem } from './prompts'
 import { stripActivePagePreamble } from './routing'
 import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
 import { generateChatTitle } from './chatTitleService'
@@ -46,7 +46,6 @@ import { prependDateContextToText } from './providers/dateContext'
 import {
   buildContractTrace,
   resolveTurnContextPolicy,
-  shouldEnableCursorMcpBridge,
   stripStaleActivePageContext,
   type TurnContextPolicy
 } from './turnContextPolicy'
@@ -369,6 +368,7 @@ export class ChatService {
     actionableText: string
     mode: 'ask' | 'agent'
     enableBrowserTools: boolean
+    allowedToolNames?: ReadonlySet<string>
   }): Promise<{ text: string; usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } }> {
     let currentPrompt = args.actionableText
     let lastResult: { text: string; usage?: { inputTokens?: number; outputTokens?: number; cachedInputTokens?: number } } | null = null
@@ -390,6 +390,7 @@ export class ChatService {
         args.mode,
         {
           enableBrowserTools: args.enableBrowserTools,
+          allowedToolNames: args.allowedToolNames,
           getQueuedContext: () => this.consumeQueuedInterjection(args.req.requestId)
         }
       )
@@ -523,7 +524,7 @@ export class ChatService {
               conversationId: args.conversationId,
               modelId: args.modelId,
               requestId: args.requestId,
-              allowedToolNames: CURSOR_MCP_TOOL_NAMES,
+              allowedToolNames: args.allowedToolNames,
               browserLlm: (system, user, options) =>
                 this.embeddedBrowserLlm(system, user, {
                   ...options,
@@ -553,6 +554,7 @@ export class ChatService {
               conversationId: args.conversationId,
               modelId: args.modelId,
               requestId: args.requestId,
+              allowedToolNames: args.allowedToolNames,
               browserLlm: (system, user, options) =>
                 this.embeddedBrowserLlm(system, user, {
                   ...options,
@@ -998,10 +1000,12 @@ export class ChatService {
           input: req.messages
         })
         try {
+          const embeddedToolNames = selectEmbeddedMcpToolNames(profile.tools.map((tool) => tool.name))
+          const enableClaudeMcp = embeddedToolNames.size > 0
           const wsBlock = this.agentConfig.workspaceSystemBlock(profile)
           const repoBlock = await this.agentConfig.codexRepoOverviewBlock(req, actionableText)
           const claudeSystem = [
-            CLAUDE_CODE_SYSTEM,
+            buildClaudeCodeSystem({ enableBrowserTools: enableClaudeMcp }),
             this.agentConfig.customAgentSystemBlock(req),
             wsBlock,
             repoBlock
@@ -1009,7 +1013,10 @@ export class ChatService {
             .filter(Boolean)
             .join('\n\n')
           this.logSystemPrompt('claudecode', 'claudecode', claudeSystem)
-          const output = await this.claudeCode().send(req, controller.signal, claudeSystem, actionableText)
+          const output = await this.claudeCode().send(req, controller.signal, claudeSystem, actionableText, {
+            enableBrowserTools: enableClaudeMcp,
+            allowedToolNames: embeddedToolNames
+          })
           supervisor.complete('Claude Code task completed.')
           call.finish({ output })
         } catch (err) {
@@ -1034,7 +1041,8 @@ export class ChatService {
           input: req.messages
         })
         try {
-          const enableCursorMcp = shouldEnableCursorMcpBridge(policy)
+          const embeddedToolNames = selectEmbeddedMcpToolNames(profile.tools.map((tool) => tool.name))
+          const enableCursorMcp = embeddedToolNames.size > 0
           const cursorMode: 'ask' | 'agent' = agentic ? 'agent' : 'ask'
           this.cursorValidationStates.set(req.requestId, createToolValidationState())
           const wsBlock = this.agentConfig.workspaceSystemBlock(profile)
@@ -1055,7 +1063,8 @@ export class ChatService {
             system: cursorSystem,
             actionableText,
             mode: cursorMode,
-            enableBrowserTools: enableCursorMcp
+            enableBrowserTools: enableCursorMcp,
+            allowedToolNames: embeddedToolNames
           })
           supervisor.complete(`${model.label} task completed.`)
           call.finish({

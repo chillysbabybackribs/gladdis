@@ -300,10 +300,11 @@ export class CodexClient {
     req: ChatRequest,
     signal: AbortSignal,
     system?: string,
-    useWorkspace = true
+    useWorkspace = true,
+    dynamicToolNames?: ReadonlySet<string>
   ): Promise<string> {
     const server = await this.ensureServer()
-    const resolution = await this.threadStore.ensureThread(req, system, useWorkspace)
+    const resolution = await this.threadStore.ensureThread(req, system, useWorkspace, dynamicToolNames)
     const originalUserText =
       [...req.messages].reverse().find((m) => m.role === 'user')?.content ?? ''
 
@@ -314,6 +315,7 @@ export class CodexClient {
       req.modelId,
       req.conversationId ?? null
     )
+    turn.allowedToolNames = dynamicToolNames
 
     // Abort wins over pause: if the user hits stop while paused, wake the
     // pause waiter too so send() can return promptly. The onAbort hook

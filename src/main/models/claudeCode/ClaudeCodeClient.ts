@@ -28,6 +28,7 @@ type CreateClaudeCodeBridgeSession = (args: {
   conversationId: string | null
   modelId: string
   requestId: string | null
+  allowedToolNames?: ReadonlySet<string>
 }) => Promise<ClaudeCodeBridgeRegistration>
 
 function probeClaudeCodeBinary(): Promise<{ installed: boolean; version: string | null }> {
@@ -129,7 +130,7 @@ export class ClaudeCodeClient {
     system: string,
     user: string,
     conversationId?: string | null,
-    options: { enableBrowserTools?: boolean } = {}
+    options: { enableBrowserTools?: boolean; allowedToolNames?: ReadonlySet<string> } = {}
   ): Promise<{ text: string; usage?: ClaudeUsage }> {
     return this.runTurn({
       modelId,
@@ -138,7 +139,8 @@ export class ClaudeCodeClient {
       conversationId: conversationId ?? null,
       requestId: null,
       signal: null,
-      enableBrowserTools: options.enableBrowserTools === true
+      enableBrowserTools: options.enableBrowserTools === true,
+      allowedToolNames: options.allowedToolNames
     })
   }
 
@@ -146,7 +148,8 @@ export class ClaudeCodeClient {
     req: ChatRequest,
     signal: AbortSignal,
     system: string,
-    user: string
+    user: string,
+    options: { enableBrowserTools?: boolean; allowedToolNames?: ReadonlySet<string> } = {}
   ): Promise<string> {
     const result = await this.runTurn({
       modelId: req.modelId,
@@ -155,7 +158,8 @@ export class ClaudeCodeClient {
       conversationId: req.conversationId ?? null,
       requestId: req.requestId,
       signal,
-      enableBrowserTools: true
+      enableBrowserTools: options.enableBrowserTools === true,
+      allowedToolNames: options.allowedToolNames
     })
     return result.text
   }
@@ -168,6 +172,7 @@ export class ClaudeCodeClient {
     requestId: string | null
     signal: AbortSignal | null
     enableBrowserTools: boolean
+    allowedToolNames?: ReadonlySet<string>
   }): Promise<{ text: string; usage?: ClaudeUsage }> {
     const probe = await probeClaudeCodeBinary()
     if (!probe.installed) throw new Error('Claude Code CLI not found')
@@ -180,7 +185,8 @@ export class ClaudeCodeClient {
       ? await this.createBridgeSession({
           conversationId: args.conversationId,
           modelId: args.modelId,
-          requestId: args.requestId
+          requestId: args.requestId,
+          allowedToolNames: args.allowedToolNames
         })
       : null
     const baseCliArgs = [

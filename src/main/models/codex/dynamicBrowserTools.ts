@@ -17,41 +17,43 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'memory_list',
   'memory_forget',
   'memory_create_task',
-  'repo_overview',
-  'search_repo',
-  'repo_grep_task',
-  'read_spans',
-  'research_dossier',
-  'verify_change',
   'search',
-  'search_open',
-  'deep_search',
-  'fetch_page',
   'navigate',
   'read_page',
   'read_a11y',
   'grep_page',
   'watch_network',
-  'grep_click',
-  'grep_type',
   'screenshot',
   'screenshot_app',
-  'click_xy',
-  'type_text',
-  'press_key',
+  'act',
+  'grep_click',
+  'grep_type',
   'execute_in_browser',
   'cdp_command'
 ])
 
-export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
-  .filter((tool) => CODEX_BROWSER_TOOL_NAMES.has(tool.name))
-  .map((tool) => ({
-    namespace: 'gladdis',
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.parameters as unknown as JsonValue,
-    ...(tool.outputSchema ? { outputSchema: tool.outputSchema as unknown as JsonValue } : {})
-  })) as JsonValue[]
+export function selectCodexDynamicToolNames(toolNames: Iterable<string>): ReadonlySet<string> {
+  const allowed = new Set<string>()
+  for (const name of toolNames) {
+    if (CODEX_BROWSER_TOOL_NAMES.has(name)) allowed.add(name)
+  }
+  return allowed
+}
+
+export function buildCodexBrowserTools(allowedToolNames?: Iterable<string>): JsonValue[] {
+  const allowed = allowedToolNames ? new Set(allowedToolNames) : CODEX_BROWSER_TOOL_NAMES
+  return AGENT_TOOLS
+    .filter((tool) => allowed.has(tool.name))
+    .map((tool) => ({
+      namespace: 'gladdis',
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.parameters as unknown as JsonValue,
+      ...(tool.outputSchema ? { outputSchema: tool.outputSchema as unknown as JsonValue } : {})
+    })) as JsonValue[]
+}
+
+export const CODEX_BROWSER_TOOLS = buildCodexBrowserTools(CODEX_BROWSER_TOOL_NAMES)
 
 // The single source of truth — for EVERY provider, not just Codex — for the hard
 // rule that web/search work goes through Gladdis's own tools, never the model's
@@ -61,8 +63,8 @@ export const CODEX_BROWSER_TOOLS = AGENT_TOOLS
 // soft "prefer" nudge let Gemini fall back to its native search.
 export const GLADDIS_WEB_TOOLS_RULE =
   'WEB SEARCH RULE — binding, not a preference: every web/search action goes through Gladdis\'s own ' +
-  'tools, which drive the visible Chromium tab the user is watching. Use search and deep_search for web ' +
-  'search (the user sees the results in-tab), use search_open when you have both a search query and a likely direct URL to check in parallel, and use fetch_page to read a known URL. ' +
+  'tools, which drive the visible Chromium tab the user is watching. Use search for web ' +
+  'search (the user sees the results in-tab; pass navigate_visible: true to also open the best hit), and use navigate to load a known URL then grep_page to read it. ' +
   'You do NOT have a working built-in/native web search or grounding here: it is disabled and its results ' +
   'do not reach the user. If your runtime exposes a native search/fetch tool anyway, such as WebSearch, ' +
   'WebFetch, web_search, web_fetch, browser_search, or browser_fetch, do not call it; it is outside the ' +
@@ -79,17 +81,33 @@ export const GLADDIS_WEB_TOOLS_RULE =
 // explicit "even via your shell" line.
 export const CODEX_BROWSER_INSTRUCTIONS =
   `${GLADDIS_WEB_TOOLS_RULE}\n` +
-  'For browser work beyond search use the gladdis.* tools too: navigate, read_page, read_a11y, grep_page, ' +
-  'watch_network (read the JSON behind a page instead of scraping its HTML), ' +
-  'grep_click, grep_type, execute_in_browser, screenshot, and screenshot_app. For repo intel use ' +
-  'recall_history, repo_overview, repo_grep_task, search_repo, read_spans, research_dossier, and verify_change. ' +
-  'When reading code, start with search_repo or repo_grep_task; use read_spans only as the follow-up bounded read, and batch related windows into one read_spans({items:[...]}) call instead of a long chain of single-span reads. ' +
+  'For browser work beyond search use the gladdis.* tools: act is the primary action verb ' +
+  '(click | type | key | select) — it does the action AND returns a fresh `after` object with ' +
+  '{url, title, readyState, activeElement, navigated, elements?} so you re-orient FROM the result ' +
+  'instead of calling read_page/read_a11y again. Pair it with navigate (returns a page MAP of ' +
+  'primary @refs ready to act on), read_page (orient when you did not just navigate), read_a11y ' +
+  '(a11y tree with @aN refs for control-heavy UIs), grep_page (surgical text/element lookup), ' +
+  'watch_network (read the JSON behind a page instead of scraping its HTML), grep_click/grep_type ' +
+  '(legacy split verbs — only when you specifically do not want the act re-orientation), ' +
+  'execute_in_browser, cdp_command, screenshot, and screenshot_app. For Gladdis state and continuity ' +
+  'use recall_history plus the memory_* notebook tools; for local repo/code/package work, use your ' +
+  'native shell and file tools instead of inventing removed Gladdis repo tools.\n' +
+  'grep_page is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the ' +
+  'user actually wants (e.g. "Pro plan $20 per user", "released on 14 March 2026"), never a single ' +
+  'common word like "price" or "date" — those flood with noise. If the first phrasing misses, run 2–3 ' +
+  'variations of the same meaning rather than broadening. Use type "selector" ONLY with a specific CSS ' +
+  'selector or XPath; never with bare tag names (a/div/img dump the page).\n' +
+  'After every act call, READ the returned `after` object before deciding the next step — IT IS the ' +
+  'post-action read. When `after.navigated` is true the page changed and `after.elements` lists the ' +
+  'new page\'s top targets with coordinates; act on those directly. Do NOT immediately call ' +
+  'read_page/read_a11y after a navigating act — the digest you need is already in hand. When act ' +
+  'returns ok:false with "no visible element matched …", treat that as a re-orient signal: run ' +
+  'read_a11y or a re-phrased grep_page, then target a fresh @ref — do not retry the same query.\n' +
   'For longer or multi-step tasks, use the memory_* tools as a lightweight notebook (your native cross-session ' +
   'memory is disabled here, so this is the only durable channel): memory_read before re-asking for context that ' +
   'may already be known, memory_write for durable decisions/constraints/identifiers, memory_list for a quick ' +
   'inventory, memory_create_task for task-specific notes, and memory_forget to clear stale notes. Store concise, ' +
   'reusable facts rather than large transcript dumps.\n' +
-  'Prefer grep_click/grep_type for direct discovery + action; drop to lower-level drive tools only when needed.\n' +
   'NEVER reach for a browser through your native shell or any other path. Do not run google-chrome, chromium, ' +
   'chrome, xdg-open/open on a URL, playwright (screenshot/open/codegen/test/show-report), puppeteer scripts, ' +
   'or curl/wget against localhost:9222 DevTools — not even to "just take a screenshot" or check a dev server. ' +
@@ -154,6 +172,7 @@ export async function respondToCodexBrowserToolCall(args: {
   llm?: LlmComplete | null
   conversationId?: string | null
   requestId?: string
+  allowedToolNames?: ReadonlySet<string>
   emit: (e: ChatStreamEvent) => void
 }): Promise<void> {
   const params = record(args.msg.params)
@@ -161,7 +180,8 @@ export async function respondToCodexBrowserToolCall(args: {
   const tool = str(params.tool)
   const toolArgs = record(params.arguments)
   const callId = str(params.itemId) || `codex-dynamic-${String(args.msg.id)}`
-  if (namespace !== 'gladdis' || !CODEX_BROWSER_TOOL_NAMES.has(tool)) {
+  const allowedToolNames = args.allowedToolNames ?? CODEX_BROWSER_TOOL_NAMES
+  if (namespace !== 'gladdis' || !allowedToolNames.has(tool)) {
     args.respond(args.msg.id, codexDynamicToolResponse({ ok: false, text: `Unsupported Gladdis browser tool: ${namespace}.${tool}` }))
     return
   }

@@ -44,8 +44,8 @@ interface ActiveTransport {
 
 const MCP_PATH = '/mcp'
 const GUARDRAIL_GUIDANCE =
-  'Use the Gladdis MCP tools for browser work: search, fetch_page, navigate, read_page, read_a11y, watch_network, ' +
-  'grep_page, grep_click, grep_type, screenshot, or screenshot_app. ' +
+  'Use the Gladdis MCP tools for browser work: search, navigate, read_page, read_a11y, watch_network, ' +
+  'grep_page, screenshot, screenshot_app, act, grep_click, grep_type, execute_in_browser, or cdp_command. ' +
   'Never use native shell/CLI browser commands (google-chrome, chromium, playwright, puppeteer, xdg-open on URLs, ' +
   'curl/wget against localhost:9222) - they bypass Gladdis and the user cannot see them.'
 
@@ -336,7 +336,7 @@ export class ClaudeCodeBridgeServer {
 
   private sessionTools(session: BridgeSession): typeof CLAUDE_CODE_BROWSER_TOOLS {
     const allow = session.allowedToolNames
-    if (!allow || allow.size === 0) return CLAUDE_CODE_BROWSER_TOOLS
+    if (!allow) return CLAUDE_CODE_BROWSER_TOOLS
     return CLAUDE_CODE_BROWSER_TOOLS.filter((tool) => allow.has(tool.name))
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CodexClient } from './CodexClient'
-import { CODEX_BROWSER_TOOLS } from './dynamicBrowserTools'
+import { buildCodexBrowserTools, CODEX_BROWSER_TOOLS } from './dynamicBrowserTools'
 
 function makeClient(savedThreadId: string | null = null) {
   const requests: Array<{ method: string; params: any }> = []
@@ -62,5 +62,27 @@ describe('CodexClient thread lifecycle', () => {
       }
     })
     expect(persisted.get('conv-1')).toBe('thread-saved')
+  })
+
+  it('registers only the routed Codex dynamic tools for the turn', async () => {
+    const { client, requests } = makeClient()
+    const dynamicToolNames = new Set(['grep_page', 'act'])
+
+    await (client as any).threadStore.ensureThread(
+      {
+        conversationId: 'conv-1',
+        modelId: 'gpt-5.5'
+      },
+      undefined,
+      true,
+      dynamicToolNames
+    )
+
+    expect(requests[0]).toMatchObject({
+      method: 'thread/start',
+      params: {
+        dynamicTools: buildCodexBrowserTools(dynamicToolNames)
+      }
+    })
   })
 })

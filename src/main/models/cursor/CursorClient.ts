@@ -46,6 +46,7 @@ type CreateCursorBridgeSession = (args: {
   conversationId: string | null
   modelId: string
   requestId: string | null
+  allowedToolNames?: ReadonlySet<string>
 }) => Promise<BridgeRegistration>
 
 function probeCursorBinary(): Promise<{ installed: boolean; version: string | null }> {
@@ -242,7 +243,7 @@ export class CursorClient {
     system: string,
     user: string,
     conversationId?: string | null,
-    options: { enableBrowserTools?: boolean } = {}
+    options: { enableBrowserTools?: boolean; allowedToolNames?: ReadonlySet<string> } = {}
   ): Promise<{ text: string; usage?: CursorUsage }> {
     return this.runTurn({
       modelId,
@@ -253,7 +254,8 @@ export class CursorClient {
       requestId: null,
       signal: null,
       mode: 'ask',
-      enableBrowserTools: options.enableBrowserTools === true
+      enableBrowserTools: options.enableBrowserTools === true,
+      allowedToolNames: options.allowedToolNames
     })
   }
 
@@ -263,7 +265,11 @@ export class CursorClient {
     system: string,
     user: string,
     mode: 'ask' | 'agent',
-    options: { enableBrowserTools?: boolean; getQueuedContext?: () => string | null } = {}
+    options: {
+      enableBrowserTools?: boolean
+      allowedToolNames?: ReadonlySet<string>
+      getQueuedContext?: () => string | null
+    } = {}
   ): Promise<{ text: string; usage?: CursorUsage }> {
     return this.runTurn({
       modelId: req.modelId,
@@ -275,6 +281,7 @@ export class CursorClient {
       signal,
       mode,
       enableBrowserTools: options.enableBrowserTools === true,
+      allowedToolNames: options.allowedToolNames,
       getQueuedContext: options.getQueuedContext
     })
   }
@@ -289,6 +296,7 @@ export class CursorClient {
     signal: AbortSignal | null
     mode: 'ask' | 'agent'
     enableBrowserTools: boolean
+    allowedToolNames?: ReadonlySet<string>
     getQueuedContext?: () => string | null
   }): Promise<{ text: string; usage?: CursorUsage }> {
     const turnStart = Date.now()
@@ -310,7 +318,8 @@ export class CursorClient {
         bridge = await this.createBridgeSession!({
           conversationId: args.conversationId,
           modelId: args.modelId,
-          requestId: args.requestId
+          requestId: args.requestId,
+          allowedToolNames: args.allowedToolNames
         })
         cursorDebug(`bridge created fresh +${Date.now() - turnStart}ms`)
       }
@@ -1036,20 +1045,20 @@ function extractMcpToolResultText(
     return formatToolError(scope || `${qualified} failed`)
   }
 
-  if (toolName === 'grep_click' || toolName === 'grep_type' || toolName === 'click_xy') {
+  if (toolName === 'act' || toolName === 'grep_click' || toolName === 'grep_type') {
     if (body) return ok ? body : formatToolError(scope ? prefixScope(scope, body) : body)
     if (ok) return scope ? `${qualified}: ${scope}` : `${qualified} completed.`
     return formatToolError(scope || `${qualified} failed`)
   }
 
-  if (toolName === 'navigate' || toolName === 'fetch_page') {
+  if (toolName === 'navigate') {
     const url = typeof argRecord.url === 'string' ? argRecord.url.trim() : scope
     if (body) return ok ? body : formatToolError(url ? prefixScope(url, body) : body)
     if (ok) return url ? `Navigated to ${url}` : `${qualified} completed.`
     return formatToolError(url || `${qualified} failed`)
   }
 
-  if (toolName === 'search' || toolName === 'search_open' || toolName === 'deep_search') {
+  if (toolName === 'search') {
     const query = typeof argRecord.query === 'string' ? argRecord.query.trim() : scope
     if (body) return ok ? body : formatToolError(query ? prefixScope(query, body) : body)
     if (ok) return query ? `Searched for ${query}` : `${qualified} completed.`

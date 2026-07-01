@@ -1,6 +1,7 @@
 # Fast Mode Playbook
 
 Quick companion: [Fast Mode Checklist](/home/dp/Desktop/myworkspace/Gladdis/docs/fast-mode-checklist.md)
+Working template: [Browser Task Template](/home/dp/Desktop/myworkspace/Gladdis/docs/browser-task-template.md)
 
 Fast mode means using the minimum verification needed to stay reliable during live browser work. The goal is not zero checks. The goal is to spend checks only where the UI is likely to stall, branch, ignore input, or open a risky path.
 

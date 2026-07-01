@@ -1,5 +1,7 @@
 # Fast Mode Checklist
 
+Working template: [Browser Task Template](/home/dp/Desktop/myworkspace/Gladdis/docs/browser-task-template.md)
+
 Use this during live browser work when speed matters more than exhaustive narration.
 
 ## Start

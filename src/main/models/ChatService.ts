@@ -1238,6 +1238,25 @@ export class ChatService {
     if (!key) throw new Error('xAI/Grok API key not found in KeyStore')
     return key
   }
+
+  dispose(): void {
+    for (const controller of this.aborts.values()) controller.abort()
+    this.aborts.clear()
+    for (const gate of this.pauseGates.values()) gate.release()
+    this.pauseGates.clear()
+    this.queuedInterjections.clear()
+    this.assistantMessageIds.clear()
+    this.cursorValidationStates.clear()
+    this.codexClient?.dispose()
+    this.codexClient = null
+    this.claudeCodeClient?.dispose()
+    this.claudeCodeClient = null
+    this.cursorClient?.dispose()
+    this.cursorClient = null
+    void this.claudeCodeBridgeServer?.close()
+    this.claudeCodeBridgeServer = null
+    this.dreamer = null
+  }
 }
 
 function normalizeMaxOutputTokens(value: number): number {

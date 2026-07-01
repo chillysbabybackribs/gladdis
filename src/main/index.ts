@@ -722,6 +722,6 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  registry?.disposePtyHost()
+  registry?.dispose()
   void remoteChatServer?.close()
 })

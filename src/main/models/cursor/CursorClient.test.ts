@@ -505,6 +505,27 @@ describe('CursorClient pause/resume', () => {
     expect(client.resumeRequest('req-1')).toBe(true)
     expect(resumed).toBe(true)
   })
+
+  it('kills active Cursor child processes on dispose', () => {
+    const client = new CursorClient(
+      vi.fn(),
+      () => '/tmp/workspace',
+      { get: () => null, set: vi.fn() }
+    )
+
+    const child = new EventEmitter() as import('node:child_process').ChildProcess & EventEmitter
+    child.kill = vi.fn()
+    ;(client as any).activeProcesses.set('req-1', child)
+    ;(client as any).pausedRequests.add('req-1')
+    ;(client as any).resumeResolvers.set('req-1', vi.fn())
+
+    client.dispose()
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    expect((client as any).activeProcesses.size).toBe(0)
+    expect((client as any).pausedRequests.size).toBe(0)
+    expect((client as any).resumeResolvers.size).toBe(0)
+  })
 })
 
 describe('CursorClient bridge warming', () => {

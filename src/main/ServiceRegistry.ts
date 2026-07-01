@@ -174,4 +174,10 @@ export class ServiceRegistry {
   disposePtyHost(): void {
     this._ptyHost?.disposeAll()
   }
+
+  dispose(): void {
+    this._autoDream?.dispose()
+    this._chat?.dispose()
+    this.disposePtyHost()
+  }
 }

@@ -89,6 +89,13 @@ export class ClaudeCodeClient {
     return true
   }
 
+  dispose(): void {
+    for (const child of this.activeProcesses.values()) child.kill('SIGTERM')
+    this.activeProcesses.clear()
+    this.pausedRequests.clear()
+    this.resumeResolvers.clear()
+  }
+
   async status(): Promise<ClaudeCodeStatus> {
     const probe = await probeClaudeCodeBinary()
     if (!probe.installed) {

@@ -120,6 +120,44 @@ function makeSupervisorHarness(req: {
 }
 
 describe('ChatService provider hardening', () => {
+  it('disposes local Codex, Claude Code, Cursor, and bridge runtimes on shutdown', () => {
+    const { service } = makeService('/tmp/workspace')
+    const codexDispose = vi.fn()
+    const claudeDispose = vi.fn()
+    const cursorDispose = vi.fn()
+    const bridgeClose = vi.fn(async () => undefined)
+    const abort = vi.fn()
+    const gateRelease = vi.fn()
+
+    ;(service as any).aborts.set('req-1', { abort })
+    ;(service as any).pauseGates.set('req-1', { release: gateRelease })
+    ;(service as any).queuedInterjections.set('req-1', ['later'])
+    ;(service as any).assistantMessageIds.set('req-1', 'assistant-1')
+    ;(service as any).cursorValidationStates.set('req-1', {})
+    ;(service as any).codexClient = { dispose: codexDispose }
+    ;(service as any).claudeCodeClient = { dispose: claudeDispose }
+    ;(service as any).cursorClient = { dispose: cursorDispose }
+    ;(service as any).claudeCodeBridgeServer = { close: bridgeClose }
+
+    service.dispose()
+
+    expect(abort).toHaveBeenCalledTimes(1)
+    expect(gateRelease).toHaveBeenCalledTimes(1)
+    expect(codexDispose).toHaveBeenCalledTimes(1)
+    expect(claudeDispose).toHaveBeenCalledTimes(1)
+    expect(cursorDispose).toHaveBeenCalledTimes(1)
+    expect(bridgeClose).toHaveBeenCalledTimes(1)
+    expect((service as any).aborts.size).toBe(0)
+    expect((service as any).pauseGates.size).toBe(0)
+    expect((service as any).queuedInterjections.size).toBe(0)
+    expect((service as any).assistantMessageIds.size).toBe(0)
+    expect((service as any).cursorValidationStates.size).toBe(0)
+    expect((service as any).codexClient).toBeNull()
+    expect((service as any).claudeCodeClient).toBeNull()
+    expect((service as any).cursorClient).toBeNull()
+    expect((service as any).claudeCodeBridgeServer).toBeNull()
+  })
+
   it('exposes the reduced primitive tool surface', () => {
     const toolNames = AGENT_TOOLS.map((tool) => tool.name)
     expect(toolNames).toEqual(

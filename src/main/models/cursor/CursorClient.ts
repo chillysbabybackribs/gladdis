@@ -110,6 +110,13 @@ export class CursorClient {
     return true
   }
 
+  dispose(): void {
+    for (const child of this.activeProcesses.values()) child.kill('SIGTERM')
+    this.activeProcesses.clear()
+    this.pausedRequests.clear()
+    this.resumeResolvers.clear()
+  }
+
   async status(): Promise<CursorStatus> {
     const now = Date.now()
     if (cachedStatus && now - lastStatusTime < STATUS_CACHE_TTL_MS) return cachedStatus

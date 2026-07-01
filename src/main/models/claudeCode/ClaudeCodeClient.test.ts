@@ -271,4 +271,24 @@ describe('ClaudeCodeClient', () => {
       callId: 'toolu_repo'
     })
   })
+
+  it('kills active Claude Code child processes on dispose', async () => {
+    const { ClaudeCodeClient } = await import('./ClaudeCodeClient')
+    const client = new ClaudeCodeClient(
+      vi.fn(),
+      () => '/tmp/workspace',
+      { get: () => null, set: vi.fn() }
+    )
+
+    const child = new FakeChildProcess()
+    const killSpy = vi.spyOn(child, 'kill')
+    ;(client as any).activeProcesses.set('req-1', child)
+
+    client.dispose()
+
+    expect(killSpy).toHaveBeenCalledWith('SIGTERM')
+    expect((client as any).activeProcesses.size).toBe(0)
+    expect((client as any).pausedRequests.size).toBe(0)
+    expect((client as any).resumeResolvers.size).toBe(0)
+  })
 })

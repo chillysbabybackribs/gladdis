@@ -24,6 +24,10 @@ export const CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE =
   '(or screenshot if the UI is genuinely vision-only) that it is not blank and the intended UI is ' +
   'visible before answering. Do not stop at build/curl-only validation for UI work.'
 
+export const STOP_AFTER_VALIDATED_DONE_GUIDANCE =
+  'When your done checks are satisfied and validation has passed, stop and deliver the result. Do not ' +
+  'keep exploring or run extra work after confirmed completion unless the user asks for it.'
+
 export function buildCodexLocalMachineGuidance(): string {
   return (
     'This turn has the local machine under it. Before changing anything, locate the truth of how this ' +
@@ -68,6 +72,22 @@ export const CURSOR_POST_ACTION_REPAIR_GUIDANCE =
 export const CURSOR_FINISH_AFTER_VALIDATION_GUIDANCE =
   'Once validation passes and the requested task is complete, stop and deliver the result instead of continuing by default.'
 
+export function buildWorkingTheCodeContract(args: {
+  localMachineGuidance: string
+  recallTool: string
+  additionalDiscipline?: string
+}): string {
+  const sections = [
+    '## Working the code',
+    args.localMachineGuidance
+  ]
+
+  if (args.additionalDiscipline) sections.push(args.additionalDiscipline)
+  sections.push(buildResumeProcessGuidance({ recallTool: args.recallTool }))
+
+  return sections.join('\n\n')
+}
+
 export function buildCursorNativeWorkContract(args?: { includeBrowserWorkLine?: boolean }): string {
   const segments = [
     CURSOR_NATIVE_WORK_GUIDANCE,
@@ -90,4 +110,20 @@ export function buildResumeProcessGuidance(args: { recallTool: string }): string
     'instruction. Do not edit files, run validations, navigate pages, or continue old work from a bare ' +
     'resume request.'
   )
+}
+
+export function buildBrowserProcessContract(args: {
+  uiVisualConfirmationGuidance: string
+  includeValidateCommitPush?: boolean
+}): string {
+  const sections = [
+    ACTIVE_PAGE_GROUNDING_GUIDANCE,
+    args.uiVisualConfirmationGuidance
+  ]
+
+  if (args.includeValidateCommitPush !== false) {
+    sections.push(VALIDATE_COMMIT_PUSH_GUIDANCE)
+  }
+
+  return sections.join('\n\n')
 }

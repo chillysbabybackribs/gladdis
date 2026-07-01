@@ -17,14 +17,15 @@ import {
   stripNamedToolLead
 } from './codex/dynamicBrowserTools'
 import {
-  ACTIVE_PAGE_GROUNDING_GUIDANCE,
+  buildBrowserProcessContract,
   buildClaudeLocalMachineGuidance,
   buildCodexLocalMachineGuidance,
   buildCursorLocalMachineGuidance,
   buildCursorNativeWorkContract,
-  buildResumeProcessGuidance,
+  buildWorkingTheCodeContract,
   CLAUDE_NATIVE_WORK_GUIDANCE,
   CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE,
+  STOP_AFTER_VALIDATED_DONE_GUIDANCE,
   STOP_WHEN_DONE_GUIDANCE,
   UI_VISUAL_CONFIRMATION_GUIDANCE,
   VALIDATE_COMMIT_PUSH_GUIDANCE,
@@ -371,19 +372,19 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
 
   const core =
     `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
-    '## Working the code\n' +
-    `${buildCodexLocalMachineGuidance()}\n\n` +
-    'When your done checks are satisfied and validation has passed, stop and deliver the result. Do not ' +
-    'keep exploring or run extra work after confirmed completion unless the user asks for it.\n\n' +
-    buildResumeProcessGuidance({ recallTool: 'recall_history' })
+    buildWorkingTheCodeContract({
+      localMachineGuidance: buildCodexLocalMachineGuidance(),
+      additionalDiscipline: STOP_AFTER_VALIDATED_DONE_GUIDANCE,
+      recallTool: 'recall_history'
+    })
 
   const result = gladdisToolNames.size > 0
     ? core +
       '\n\n' +
       `${buildCodexBrowserInstructions(gladdisToolNames)}\n\n` +
-      `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
-      `${CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE}\n\n` +
-      VALIDATE_COMMIT_PUSH_GUIDANCE
+      buildBrowserProcessContract({
+        uiVisualConfirmationGuidance: CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE
+      })
     : core +
       '\n\nUse your native shell/file tools for local repo, package, validation, and coding work. ' +
       VALIDATE_COMMIT_PUSH_GUIDANCE
@@ -409,18 +410,19 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
 
   const core =
     `${ABOUT_GLADDIS}\n\n${REASONING_METHOD}\n\n` +
-    '## Working the code\n' +
-    `${buildClaudeLocalMachineGuidance()}\n\n` +
-    `${WORK_FROM_REAL_CODEBASE_GUIDANCE} ${STOP_WHEN_DONE_GUIDANCE}\n\n` +
-    buildResumeProcessGuidance({ recallTool: 'the attached recall_history MCP helper' })
+    buildWorkingTheCodeContract({
+      localMachineGuidance: buildClaudeLocalMachineGuidance(),
+      additionalDiscipline: `${WORK_FROM_REAL_CODEBASE_GUIDANCE} ${STOP_WHEN_DONE_GUIDANCE}`,
+      recallTool: 'the attached recall_history MCP helper'
+    })
 
   const result = browserToolNames.size > 0
     ? core +
       '\n\n' +
       `${buildClaudeCodeBrowserInstructions(browserToolNames)}\n\n` +
-      `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
-      `${UI_VISUAL_CONFIRMATION_GUIDANCE}\n\n` +
-      VALIDATE_COMMIT_PUSH_GUIDANCE
+      buildBrowserProcessContract({
+        uiVisualConfirmationGuidance: UI_VISUAL_CONFIRMATION_GUIDANCE
+      })
     : core +
       `\n\n${CLAUDE_NATIVE_WORK_GUIDANCE} ${VALIDATE_COMMIT_PUSH_GUIDANCE}`
 
@@ -459,8 +461,10 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
       core +
       '\n\n' +
       `${buildCursorBrowserInstructions(browserToolNames)}\n\n` +
-      `${ACTIVE_PAGE_GROUNDING_GUIDANCE}\n\n` +
-      UI_VISUAL_CONFIRMATION_GUIDANCE
+      buildBrowserProcessContract({
+        uiVisualConfirmationGuidance: UI_VISUAL_CONFIRMATION_GUIDANCE,
+        includeValidateCommitPush: false
+      })
   }
 
   CURSOR_SYSTEM_CACHE.set(key, result)

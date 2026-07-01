@@ -12,7 +12,7 @@ import type { ChatStreamEvent } from '../../../shared/types'
 import type { LlmComplete } from './llm'
 import type { AgentToolSurface } from './AgentConfigurationService'
 
-export const VERBATIM_TOOL_RESULTS = 4
+export const VERBATIM_TOOL_RESULTS = 8  // Increased from 4; more verbatim context helps on long tasks
 
 function latestUserText(messages: ChatMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {

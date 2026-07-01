@@ -29,7 +29,11 @@ type ModelAudit = {
   }) => ActiveAuditCall
 }
 
+// Stub prefix for old tool results
 const STUB_PREFIX = '[trimmed]'
+
+// Note: VERBATIM_TOOL_RESULTS in providerRouting.ts controls how many results stay verbatim.
+// Consider increasing from 4 to 8 for better model context on long tasks.
 
 export function textFromAnthropicContent(content: any[]): string {
   return (content ?? []).map((b) => (b?.type === 'text' ? b.text : '')).join('')
@@ -122,8 +126,47 @@ export async function completeAnthropic(args: {
   }
 }
 
-function applyRollingCache(messages: Anthropic.MessageParam[]): void {
-  // First, strip all cache_control from all messages to avoid exceeding the limit
+/**
+ * Place Anthropic prompt-cache breakpoints for a growing multi-turn tool loop.
+ *
+ * The naive approach — strip every `cache_control` and drop a single marker on
+ * the new last message each turn — moves the breakpoint forward every iteration.
+ * A breakpoint only walks back 20 content blocks to find a prior cache entry, so
+ * in a tool loop that appends an assistant turn + a user turn of tool_results per
+ * iteration, the marker routinely lands >20 blocks past the previous one and
+ * silently misses — re-billing the ENTIRE history at full input price every turn.
+ *
+ * Instead we keep TWO rolling breakpoints (Anthropic allows 4 total; two sit on
+ * the system blocks): a STABLE anchor on the previous turn's tail and a MOVING
+ * one on the newest tail. The anchor keeps the just-grown prefix readable while
+ * the moving marker extends the cached region, so each turn reads the whole prior
+ * conversation at cache-read (~0.1x) rates and only pays full price for the delta.
+ * This only works because the history bytes before the anchor never change —
+ * `stubOldResults` no longer rewrites already-sent results (see its docstring).
+ *
+ * `lastUserBreakpointIndex` from the previous call tells us where the anchor
+ * should sit this turn; the function returns the new moving-breakpoint index to
+ * thread back in.
+ */
+function markLastBlock(msg: Anthropic.MessageParam): void {
+  if (typeof msg.content === 'string') {
+    msg.content = [
+      { type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } } as any
+    ]
+  } else if (Array.isArray(msg.content)) {
+    const lastBlock = msg.content[msg.content.length - 1]
+    if (lastBlock && typeof lastBlock === 'object') {
+      (lastBlock as any).cache_control = { type: 'ephemeral' }
+    }
+  }
+}
+
+export function applyRollingCache(
+  messages: Anthropic.MessageParam[],
+  prevBreakpointIndex: number | null
+): number | null {
+  // Strip existing message-level cache_control so we re-place exactly two markers
+  // (the system blocks carry their own, placed once at loop setup).
   for (const msg of messages) {
     if (Array.isArray(msg.content)) {
       for (const block of msg.content) {
@@ -134,23 +177,24 @@ function applyRollingCache(messages: Anthropic.MessageParam[]): void {
     }
   }
 
-  // Find the last user message
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role === 'user') {
-      if (typeof msg.content === 'string') {
-        msg.content = [
-          { type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } } as any
-        ]
-      } else if (Array.isArray(msg.content)) {
-        const lastBlock = msg.content[msg.content.length - 1]
-        if (lastBlock && typeof lastBlock === 'object') {
-          (lastBlock as any).cache_control = { type: 'ephemeral' }
-        }
-      }
-      break // Only cache the single last user message
-    }
+  // Moving breakpoint: the current last message.
+  const lastIndex = messages.length - 1
+  if (lastIndex < 0) return null
+  markLastBlock(messages[lastIndex])
+
+  // Stable anchor: the message that was the moving breakpoint last turn. Keeping
+  // it marked lets this turn's request read the prefix the previous turn cached,
+  // even when the new tail is >20 blocks further along.
+  if (
+    prevBreakpointIndex != null &&
+    prevBreakpointIndex < lastIndex &&
+    prevBreakpointIndex >= 0 &&
+    messages[prevBreakpointIndex]
+  ) {
+    markLastBlock(messages[prevBreakpointIndex])
   }
+
+  return lastIndex
 }
 
 export async function streamAnthropicPlain(args: {
@@ -164,7 +208,7 @@ export async function streamAnthropicPlain(args: {
   maxTokens: number
 }): Promise<void> {
   const messages = toAnthropicMessages(args.req)
-  applyRollingCache(messages)
+  applyRollingCache(messages, null)
 
   const systemParam: Anthropic.MessageCreateParams['system'] = [
     { type: 'text', text: args.system, cache_control: { type: 'ephemeral' } }
@@ -242,6 +286,9 @@ export async function runAnthropicToolLoop(args: {
   const messages = toAnthropicMessages(args.req)
   const resultBlocks: Anthropic.ToolResultBlockParam[] = []
   const validation = createToolValidationState()
+  // Index of last turn's cache breakpoint, so this turn can keep it as a stable
+  // anchor (see applyRollingCache). null on the first iteration.
+  let prevBreakpointIndex: number | null = null
 
   for (let turn = 0; !args.signal.aborted; turn++) {
     // Pause is honored at the iteration boundary so the model state stays
@@ -252,7 +299,15 @@ export async function runAnthropicToolLoop(args: {
     if (queuedContext) messages.push({ role: 'user', content: queuedContext })
     args.ctx.iteration = turn + 1
     args.supervisor?.iterationStarted(turn + 1)
-    applyRollingCache(messages)
+    prevBreakpointIndex = applyRollingCache(messages, prevBreakpointIndex)
+    const inputChars = estimatePromptInputChars({
+      system: args.agentSystem,
+      tools: anthropicTools,
+      dynamic: messages
+    })
+    // Rough tokens ≈ chars / 4; used only to decide when context pressure is high
+    // enough to justify stubbing (which trades a cache hit for a smaller prompt).
+    const estimatedInputTokens = Math.ceil(inputChars / 4)
     const call = args.audit.begin({
       requestId: args.req.requestId,
       conversationId: args.req.conversationId,
@@ -260,7 +315,7 @@ export async function runAnthropicToolLoop(args: {
       modelId: args.modelId,
       stage: `chat:browser:${turn}`,
       input: { system: args.agentSystem, tools: anthropicTools, messages },
-      inputChars: estimatePromptInputChars({ system: args.agentSystem, tools: anthropicTools, dynamic: messages })
+      inputChars
     })
     let final: any
     try {
@@ -312,7 +367,13 @@ export async function runAnthropicToolLoop(args: {
       return
     }
 
-    stubOldResults(resultBlocks, args.keepResults)
+    // Stub old tool results ONLY under real context pressure — not every turn.
+    // Stubbing rewrites already-sent bytes, which invalidates the prompt cache
+    // from that point forward; doing it each iteration (the old behavior) meant
+    // the growing history never cached. Left verbatim, those results ride along
+    // at cache-read (~0.1x) rates instead. When we do approach the window, stub
+    // oldest-first as a backstop; recall_history still recovers the full text.
+    maybeStubUnderContextPressure(resultBlocks, args.keepResults, estimatedInputTokens)
 
     const results: Anthropic.ToolResultBlockParam[] = []
     for (const tu of toolUses) {
@@ -353,9 +414,30 @@ export async function runAnthropicToolLoop(args: {
 }
 
 /**
+ * Context-window backstop: only stub old tool results once the estimated prompt
+ * is large enough that carrying them verbatim risks the context limit. Below the
+ * threshold we leave everything in place so the prompt cache keeps hitting.
+ *
+ * Opus/Sonnet expose a 1M-token window; we start relieving pressure well before
+ * that so a marathon browser session can't overflow. `stubOldResults` is a no-op
+ * on already-stubbed blocks, so once a block is stubbed it stays byte-stable.
+ */
+const CONTEXT_STUB_THRESHOLD_TOKENS = 300_000  // Lowered from 700k for more aggressive stubbing
+
+export function maybeStubUnderContextPressure(
+  blocks: Anthropic.ToolResultBlockParam[],
+  keep: number,
+  estimatedInputTokens: number
+): void {
+  if (estimatedInputTokens < CONTEXT_STUB_THRESHOLD_TOKENS) return
+  stubOldResults(blocks, keep)
+}
+
+/**
  * Collapse all but the last `keep` Anthropic tool_result blocks to a short
  * stub, in place. The full result stays retrievable via recall_history using
  * the block's tool_use_id, so trimming the live window doesn't lose anything.
+ * Idempotent: an already-stubbed block is skipped, keeping its bytes stable.
  */
 export function stubOldResults(blocks: Anthropic.ToolResultBlockParam[], keep: number): void {
   const cutoff = blocks.length - keep
@@ -367,7 +449,18 @@ export function stubOldResults(blocks: Anthropic.ToolResultBlockParam[], keep: n
 }
 
 function toAnthropicMessages(req: ChatRequest): Anthropic.MessageParam[] {
-  return withDateContext(req.messages).map((m) => {
+  const messages = withDateContext(req.messages)
+  const IMAGE_HISTORY_RETENTION = 2  // Keep images from last N turns only
+
+  return messages.map((m, idx) => {
+    // Only keep images in recent messages; strip from older turns to save context
+    const isRecentMessage = (messages.length - idx) <= IMAGE_HISTORY_RETENTION
+
+    if (m.images && m.images.length > 0 && !isRecentMessage) {
+      // Strip images from old messages, but keep the text content
+      return { role: m.role, content: m.content || '(screenshot from earlier turn; text preserved)' }
+    }
+
     if (m.images && m.images.length > 0) {
       const content: Anthropic.ContentBlockParam[] = [
         { type: 'text', text: m.content || 'Attached screenshot:' }

@@ -7,7 +7,7 @@ import { axNodeCenter } from '../../extract/axRef'
 import { buildPageWireframe, formatPageWireframe } from '../../extract/pageWireframe'
 import type { PageCapture } from '../../../../shared/extraction'
 import type { SavedPage } from '../../extract/pageStore'
-import { waitForTextStable } from './toolUtils'
+import { waitForTextStable, cap } from './toolUtils'
 import type { CapturedNetworkBody, CapturedNetworkRequest } from '../../network/watchNetworkRecorder'
 import type { NetworkFilterSpec } from '../../network/watchNetworkRecorder'
 import {
@@ -856,8 +856,8 @@ export async function runGrepPage(
         })
 
         return {
-          ok: true,
-          text: output.trim(),
+      ok: true,
+      text: cap(output.trim(), 24_000),
           structuredContent: {
             query,
             type,

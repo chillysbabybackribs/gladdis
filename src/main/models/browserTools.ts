@@ -7,6 +7,7 @@ import { AGENT_TOOLS } from './agentTools'
 import type { LlmComplete } from './llm'
 import type { PipelineProgressStep } from '../../../shared/chat'
 import { KeyStore } from './KeyStore'
+import type { VaultStore } from './VaultStore'
 import type { AxSnapshot, AxSnapshotNode } from '../extract/axTree'
 import { axRefStillValid, resolveAxRef, type AxRefStore } from '../extract/axRef'
 import { savePageCapture, type PageStoreConfig, type SavedPage } from '../extract/pageStore'
@@ -18,8 +19,6 @@ import {
   runExecuteInBrowser,
   runOpenResult,
   runNavigate,
-  runGrepClick,
-  runGrepType,
   runSetField,
   runSubmit
 } from './tools/driveTools'
@@ -53,7 +52,15 @@ import {
 import { runSearchTool } from './tools/searchTools'
 import { runShellCommand } from './tools/shellTools'
 import { runRecallHistory } from './tools/historyTools'
+import {
+  runVaultFillLogin,
+  runVaultFillPayment,
+  runVaultGetEntry,
+  runVaultListEntries,
+  runVaultStatus
+} from './tools/vaultTools'
 import type { ReadPageCacheStats } from './tools/perceiveTools'
+import { hashScreenshot, type ScreenshotMetadata, type ScreenshotCache } from './tools/screenshotOptimizer'
 import {
   buildToolCalibrationBlock,
   createToolCalibrationState,
@@ -128,14 +135,25 @@ function formatTabBriefLine(brief: TabBrief): string {
  * Merge the tab-grounding brief into a browser tool's successful outcome, both
  * as structured `tab` state and as an appended text line. Non-browser tools,
  * failures, and calls with no resolvable tab are returned unchanged.
+ *
+ * OPTIMIZATION: Only inject brief once per tab per turn. Subsequent calls reuse
+ * prior brief to save ~100 bytes per tool call.
  */
 function withTabBrief(
   tabs: TabManager,
   name: string,
   tabId: string | null | undefined,
-  outcome: ToolOutcome
+  outcome: ToolOutcome,
+  toolInstance?: BrowserTools
 ): ToolOutcome {
   if (!outcome.ok || !TAB_BRIEF_TOOLS.has(name)) return outcome
+  
+  // Skip redundant briefs: if this tab was already briefed this turn, return as-is
+  const briefKey = tabId || 'null'
+  if (toolInstance && toolInstance['tabBriefSentThisTurn']?.has(briefKey)) {
+    return outcome  // Brief already sent this turn; skip to save tokens
+  }
+
   // Best-effort: grounding enrichment must never fail (or crash) a successful
   // tool call. If the tab layer can't produce a brief, return the outcome as-is.
   if (typeof tabs?.tabBrief !== 'function') return outcome
@@ -146,6 +164,12 @@ function withTabBrief(
     return outcome
   }
   if (!brief) return outcome
+  
+  // Mark this tab as briefed
+  if (toolInstance) {
+    toolInstance['tabBriefSentThisTurn'].add(briefKey)
+  }
+
   return {
     ...outcome,
     text: `${outcome.text}\n${formatTabBriefLine(brief)}`,
@@ -204,11 +228,20 @@ export class BrowserTools {
   private readonly calibrationByScope = new Map<string, ToolCalibrationState>()
   private static readonly CALIBRATION_SCOPE_LIMIT = 64
 
+  /** Screenshot cache with deduplication: key = `${tabId}:${fullPage}:${url}` */
+  private readonly screenshotCache = new Map<string, { base64: string; hash: string; capturedAt: number }>()
+  private static readonly SCREENSHOT_CACHE_LIMIT = 16
+  private static readonly SCREENSHOT_CACHE_TTL_MS = 60_000
+
+  /** Track which tabs have been briefed this turn to avoid redundant metadata. */
+  private tabBriefSentThisTurn = new Set<string>()
+
   constructor(
     public readonly tabs: TabManager,
     public readonly extractor: PageExtractor,
     public readonly chats: ChatStore,
-    public readonly keys?: KeyStore
+    public readonly keys?: KeyStore,
+    public readonly vault?: VaultStore
   ) {}
 
   setAppCapture(fn: () => Promise<string>): void {
@@ -421,8 +454,16 @@ export class BrowserTools {
     return { chats: this.chats }
   }
 
+  private vaultDeps() {
+    return { vault: this.vault, drive: this.driveDeps() }
+  }
+
   /** Dispatch a tool call to the right per-domain module. */
   async run(name: string, args: Record<string, any>, ctx: ToolContext): Promise<ToolOutcome> {
+    // Reset tab brief tracking for each new request (per-turn, not per-tool)
+    if (!ctx.requestId || ctx.iteration === 1) {
+      this.tabBriefSentThisTurn.clear()
+    }
     try {
       let outcome: ToolOutcome
       switch (name) {
@@ -485,11 +526,22 @@ export class BrowserTools {
         case 'cdp_command':
           outcome = await runCdpCommand(this.driveDeps(), args, { tabId: ctx.tabId })
           break
-        case 'grep_click':
-          outcome = await runGrepClick(this.driveDeps(), args, { tabId: ctx.tabId })
+
+        // ── Accounts & Purchases Vault ─────────────────────────────────────
+        case 'vault_status':
+          outcome = await runVaultStatus(this.vaultDeps())
           break
-        case 'grep_type':
-          outcome = await runGrepType(this.driveDeps(), args, { tabId: ctx.tabId })
+        case 'vault_list_entries':
+          outcome = await runVaultListEntries(this.vaultDeps())
+          break
+        case 'vault_get_entry':
+          outcome = await runVaultGetEntry(this.vaultDeps(), args)
+          break
+        case 'vault_fill_login':
+          outcome = await runVaultFillLogin(this.vaultDeps(), args, { tabId: ctx.tabId })
+          break
+        case 'vault_fill_payment':
+          outcome = await runVaultFillPayment(this.vaultDeps(), args, { tabId: ctx.tabId })
           break
 
         // ── Filesystem ──────────────────────────────────────────────────────
@@ -681,7 +733,7 @@ export class BrowserTools {
       // perception/drive result carries the current tab (id, index/count) and
       // its live load state, so the model always knows which tab it is on and
       // whether that tab is still — or abnormally slowly — loading.
-      outcome = withTabBrief(this.tabs, name, ctx.tabId, outcome)
+      outcome = withTabBrief(this.tabs, name, ctx.tabId, outcome, this)
       const state = this.calibrationScope(ctx)
       noteToolCalibrationOutcome(state, name, outcome, ctx.iteration)
       return maybeAddRecalibrationHint(state, name, outcome)

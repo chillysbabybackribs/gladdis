@@ -39,7 +39,6 @@ import { ASK_SYSTEM, buildAgentSystem, buildClaudeCodeSystem, buildCursorSystem 
 import { stripActivePagePreamble } from './routing'
 import { openCodexLocalPreviewIfRequested } from './localPreviewBridge'
 import { generateChatTitle } from './chatTitleService'
-import { runProviderAgenticTurn } from './agentLoopRunner'
 import { runCodexHandoff } from './codex/codexHandoff'
 import { dispatchAgenticTurn, dispatchStreamPlain } from './providerRouting'
 import { prependDateContextToText } from './providers/dateContext'
@@ -58,24 +57,10 @@ import {
   needsValidationBeforeFinal,
   noteToolOutcome
 } from './providers/toolValidation'
-import {
-  completeAnthropic,
-  runAnthropicToolLoop,
-  streamAnthropicPlain,
-  stubOldResults
-} from './providers/anthropic'
-import {
-  completeGoogle,
-  runGoogleToolLoop,
-  streamGooglePlain,
-  stubOldGoogleResults
-} from './providers/google'
-import { completeGrok, runGrokToolLoop, streamGrokPlain } from './providers/grok'
-import {
-  completeOpenAi,
-  runOpenAiToolLoop,
-  streamOpenAiPlain
-} from './providers/openai'
+import { completeAnthropic } from './providers/anthropic'
+import { completeGoogle } from './providers/google'
+import { completeGrok } from './providers/grok'
+import { completeOpenAi } from './providers/openai'
 export {
   extractLocalPreviewUrl,
   hasActivePagePreamble,
@@ -85,7 +70,7 @@ export {
 export { stubOldResults } from './providers/anthropic'
 export { stubOldGoogleResults } from './providers/google'
 
-const VERBATIM_TOOL_RESULTS = 4
+const VERBATIM_TOOL_RESULTS = 8  // Increased from 4; more verbatim context helps on long tasks
 
 const MAX_OUTPUT_TOKENS = 32_000
 const ANTHROPIC_MAX_TOKENS = MAX_OUTPUT_TOKENS

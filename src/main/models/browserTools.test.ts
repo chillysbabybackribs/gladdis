@@ -634,6 +634,84 @@ describe('BrowserTools', () => {
     expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Accessibility.getFullAXTree', { frameId: 'main' })
   })
 
+  // ── diagnose_target: cross-frame occlusion / actionability probe ──────────
+  // Builds a tabs mock whose CDP hit-test (DOM.getNodeForLocation → resolveNode →
+  // callFunctionOn) returns the given `topmost` node payload at the point.
+  function makeDiagnoseTabs(topmost: Record<string, unknown> | null, frameId = 'main') {
+    const cdpSend = vi.fn(async (_id: string, method: string) => {
+      if (method === 'DOM.getNodeForLocation') return { backendNodeId: 7, frameId, nodeId: 3 }
+      if (method === 'DOM.resolveNode') return { object: { objectId: 'obj-7' } }
+      if (method === 'Runtime.callFunctionOn') return { result: { value: topmost } }
+      return {}
+    })
+    return {
+      list: () => [{ id: 'tab-1', title: 'X', url: 'https://book.test' }],
+      getTabUrl: () => 'https://book.test',
+      cdpSend,
+      executeJavaScript: vi.fn(async () => ({ success: false }))
+    }
+  }
+
+  it('diagnose_target flags an overlay covering the intended control', async () => {
+    // Intended button resolves via query at a point, but the topmost element is a
+    // different cookie-wall overlay.
+    const { tabs } = makeActTabs({ grepMatches: [{ ...VISIBLE_BUTTON, matchedLine: 'Search' }] })
+    const cdpSend = vi.fn(async (_id: string, method: string) => {
+      if (method === 'DOM.getNodeForLocation') return { backendNodeId: 7, frameId: 'main' }
+      if (method === 'DOM.resolveNode') return { object: { objectId: 'obj-7' } }
+      if (method === 'Runtime.callFunctionOn') {
+        return { result: { value: { found: true, tag: 'div', role: 'dialog', label: 'Accept all cookies',
+          disabled: false, pointerEventsNone: false, inert: false, offscreen: false, rect: { x: 0, y: 0, w: 1000, h: 800 } } } }
+      }
+      return {}
+    })
+    ;(tabs as any).cdpSend = cdpSend
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('diagnose_target', { query: 'Search' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.clickable).toBe(false)
+    expect(result.structuredContent?.occluded).toBe(true)
+    expect(result.text).toContain('overlay is on top')
+    expect(result.text).toContain('Accept all cookies')
+  })
+
+  it('diagnose_target reports a disabled control (blocked by validation)', async () => {
+    const tabs = makeDiagnoseTabs({ found: true, tag: 'button', role: 'button', label: 'Search',
+      disabled: true, pointerEventsNone: false, inert: false, offscreen: false, rect: { x: 10, y: 10, w: 80, h: 30 } })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('diagnose_target', { coords: { x: 50, y: 25 } }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.clickable).toBe(false)
+    expect((result.structuredContent?.reasons as string[]).some((r) => r.includes('DISABLED'))).toBe(true)
+  })
+
+  it('diagnose_target reports a clean, actionable target', async () => {
+    const tabs = makeDiagnoseTabs({ found: true, tag: 'button', role: 'button', label: 'Search',
+      disabled: false, pointerEventsNone: false, inert: false, offscreen: false, rect: { x: 10, y: 10, w: 80, h: 30 } })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('diagnose_target', { coords: { x: 50, y: 25 } }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.clickable).toBe(true)
+    expect((result.structuredContent?.reasons as string[]).length).toBe(0)
+    expect(result.text).toContain('looks actionable')
+  })
+
+  it('diagnose_target requires a target', async () => {
+    const tabs = makeDiagnoseTabs(null)
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('diagnose_target', {}, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('provide a target')
+  })
+
   it('routes read_page through the extractor and returns an orientation digest', async () => {
     const cap = {
       url: 'https://example.com/pricing',

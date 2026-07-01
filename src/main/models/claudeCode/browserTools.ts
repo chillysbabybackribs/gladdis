@@ -5,6 +5,7 @@ import {
   CODEX_BROWSER_TOOL_NAMES,
   CODEX_MEMORY_TOOL_NAMES,
   CODEX_INTERACTION_TOOL_NAMES,
+  DIAGNOSE_TARGET_GUIDANCE,
   DISCOVER_DATA_SOURCES_GUIDANCE,
   EXTRACT_STRUCTURED_GUIDANCE,
   GLADDIS_DEBUGGING_GUIDANCE,
@@ -115,6 +116,10 @@ function buildEmbeddedBrowserInstructions(args: {
 
   if (allowed.has('discover_data_sources')) {
     lines.push(DISCOVER_DATA_SOURCES_GUIDANCE)
+  }
+
+  if (allowed.has('diagnose_target')) {
+    lines.push(DIAGNOSE_TARGET_GUIDANCE)
   }
 
   if (allowed.has('act') && (allowed.has('read_a11y') || allowed.has('grep_page'))) {

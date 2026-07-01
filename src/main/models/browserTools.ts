@@ -39,6 +39,7 @@ import {
 import {
   type ReadPageCacheEntry,
   type ReadA11yCacheEntry,
+  runDiagnoseTarget,
   runDiscoverDataSources,
   runExtractStructured,
   runGrepPage,
@@ -354,6 +355,7 @@ export class BrowserTools {
     return {
       tabs: this.tabs,
       extractor: this.extractor,
+      resolveAxRef: (tabId: string, query: string) => this.resolveAxRef(tabId, query),
       pageCache: this.pageCache,
       pageCacheLimit: BrowserTools.PAGE_CACHE_LIMIT,
       pageCacheTtlMs: BrowserTools.PAGE_CACHE_TTL_MS,
@@ -436,6 +438,9 @@ export class BrowserTools {
           break
         case 'grep_page':
           outcome = await runGrepPage(this.perceiveDeps(), args, ctx.tabId)
+          break
+        case 'diagnose_target':
+          outcome = await runDiagnoseTarget(this.perceiveDeps(), args, ctx.tabId)
           break
         case 'extract_structured':
           outcome = await runExtractStructured(this.perceiveDeps(), args, ctx.tabId)

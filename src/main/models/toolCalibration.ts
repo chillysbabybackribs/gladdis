@@ -32,6 +32,7 @@ export function toolSurfaceForName(name: string): ToolSurface | null {
     name === 'grep_page' ||
     name === 'read_page' ||
     name === 'read_a11y' ||
+    name === 'diagnose_target' ||
     name === 'extract_structured' ||
     name === 'discover_data_sources' ||
     name === 'watch_network' ||

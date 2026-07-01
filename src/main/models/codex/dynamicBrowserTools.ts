@@ -23,6 +23,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'wait_for_load',
   'read_a11y',
   'grep_page',
+  'diagnose_target',
   'extract_structured',
   'discover_data_sources',
   'watch_network',
@@ -47,7 +48,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
  * (browserTools.ts) and the prompt gate below.
  */
 export const TAB_BRIEF_CARRYING_TOOLS = [
-  'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured',
+  'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'diagnose_target', 'extract_structured',
   'watch_network', 'discover_data_sources', 'screenshot',
   'act', 'set_field', 'submit', 'open_result', 'execute_in_browser', 'navigate',
   'cdp_command', 'grep_click', 'grep_type'
@@ -117,6 +118,10 @@ export const EXTRACT_STRUCTURED_GUIDANCE =
 
 export const DISCOVER_DATA_SOURCES_GUIDANCE =
   '`discover_data_sources` is the early network-intelligence pass: use it when repeated records may come from APIs. It classifies the page as server-rendered, API-backed, or mixed, ranks candidate JSON/GraphQL endpoints, and tells you whether to stay in the DOM or pivot to network capture.'
+
+export const DIAGNOSE_TARGET_GUIDANCE =
+  '`diagnose_target` explains WHY a click/type is not landing on hard interactive pages (booking widgets, custom date pickers, typeaheads, modals) — reach for it when an action seemed to do nothing instead of blindly retrying or brute-forcing coordinates. ' +
+  'Give it a read_a11y @ref (best — it carries the owning frame), a `query`, or `coords`, and it hit-tests the point ACROSS FRAMES and reports the real blocker: an overlay is on top, the control is disabled by validation, pointer-events:none, inert behind a modal, offscreen, in a (cross-origin) iframe, or a visible fake control over a hidden real input that must be committed by selecting a suggestion. It is read-only — resolve the reason it gives, then act.'
 
 export const ACT_REORIENT_GUIDANCE =
   'When `act` returns ok:false with "no visible element matched …", treat that as a re-orient signal: use one of the attached read tools ' +
@@ -216,7 +221,7 @@ const BROWSER_TOOL_CATEGORY_CAPABILITIES: Record<BrowserToolCategory, string> = 
 const BROWSER_TOOL_CATEGORY_MEMBERS: Record<BrowserToolCategory, readonly string[]> = {
   memory: CODEX_MEMORY_TOOL_NAMES,
   discovery: ['search', 'navigate'],
-  orientation: ['read_page', 'wait_for_load', 'read_a11y'],
+  orientation: ['read_page', 'wait_for_load', 'read_a11y', 'diagnose_target'],
   targeting: ['grep_page'],
   'structured-data': ['extract_structured'],
   'network-intelligence': ['discover_data_sources', 'watch_network'],
@@ -483,6 +488,10 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
 
   if (allowed.has('discover_data_sources')) {
     lines.push(DISCOVER_DATA_SOURCES_GUIDANCE)
+  }
+
+  if (allowed.has('diagnose_target')) {
+    lines.push(DIAGNOSE_TARGET_GUIDANCE)
   }
 
   if (allowed.has('act') && (allowed.has('read_a11y') || allowed.has('grep_page'))) {

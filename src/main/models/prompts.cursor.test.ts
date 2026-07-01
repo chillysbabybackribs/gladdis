@@ -29,6 +29,7 @@ describe('buildCursorSystem', () => {
         'wait_for_load',
         'read_a11y',
         'grep_page',
+        'diagnose_target',
         'extract_structured',
         'discover_data_sources',
         'watch_network',

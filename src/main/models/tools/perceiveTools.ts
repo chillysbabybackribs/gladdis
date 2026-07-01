@@ -2,7 +2,8 @@ import type { TabManager } from '../../TabManager'
 import type { PageExtractor } from '../../extract/PageExtractor'
 import type { ToolOutcome } from '../browserTools'
 import { digestPage } from '../PageDigest'
-import { captureAxSnapshotForTab, digestAxSnapshot } from '../../extract/axTree'
+import { captureAxSnapshotForTab, digestAxSnapshot, type AxSnapshotNode } from '../../extract/axTree'
+import { axNodeCenter } from '../../extract/axRef'
 import { buildPageWireframe, formatPageWireframe } from '../../extract/pageWireframe'
 import type { PageCapture } from '../../../../shared/extraction'
 import type { SavedPage } from '../../extract/pageStore'
@@ -41,6 +42,8 @@ export interface ReadPageCacheStats {
 export interface PerceiveToolsDeps {
   tabs: TabManager
   extractor: PageExtractor
+  /** Resolve a read_a11y @aN ref to its node (with frameId + backendDOMNodeId). */
+  resolveAxRef?: (tabId: string, query: string) => import('../../extract/axTree').AxSnapshotNode | null
   /** Read-through digest cache, keyed by `${tabId}:${focus}:${viewportOnly}`. */
   pageCache: Map<string, ReadPageCacheEntry>
   pageCacheLimit: number
@@ -1644,5 +1647,209 @@ function networkDiscoveryOutcome(
       filter: summary.filter,
       candidateApis: summary.candidateApis
     }
+  }
+}
+
+// ── diagnose_target ─────────────────────────────────────────────────────────
+// Answers "can I act on this point/control, and if not why" ACROSS FRAMES. The
+// booking-page failure modes it exists to surface: the target is in a (possibly
+// cross-origin) iframe, an overlay covers it, it is disabled/inert/
+// pointer-events:none, or the visible label belongs to a different hidden input.
+// Read-only. Uses privileged CDP (DOM.getNodeForLocation hit-tests across
+// frames; DOM.resolveNode + Runtime.callFunctionOn read a node in ITS OWN frame
+// context — which top-frame executeJavaScript cannot do for cross-origin frames).
+
+/** Read disabled/pointer-events/inert/rect/label of a resolved DOM node IN ITS OWN FRAME. */
+const DIAGNOSE_NODE_FN = `function() {
+  const el = this instanceof Element ? this : (this && this.parentElement);
+  if (!el) return { found: false };
+  const style = getComputedStyle(el);
+  const r = el.getBoundingClientRect();
+  const tag = el.tagName ? el.tagName.toLowerCase() : '';
+  const formControl = /^(button|input|select|textarea|option)$/.test(tag);
+  const label = (el.getAttribute && (el.getAttribute('aria-label')
+    || el.getAttribute('value') || el.getAttribute('name') || el.getAttribute('placeholder')))
+    || (el.innerText || '').slice(0, 80);
+  // Does a visible fake control sit over a different hidden real input? (common
+  // on custom date/typeahead widgets). Report the nearest hidden form field.
+  let hiddenReal = null;
+  try {
+    const hidden = el.closest && el.closest('label, [role="combobox"], [role="textbox"]');
+    const realInput = hidden && hidden.querySelector && hidden.querySelector('input, select, textarea');
+    if (realInput) {
+      const rs = getComputedStyle(realInput);
+      if (rs.display === 'none' || rs.visibility === 'hidden' || realInput.type === 'hidden') {
+        hiddenReal = { tag: realInput.tagName.toLowerCase(), type: realInput.type || null,
+          name: realInput.getAttribute('name') || null };
+      }
+    }
+  } catch (e) { /* best-effort */ }
+  return {
+    found: true,
+    tag,
+    id: el.id || null,
+    role: el.getAttribute ? el.getAttribute('role') : null,
+    label: (label || '').replace(/[\\s\\u00a0]+/g, ' ').trim(),
+    disabled: formControl ? !!el.disabled : false,
+    ariaDisabled: el.getAttribute && el.getAttribute('aria-disabled') === 'true',
+    pointerEventsNone: style.pointerEvents === 'none',
+    inert: !!el.closest && !!el.closest('[inert]'),
+    visibility: style.visibility,
+    display: style.display,
+    opacity: style.opacity,
+    offscreen: r.width === 0 || r.height === 0 || r.bottom < 0 || r.top > (innerHeight || 800),
+    rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) },
+    hiddenReal
+  };
+}`
+
+export async function runDiagnoseTarget(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string
+): Promise<ToolOutcome> {
+  const cdp = (method: string, params?: Record<string, unknown>): Promise<any> =>
+    deps.tabs.cdpSend(tabId, method, params ?? {})
+
+  // Enable the domains we lean on (idempotent; attach only eagerly enables Page).
+  await cdp('DOM.enable').catch(() => {})
+  await cdp('Runtime.enable').catch(() => {})
+
+  // ── 1. Resolve a target point + the intended element's identity ─────────────
+  // The intended label/role comes from EITHER the a11y node (ref) or the grep
+  // match (query), so occlusion detection works for both — otherwise a
+  // query-resolved target has no identity to compare the topmost element against.
+  let x: number | null = null
+  let y: number | null = null
+  let intendedNode: AxSnapshotNode | null = null
+  let intendedLabel = ''
+
+  const refArg = typeof args.ref === 'string' ? args.ref.trim() : ''
+  const queryArg = typeof args.query === 'string' ? args.query.trim() : ''
+  const hasCoords = Number.isFinite(Number(args?.coords?.x)) && Number.isFinite(Number(args?.coords?.y))
+
+  if (refArg && deps.resolveAxRef) {
+    intendedNode = deps.resolveAxRef(tabId, refArg)
+    if (!intendedNode) {
+      return { ok: false, text: `diagnose_target: ref ${refArg} is missing or stale — re-run read_a11y.` }
+    }
+    intendedLabel = intendedNode.name || ''
+    const center = axNodeCenter(intendedNode)
+    if (center) { x = center.x; y = center.y }
+  } else if (queryArg) {
+    const runResult = await executeGrepInTab(deps.tabs, tabId, queryArg, (args.type as any) || 'text', !!args.caseSensitive, 0)
+    const matches = ((runResult.result as any[]) || []).filter((m) => m.type !== 'error' && m.coordinates)
+    if (!matches.length) {
+      return { ok: false, text: `diagnose_target: no element matched "${queryArg}". Try read_a11y and pass a @ref.` }
+    }
+    intendedLabel = matches[0].matchedLine || matches[0].innerText || queryArg
+    x = matches[0].coordinates.x
+    y = matches[0].coordinates.y
+  } else if (hasCoords) {
+    x = Math.round(Number(args.coords.x))
+    y = Math.round(Number(args.coords.y))
+  }
+
+  if (x === null || y === null) {
+    return { ok: false, text: 'diagnose_target: provide a target — ref (@a1), query (text/selector), or coords {x,y} with resolvable bounds.' }
+  }
+
+  // ── 2. Hit-test the point ACROSS FRAMES → topmost node + owning frame ───────
+  let topmost: any = null
+  let ownerFrameId: string | undefined
+  let crossFrame = false
+  try {
+    const hit = (await cdp('DOM.getNodeForLocation', {
+      x, y, includeUserAgentShadowDOM: false
+    })) as { backendNodeId?: number; frameId?: string; nodeId?: number }
+    ownerFrameId = hit.frameId
+    if (typeof hit.backendNodeId === 'number') {
+      const resolved = (await cdp('DOM.resolveNode', { backendNodeId: hit.backendNodeId })) as {
+        object?: { objectId?: string }
+      }
+      const objectId = resolved.object?.objectId
+      if (objectId) {
+        const call = (await cdp('Runtime.callFunctionOn', {
+          functionDeclaration: DIAGNOSE_NODE_FN,
+          objectId,
+          returnByValue: true
+        })) as { result?: { value?: any } }
+        topmost = call.result?.value ?? null
+      }
+    }
+  } catch (e) {
+    // Hit-test failed (rare). Fall back to top-frame elementFromPoint below.
+  }
+
+  // Fallback: top-frame probe (misses cross-origin iframe internals, but better
+  // than nothing when the CDP hit-test is unavailable).
+  if (!topmost) {
+    try {
+      const res = await deps.tabs.executeJavaScript(tabId, `
+        const el = document.elementFromPoint(${x}, ${y});
+        if (!el) return { found: false };
+        return (${DIAGNOSE_NODE_FN}).call(el);
+      `)
+      if (res.success && res.result) topmost = res.result
+    } catch { /* leave null */ }
+  }
+
+  // ── 3. Cross-reference intended vs. topmost; derive frame + occlusion ───────
+  const intendedFrameLabel = intendedNode?.frameLabel
+  const intendedInIframe = !!intendedNode?.frameId // frameId set only for non-main frames
+  // If the a11y node names a frame but the point's owner frame differs, the
+  // intended control is in a different browsing context than where a naive click
+  // would land — a classic booking-widget iframe miss.
+  crossFrame = intendedInIframe
+
+  // Occlusion: does the topmost element look like (or contain) the intended one?
+  // Compare by label (from ref OR grep match). If we have an intended label and
+  // the topmost element's label neither contains nor is contained by it, an
+  // unrelated element (overlay/modal/cookie wall) is sitting on top of the point.
+  let occluded = false
+  let coveredByLabel: string | null = null
+  if (intendedLabel && topmost && topmost.found) {
+    const want = intendedLabel.trim().toLowerCase()
+    const topLabel = (topmost.label || '').trim().toLowerCase()
+    const nameMatch = topLabel.length > 0 && (topLabel.includes(want) || want.includes(topLabel))
+    if (!nameMatch) {
+      occluded = true
+      coveredByLabel = topmost.label || `<${topmost.tag}>`
+    }
+  }
+
+  // ── 4. Build the human hint (the point of the tool) ─────────────────────────
+  const reasons: string[] = []
+  if (topmost?.disabled || topmost?.ariaDisabled) reasons.push('the control is DISABLED (likely by form validation) — fix the inputs it depends on first')
+  if (topmost?.pointerEventsNone) reasons.push('pointer-events:none on the target — clicks pass through; act on the element that owns the handler')
+  if (topmost?.inert) reasons.push('the target is inside an [inert] subtree (e.g. a background behind an open modal) — handle the modal first')
+  if (occluded) reasons.push(`an overlay is on top (${coveredByLabel}) — dismiss/close it, then retry`)
+  if (topmost?.offscreen) reasons.push('the target is offscreen — scroll it into view first')
+  if (topmost?.hiddenReal) reasons.push(`the visible control sits over a hidden real ${topmost.hiddenReal.tag}${topmost.hiddenReal.name ? ` [name=${topmost.hiddenReal.name}]` : ''} — commit via that field (often by selecting a suggestion), not by typing raw text`)
+  if (crossFrame) reasons.push(`the intended control is in ${intendedFrameLabel ?? 'an iframe'} — target it by its read_a11y @ref (which carries the frame), not raw coords`)
+
+  const clickable = reasons.length === 0 && !!topmost?.found
+  const hint = clickable
+    ? 'Target looks actionable: topmost element at the point is the intended control, enabled and unobstructed.'
+    : `Target may not be actionable — ${reasons.join('; ')}.`
+
+  const diagnosis = {
+    point: { x, y },
+    intended: intendedNode
+      ? { ref: intendedNode.ref, role: intendedNode.role, name: intendedNode.name, frame: intendedFrameLabel ?? 'main', states: intendedNode.states }
+      : null,
+    ownerFrameId: ownerFrameId ?? null,
+    crossFrame,
+    topmost: topmost?.found ? topmost : null,
+    occluded,
+    coveredBy: coveredByLabel,
+    clickable,
+    reasons
+  }
+
+  return {
+    ok: true,
+    text: `diagnose_target (${x}, ${y}): ${hint}`,
+    structuredContent: diagnosis
   }
 }

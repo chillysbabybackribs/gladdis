@@ -10,6 +10,7 @@ import {
   ACT_REORIENT_GUIDANCE,
   buildCodexBrowserInstructions,
   CODEX_INTERACTION_TOOL_NAMES,
+  DIAGNOSE_TARGET_GUIDANCE,
   DISCOVER_DATA_SOURCES_GUIDANCE,
   EXTRACT_STRUCTURED_GUIDANCE,
   CODEX_BROWSER_INSTRUCTIONS,
@@ -182,6 +183,9 @@ function buildBrowserInteractionGuidance(names: Set<string>): string {
   }
   if (names.has('discover_data_sources')) {
     targetLines.push(`  • discover_data_sources → ${stripNamedToolLead(DISCOVER_DATA_SOURCES_GUIDANCE)}`)
+  }
+  if (names.has('diagnose_target')) {
+    targetLines.push(`  • diagnose_target → ${stripNamedToolLead(DIAGNOSE_TARGET_GUIDANCE)}`)
   }
   if (names.has('watch_network')) {
     targetLines.push(
@@ -425,7 +429,7 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
   return result
 }
 
-export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'diagnose_target', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Claude Code turns run through the local Claude CLI, preserving Claude's
@@ -462,7 +466,7 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
   return result
 }
 
-export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'diagnose_target', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Cursor turns run through the local Cursor Agent CLI. Keep this lean: Cursor
@@ -503,4 +507,4 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   return result
 }
 
-export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'wait_for_load', 'read_a11y', 'grep_page', 'diagnose_target', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })

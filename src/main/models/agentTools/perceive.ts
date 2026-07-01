@@ -243,6 +243,52 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
     }
   },
   {
+    name: 'diagnose_target',
+    description:
+      'Diagnose WHY an action on a control may not be landing — before or after a failed act. Read-only. ' +
+      'Given a read_a11y @ref (preferred — it carries the frame), a `query`, or `coords {x,y}`, it hit-tests ' +
+      'the point ACROSS FRAMES and reports: which frame owns the control (and whether it is a cross-origin ' +
+      'iframe), the topmost element actually at that point (so you see if an overlay is covering the target), ' +
+      'and whether the control is disabled / pointer-events:none / inert / offscreen, or is a visible fake ' +
+      'control sitting over a hidden real input. Use this on hard interactive pages (booking widgets, custom ' +
+      'date pickers, typeaheads, modals) when a click/type seems to do nothing: it turns a silent failure into ' +
+      'a concrete reason (overlay, disabled-by-validation, wrong frame, commit-via-suggestion) plus a next step. ' +
+      'It does NOT act — resolve the reason, then act.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'read_a11y ref like @a1 (preferred — carries the owning frame).' },
+        query: { type: 'string', description: 'Text, CSS selector, or XPath to resolve the target live when no ref.' },
+        type: {
+          type: 'string',
+          enum: ['text', 'regex', 'selector'],
+          description: 'How to interpret `query`. Defaults to "text".'
+        },
+        caseSensitive: { type: 'boolean', description: 'Case sensitivity for text/regex query. Default false.' },
+        coords: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          description: 'Explicit viewport coordinates (last-resort target).'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        point: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } } },
+        intended: { type: ['object', 'null'] },
+        ownerFrameId: { type: ['string', 'null'] },
+        crossFrame: { type: 'boolean' },
+        topmost: { type: ['object', 'null'] },
+        occluded: { type: 'boolean' },
+        coveredBy: { type: ['string', 'null'] },
+        clickable: { type: 'boolean' },
+        reasons: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['point', 'crossFrame', 'occluded', 'clickable', 'reasons']
+    }
+  },
+  {
     name: 'extract_structured',
     description:
       'Extract repeated records from the live page as bounded JSON. Use this when the page has a known repeated shape ' +

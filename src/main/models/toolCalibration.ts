@@ -73,8 +73,9 @@ export function buildToolCalibrationBlock(args: {
   tabId?: string | null
   state?: ToolCalibrationState | null
 }): string {
+  const toolNameSet = new Set(args.toolNames)
   const surfaces = new Set<ToolSurface>()
-  for (const name of args.toolNames) {
+  for (const name of toolNameSet) {
     const surface = toolSurfaceForName(name)
     if (surface) surfaces.add(surface)
   }
@@ -87,8 +88,19 @@ export function buildToolCalibrationBlock(args: {
   ]
 
   if (surfaces.has('browser')) {
+    const browserActionStarts = [
+      'navigate',
+      'set_field',
+      'submit',
+      'open_result',
+      'act'
+    ].filter((name) => toolNameSet.has(name))
+    const startFrom =
+      browserActionStarts.length > 0
+        ? `${browserActionStarts.map((name) => `${name}()`).join('/')} results`
+        : 'the attached browser results'
     lines.push(
-      `- Browser surface is attached to the visible tab${args.tabId ? ` (${args.tabId})` : ''}; start from navigate()/set_field()/submit()/open_result()/act() results before deeper reads.`
+      `- Browser surface is attached to the visible tab${args.tabId ? ` (${args.tabId})` : ''}; start from ${startFrom} before deeper reads.`
     )
   }
   if (surfaces.has('filesystem')) {
@@ -133,7 +145,9 @@ export function buildToolCalibrationBlock(args: {
     lines.push('- If grep_page misses, keep grep_page and try 2-3 sharper subject-based phrase variations, not the whole prompt and not a one-word probe, or use a precise selector/XPath before abandoning it.')
     lines.push('- If extract_structured is wrong, tighten the item selector/XPath, field selectors, or scope before switching tools.')
     lines.push('- If discover_data_sources says the page is server-rendered, stay in DOM/a11y tools; if it surfaces strong JSON/GraphQL candidates, prefer those before broad scraping.')
-    lines.push('- If act misses its target, refresh the page state with read_a11y or a phrased grep_page, then retry act with a fresh ref/query.')
+    if (toolNameSet.has('act')) {
+      lines.push('- If act misses its target, refresh the page state with read_a11y or a phrased grep_page, then retry act with a fresh ref/query.')
+    }
   }
   if (surfaces.has('filesystem')) {
     lines.push('- If search_files is noisy, refine the query or glob before falling back to shell or broader reads.')

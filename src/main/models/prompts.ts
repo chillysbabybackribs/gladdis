@@ -20,8 +20,8 @@ import {
   ACTIVE_PAGE_GROUNDING_GUIDANCE,
   buildClaudeLocalMachineGuidance,
   buildCodexLocalMachineGuidance,
-  buildCursorNativeWorkContract,
   buildCursorLocalMachineGuidance,
+  buildCursorNativeWorkContract,
   buildResumeProcessGuidance,
   CLAUDE_NATIVE_WORK_GUIDANCE,
   CODEX_UI_VISUAL_CONFIRMATION_GUIDANCE,
@@ -80,74 +80,149 @@ const REASONING_METHOD =
   'the goal; when they carry non-obvious consequences, pause and offer the better path as a concrete option.\n\n' +
   'Close with one useful next-step insight from what you found.'
 
-const BROWSER_OVERVIEW =
-  '## Browser tools\n' +
-  `${GLADDIS_WEB_TOOLS_RULE}\n\n` +
-  'All browser actions act on the VISIBLE tab the user is watching — they see the page change. ' +
-  'Use your own judgment about which tool fits; there is no fixed script.\n\n' +
-  '  • search → web search. By default it returns ranked SERP hits + a few live-evidence digests ' +
-  'WITHOUT changing the visible tab. Pass navigate_visible: true (or rely on the auto-trigger when ' +
-  'the user explicitly asked to "open / visit / navigate to" a result) to also load the best hit.\n' +
-  '  • navigate → load a known URL in the visible tab. The result already includes a clustered page ' +
-  'map in document order, so on many pages you can decide the next step without a separate read.\n\n' +
-  'For targeting on a page that is already loaded, use grep_page (distinctive multi-word phrases, ' +
-  'not single common words) or read_a11y (control discovery via @aN refs), then prefer semantic verbs like set_field / submit / open_result before dropping to act. After an action, ' +
-  'use the returned `after` field instead of re-reading. Prefer finishing the user goal over literal ' +
-  'wording; ask one clarifying option if still ambiguous.'
+function buildBrowserOverview(names: Set<string>): string {
+  const targetTools: string[] = []
+  if (names.has('grep_page')) targetTools.push('`grep_page` (distinctive multi-word phrases, not single common words)')
+  if (names.has('read_a11y')) targetTools.push('`read_a11y` (control discovery via @aN refs)')
 
-const BROWSER_INTERACTION_GUIDANCE =
-  '## Browser interaction\n' +
-  'Three layers — orient, target, act. Use the smallest one that answers the question, ' +
-  'and READ the result before deciding the next step instead of immediately re-reading the page.\n\n' +
-  'Orient (re-use what is already in the result; do not re-read for free):\n' +
-  '  • navigate → the result IS the orientation. It returns the effective URL after any redirect, ' +
-  'readyState, a page-text size hint, AND a clustered MAP of the page\'s primary handles ' +
-  '(search box, nav, main actions) in document order. It is for orientation, not stable act refs. Only call read_page / ' +
-  'read_a11y after navigate if the map is genuinely not enough.\n' +
-  '  • read_page → bounded structural digest (summary + ACTIONS table). Use only when you DID NOT just ' +
-  'navigate. It is orientation, not targeting.\n' +
-  '  • read_a11y → CDP accessibility tree with stable @aN refs + live coordinates. Reach for it on ' +
-  'component-heavy UIs whose CSS selectors churn but whose controls have accessible names — buttons, ' +
-  'inputs, tabs, menus. The @aN refs returned go straight into act and become invalid when the tab ' +
-  'navigates or the snapshot goes stale.\n\n' +
-  'Target (precise, cheap — beats screenshots for "what is X / where is X"):\n' +
-  '  • grep_page → SURGICAL, NOT exploratory. Extract the subject from the user request and search with ' +
-  '1–3 tight multi-word PHRASE variations like "released on 14 March 2026", "Pro plan $20 per user", ' +
-  'or "rate limit exceeded" — never the whole prompt, and never a single common word like "price" / ' +
-  '"date" / "Germany" (those flood with dozens of noise hits and answer nothing). If the first phrasing ' +
-  'misses, run 2–3 variations of the same meaning instead of broadening to a single word. The wording ' +
-  'does not need to match exactly: if the same terms appear close together or clearly in the same ' +
-  'section, inspect that returned section. Each match returns surrounding context, so the answer is read ' +
-  'in-place without a follow-up call. A genuinely rare token (proper noun, error code, identifier) is fine; ' +
-  'common words are the trap. Use type "selector" ONLY with a specific CSS selector or XPath; never with ' +
-  'bare tag names (a / div / img / script dump the page).\n' +
-  `  • extract_structured → ${stripNamedToolLead(EXTRACT_STRUCTURED_GUIDANCE)}\n` +
-  `  • discover_data_sources → ${stripNamedToolLead(DISCOVER_DATA_SOURCES_GUIDANCE)}\n` +
-  '  • watch_network → when the answer is data the page fetches from an API (lists, prices, search ' +
-  'results, feeds), capture the JSON behind the render instead of scraping HTML.\n\n' +
-  'Middle-game discipline for browser tasks:\n' +
-  '  • Before leaving a page you may need later, preserve it now: save the page or extract the exact records you will compare against.\n' +
-  '  • For each subtask, identify the evidence shape you need: one fact, one control, repeated flat records, hierarchical records, or API-backed data.\n' +
-  '  • After each meaningful read/action, grade the result: right entity, right structure, enough coverage. If not, recalibrate the same tool once before switching surfaces.\n\n' +
-  'Act — semantic verbs first, low-level companion actions second:\n' +
-  '  • set_field → set an input / textarea / select / contenteditable value in one semantic step. Use it instead of raw typing when the goal is "fill this field". Pass `value`; by default it replaces the current value and fires the normal DOM events.\n' +
-  '  • submit → submit the current focused form or a targeted submit control. Use it for search / send / save intent instead of a generic click or Enter when possible.\n' +
-  '  • open_result → open the first or Nth matching result / card / headline from the current page and return fresh after-state. Use it for "open the first result" instead of manually clicking.\n' +
-  `  • act → ${stripNamedToolLead(ACT_COMPANION_GUIDANCE)} To load a URL use navigate() — never pass a URL as an act query (act targets on-page elements, not link addresses).\n` +
-  '  • READ the act result before the next move — IT IS THE POST-ACTION READ. The text channel ends ' +
-  'with " Now at {url} — {title} ({readyState}) focus={...}". The structured `after` object has ' +
-  '{url, title, readyState, activeElement, bodyTextChars, navigated, elements?}. When ' +
-  '`after.navigated` is true the act crossed pages and `after.elements` is a digest of the NEW page\'s ' +
-  'top clickable targets with {tag, role, label, x, y} — act on those directly. Do NOT call ' +
-  'read_page / read_a11y immediately after a navigating act; the digest you need is already in your ' +
-  `hand. ${ACT_REORIENT_GUIDANCE}\n\n` +
-  'Lower-level (only when the layers above cannot express what you need):\n' +
-  '  • execute_in_browser, cdp_command → targeted DOM mutations, network interception, raw CDP.\n' +
-  '  • grep_click / grep_type → legacy split verbs. They find + act but return NO fresh state, so ' +
-  'you would have to read separately. Prefer act.\n' +
-  '  • screenshot / screenshot_app → vision LAST resort, for canvas / charts / unlabeled icon-buttons ' +
-  'with no accessible name, or to confirm a UI is not blank. Not for "what does this say" — grep_page ' +
-  'and read_a11y are more precise (literal node + literal coordinate vs. pixels you must infer).'
+  const semanticVerbs: string[] = []
+  if (names.has('set_field')) semanticVerbs.push('`set_field`')
+  if (names.has('submit')) semanticVerbs.push('`submit`')
+  if (names.has('open_result')) semanticVerbs.push('`open_result`')
+
+  let targetingLine = ''
+  if (targetTools.length > 0) {
+    targetingLine = `For targeting on a page that is already loaded, use ${targetTools.join(' or ')}`
+    if (semanticVerbs.length > 0) {
+      targetingLine += `, then prefer semantic verbs like ${semanticVerbs.join(' / ')}`
+      if (names.has('act')) targetingLine += ' before dropping to `act`'
+    } else if (names.has('act')) {
+      targetingLine += ', then use `act` only after you have identified the target'
+    }
+    targetingLine += '.'
+  }
+  if (!targetingLine) {
+    targetingLine = 'Use the attached browser read tools to identify the next target before taking an action.'
+  }
+
+  const afterLine = names.has('act') || semanticVerbs.length > 0
+    ? ' After an action, use the returned `after` field instead of re-reading.'
+    : ''
+
+  return [
+    '## Browser tools',
+    GLADDIS_WEB_TOOLS_RULE,
+    '',
+    'All browser actions act on the VISIBLE tab the user is watching — they see the page change. Use your own judgment about which tool fits; there is no fixed script.',
+    '',
+    names.has('search')
+      ? '  • search → web search. By default it returns ranked SERP hits + a few live-evidence digests WITHOUT changing the visible tab. Pass navigate_visible: true (or rely on the auto-trigger when the user explicitly asked to "open / visit / navigate to" a result) to also load the best hit.'
+      : null,
+    names.has('navigate')
+      ? '  • navigate → load a known URL in the visible tab. The result already includes a clustered page map in document order, so on many pages you can decide the next step without a separate read.'
+      : null,
+    '',
+    `${targetingLine}${afterLine} Prefer finishing the user goal over literal wording; ask one clarifying option if still ambiguous.`
+  ].filter((line): line is string => line != null && line !== '').join('\n')
+}
+
+function buildBrowserInteractionGuidance(names: Set<string>): string {
+  const orientLines: string[] = []
+  if (names.has('navigate')) {
+    orientLines.push(
+      '  • navigate → the result IS the orientation. It returns the effective URL after any redirect, readyState, a page-text size hint, AND a clustered MAP of the page\'s primary handles (search box, nav, main actions) in document order.'
+    )
+  }
+  if (names.has('read_page')) {
+    orientLines.push(
+      '  • read_page → bounded structural digest (summary + ACTIONS table). Use only when you DID NOT just navigate. It is orientation, not targeting.'
+    )
+  }
+  if (names.has('read_a11y')) {
+    orientLines.push(
+      `  • read_a11y → CDP accessibility tree with stable @aN refs + live coordinates. Reach for it on component-heavy UIs whose CSS selectors churn but whose controls have accessible names — buttons, inputs, tabs, menus. The @aN refs returned go straight into ${names.has('act') ? '`act`' : 'attached action tools'} and become invalid when the tab navigates or the snapshot goes stale.`
+    )
+  }
+
+  const targetLines: string[] = []
+  if (names.has('grep_page')) {
+    targetLines.push(
+      '  • grep_page → SURGICAL, NOT exploratory. Extract the subject from the user request and search with 1–3 tight multi-word PHRASE variations like "released on 14 March 2026", "Pro plan $20 per user", or "rate limit exceeded" — never the whole prompt, and never a single common word like "price" / "date" / "Germany" (those flood with dozens of noise hits and answer nothing). If the first phrasing misses, run 2–3 variations of the same meaning instead of broadening to a single word. The wording does not need to match exactly: if the same terms appear close together or clearly in the same section, inspect that returned section. Each match returns surrounding context, so the answer is read in-place without a follow-up call. A genuinely rare token (proper noun, error code, identifier) is fine; common words are the trap. Use type "selector" ONLY with a specific CSS selector or XPath; never with bare tag names (a / div / img / script dump the page).'
+    )
+  }
+  if (names.has('extract_structured')) {
+    targetLines.push(`  • extract_structured → ${stripNamedToolLead(EXTRACT_STRUCTURED_GUIDANCE)}`)
+  }
+  if (names.has('discover_data_sources')) {
+    targetLines.push(`  • discover_data_sources → ${stripNamedToolLead(DISCOVER_DATA_SOURCES_GUIDANCE)}`)
+  }
+  if (names.has('watch_network')) {
+    targetLines.push(
+      '  • watch_network → when the answer is data the page fetches from an API (lists, prices, search results, feeds), capture the JSON behind the render instead of scraping HTML.'
+    )
+  }
+
+  const actionLines: string[] = []
+  if (names.has('set_field')) {
+    actionLines.push(
+      '  • set_field → set an input / textarea / select / contenteditable value in one semantic step. Use it instead of raw typing when the goal is "fill this field". Pass `value`; by default it replaces the current value and fires the normal DOM events.'
+    )
+  }
+  if (names.has('submit')) {
+    actionLines.push(
+      '  • submit → submit the current focused form or a targeted submit control. Use it for search / send / save intent instead of a generic click or Enter when possible.'
+    )
+  }
+  if (names.has('open_result')) {
+    actionLines.push(
+      '  • open_result → open the first or Nth matching result / card / headline from the current page and return fresh after-state. Use it for "open the first result" instead of manually clicking.'
+    )
+  }
+  if (names.has('act')) {
+    actionLines.push(
+      `  • act → ${stripNamedToolLead(ACT_COMPANION_GUIDANCE)} To load a URL use navigate() — never pass a URL as an act query (act targets on-page elements, not link addresses).`
+    )
+    actionLines.push(
+      '  • READ the act result before the next move — IT IS THE POST-ACTION READ. The text channel ends with " Now at {url} — {title} ({readyState}) focus={...}". The structured `after` object has {url, title, readyState, activeElement, bodyTextChars, navigated, elements?}. When `after.navigated` is true the act crossed pages and `after.elements` is a digest of the NEW page\'s top clickable targets with {tag, role, label, x, y} — act on those directly. Do NOT call read_page / read_a11y immediately after a navigating act; the digest you need is already in your hand. ' +
+      ACT_REORIENT_GUIDANCE
+    )
+  }
+
+  const lowerLevelLines: string[] = []
+  if (names.has('execute_in_browser') || names.has('cdp_command')) {
+    lowerLevelLines.push('  • execute_in_browser, cdp_command → targeted DOM mutations, network interception, raw CDP.')
+  }
+  if (names.has('grep_click') || names.has('grep_type')) {
+    lowerLevelLines.push(
+      names.has('act')
+        ? '  • grep_click / grep_type → legacy split verbs. They find + act but return NO fresh state, so you would have to read separately. Prefer act.'
+        : '  • grep_click / grep_type → legacy split verbs. They find + act but return NO fresh state, so re-read explicitly after using them.'
+    )
+  }
+  if (names.has('screenshot') || names.has('screenshot_app')) {
+    lowerLevelLines.push(
+      '  • screenshot / screenshot_app → vision LAST resort, for canvas / charts / unlabeled icon-buttons with no accessible name, or to confirm a UI is not blank. Not for "what does this say" — grep_page and read_a11y are more precise (literal node + literal coordinate vs. pixels you must infer).'
+    )
+  }
+
+  const sections = [
+    '## Browser interaction',
+    `Three layers — orient, target, ${names.has('act') ? 'act' : 'execute'}. Use the smallest one that answers the question, and READ the result before deciding the next step instead of immediately re-reading the page.`,
+    '',
+    orientLines.length > 0 ? ['Orient (re-use what is already in the result; do not re-read for free):', ...orientLines].join('\n') : null,
+    targetLines.length > 0 ? ['Target (precise, cheap — beats screenshots for "what is X / where is X"):', ...targetLines].join('\n') : null,
+    [
+      'Middle-game discipline for browser tasks:',
+      '  • Before leaving a page you may need later, preserve it now: save the page or extract the exact records you will compare against.',
+      '  • For each subtask, identify the evidence shape you need: one fact, one control, repeated flat records, hierarchical records, or API-backed data.',
+      '  • After each meaningful read/action, grade the result: right entity, right structure, enough coverage. If not, recalibrate the same tool once before switching surfaces.'
+    ].join('\n'),
+    actionLines.length > 0 ? [`${names.has('act') ? 'Act' : 'Action'} — semantic verbs first, low-level companion actions second:`, ...actionLines].join('\n') : null,
+    lowerLevelLines.length > 0 ? ['Lower-level (only when the layers above cannot express what you need):', ...lowerLevelLines].join('\n') : null
+  ].filter((section): section is string => Boolean(section))
+
+  return sections.join('\n\n')
+}
 
 const FILESYSTEM_OVERVIEW =
   '## Filesystem\n' +
@@ -170,11 +245,11 @@ const MEMORY_OVERVIEW =
   '## Memory\n' +
   'Only the recent tail of the conversation is in context. Past conversation memory is never injected automatically; if the user asks to resume or refers to something earlier, call recall_history first. Use recall_history with scope:"all" only when the user explicitly asks about a different or older chat. Resume process: retrieve the relevant summary, read the full saved conversation only if the summary is not enough, then tell the user what you found and ask or wait for the next concrete instruction. A bare resume request such as "pick up where we were" is context recovery, not permission to edit files, run validations, navigate pages, or continue old work automatically. Trimmed tool results (shown as "[trimmed]") are re-readable via recall_history(tool_call_id). Do not claim you cannot remember something without first calling recall_history.'
 
-const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: string }> = [
+const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: string | ((names: Set<string>) => string) }> = [
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
-  { enabled: (names) => names.has('search'), text: BROWSER_OVERVIEW },
-  { enabled: (names) => CODEX_INTERACTION_TOOL_NAMES.some((name) => names.has(name)) || names.has('set_field') || names.has('submit') || names.has('open_result'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => names.has('search') || names.has('navigate') || names.has('grep_page') || names.has('read_a11y') || names.has('set_field') || names.has('submit') || names.has('open_result') || names.has('act'), text: buildBrowserOverview },
+  { enabled: (names) => CODEX_INTERACTION_TOOL_NAMES.some((name) => names.has(name)) || names.has('set_field') || names.has('submit') || names.has('open_result'), text: buildBrowserInteractionGuidance },
   { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
   { enabled: (names) => names.has('run_command'), text: SHELL_GUIDANCE },
@@ -219,7 +294,10 @@ function agentGuidanceForTools(tools: ToolDef[]): string {
   if (cached) return cached
 
   const names = new Set(tools.map((tool) => tool.name))
-  const guidance = GUIDANCE_BLOCKS.filter((block) => block.enabled(names)).map((block) => block.text).join('\n\n')
+  const guidance = GUIDANCE_BLOCKS
+    .filter((block) => block.enabled(names))
+    .map((block) => typeof block.text === 'function' ? block.text(names) : block.text)
+    .join('\n\n')
 
   if (GUIDANCE_CACHE.size >= GUIDANCE_CACHE_LIMIT) {
     const first = GUIDANCE_CACHE.keys().next()

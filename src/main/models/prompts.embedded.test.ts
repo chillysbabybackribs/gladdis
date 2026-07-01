@@ -1,7 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { buildClaudeCodeSystem, buildCodexSystem } from './prompts'
+import { buildAgentSystem, buildClaudeCodeSystem, buildCodexSystem } from './prompts'
+import { knownToolByName } from './agentTools'
 
 describe('embedded prompt tool routing', () => {
+  it('does not advertise act on direct-provider turns when act is not attached', async () => {
+    const prompt = await buildAgentSystem([
+      knownToolByName('search')!,
+      knownToolByName('navigate')!,
+      knownToolByName('grep_page')!,
+      knownToolByName('read_a11y')!,
+      knownToolByName('set_field')!
+    ])
+
+    expect(prompt).toContain('`set_field`')
+    expect(prompt).not.toContain('`act`')
+    expect(prompt).not.toContain('before dropping to `act`')
+    expect(prompt).not.toContain('`act` is a companion action tool')
+    expect(prompt).not.toContain('READ the act result before the next move')
+  })
+
   it('builds a Claude Code prompt that only names the routed MCP subset', () => {
     const prompt = buildClaudeCodeSystem({ browserToolNames: ['search', 'memory_read'] })
 

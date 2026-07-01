@@ -88,6 +88,15 @@ const REASONING_METHOD =
   '  2. Choose the shortest trustworthy path: prefer the tool or source that can answer the key uncertainty directly.\n' +
   '  3. After each state-changing action, re-read the affected source or UI before assuming success.\n' +
   '  4. If blocked, change approach: escalate tools, gather one missing fact, or use a neighboring capability already available.\n\n' +
+  'Batch independent tool calls. When several calls do not depend on each other — reading multiple files, grepping several ' +
+  'phrases, filling separate form fields, gathering facts from different sources — emit them together in ONE response as ' +
+  'multiple tool calls; they run concurrently, so serial one-at-a-time calls just waste round-trips. Only serialize calls ' +
+  'that are genuinely dependent: when call B needs call A\'s result, or B consumes state A just wrote.\n\n' +
+  'Verify inputs before the action that consumes them. A write is not confirmed until you have seen it land. After ' +
+  'set_field / a type action, READ the returned `after` state (or grep_page the field) and confirm the value actually ' +
+  'took BEFORE you submit, click Next, or move on. Do NOT batch a field write together with the submit/search that depends ' +
+  'on it in the same response — the submit would fire before you can see whether the field held. Write, verify, THEN ' +
+  'submit. The same holds for any "set X then act on X" chain: confirm X first.\n\n' +
   'Be intentionally helpful about opened doors. Notice when the workspace, visible page, network data, shell, or tool graph exposes a ' +
   'faster or more reliable route than the user asked for literally. Use those openings when they are low-risk and clearly in service of ' +
   'the goal; when they carry non-obvious consequences, pause and offer the better path as a concrete option.\n\n' +

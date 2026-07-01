@@ -20,7 +20,13 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
   {
     name: 'read_page',
     description:
-      'Read a bounded active-tab digest: URL/title, summary, structure, and action table.',
+      'Orient on the active tab: a bounded, cached structural digest — URL/title, a short ' +
+      'summary, the page structure, and a table of the main actions. Use this FIRST when you ' +
+      'arrive somewhere new and need the lay of the land, before targeting anything. ' +
+      'It is the orientation tool, a different job from grep_page (which finds one exact ' +
+      'element or passage) and read_a11y (control discovery on component-heavy UIs). ' +
+      'Cached with a short TTL and invalidated on navigation, so repeating it is cheap. ' +
+      'For precise targeting or to answer "what does the page say about X", prefer grep_page.',
     parameters: {
       type: 'object',
       properties: {
@@ -52,9 +58,9 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
       'Read a compact accessibility-tree snapshot of the active tab via CDP ' +
       'Accessibility.getFullAXTree. Returns semantic role + name + state for ' +
       'interactive controls, with stable refs (@a1, @a2, …) and live coordinates ' +
-      'when available. Prefer this over read_page when you need control discovery ' +
-      'on refactored or component-heavy UIs where CSS selectors churn. Returned ' +
-      '@a1-style refs can be passed directly to grep_click, grep_type, or click_xy. Still use ' +
+      'when available. Use read_page first for orientation; reach for read_a11y when you need ' +
+      'control discovery on refactored or component-heavy UIs where CSS selectors churn. Returned ' +
+      '@a1-style refs can be passed directly to act (the primary action verb). Still use ' +
       'grep_page for exact text passages.',
     parameters: {
       type: 'object',
@@ -201,6 +207,95 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
         }
       },
       required: ['query', 'type', 'caseSensitive', 'contextLines', 'matches']
+    }
+  },
+  {
+    name: 'extract_structured',
+    description:
+      'Extract repeated records from the live page as bounded JSON. Use this when the page has a known repeated shape ' +
+      '(table rows, cards, search results, comments, feed items) and `grep_page` would require many repeated queries or truncate. ' +
+      'Provide ONE specific record selector via `item_selector` or `item_xpath`, then a small `fields` map. Each field can read ' +
+      'the whole item or a relative descendant via CSS selector/XPath, returning text, HTML, an attribute, or just whether it exists. ' +
+      'Use `read_page` first if you still need orientation, and prefer `watch_network` when the page is clearly driven by JSON/API data. ' +
+      'Avoid broad item selectors like `div` or `a`: target the real repeated record node.',
+    parameters: {
+      type: 'object',
+      properties: {
+        item_selector: {
+          type: 'string',
+          description: 'CSS selector that resolves one repeated record per match, e.g. "tr.athing" or "article.search-result".'
+        },
+        item_xpath: {
+          type: 'string',
+          description: 'XPath alternative to item_selector when CSS is not expressive enough. Pass only one of item_selector or item_xpath.'
+        },
+        fields: {
+          type: 'object',
+          description:
+            'Map field names to extraction specs. Example: { "title": { "selector": "a.title", "mode": "text" }, "href": { "selector": "a.title", "mode": "attr", "attr": "href" } }',
+          additionalProperties: {
+            type: 'object',
+            properties: {
+              selector: { type: 'string' },
+              xpath: { type: 'string' },
+              scope: {
+                type: 'string',
+                enum: ['item', 'page'],
+                description: 'Resolve selector/xpath relative to the matched item (default) or the whole page.'
+              },
+              mode: {
+                type: 'string',
+                enum: ['text', 'attr', 'html', 'exists'],
+                description: 'Read normalized text (default), an attribute, bounded HTML, or whether the target exists.'
+              },
+              attr: {
+                type: 'string',
+                description: 'Required when mode="attr", e.g. "href", "src", "datetime", or "data-id".'
+              }
+            }
+          }
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum records to return after visibility filtering. Default 20, max 100.'
+        },
+        include_invisible: {
+          type: 'boolean',
+          description: 'If true, keep records even when their root element is hidden. Default false.'
+        },
+        text_limit: {
+          type: 'number',
+          description: 'Per-field cap for text/attribute values. Default 500, max 4000.'
+        },
+        html_limit: {
+          type: 'number',
+          description: 'Per-field cap for HTML values. Default 2000, max 12000.'
+        }
+      },
+      required: ['fields']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        itemSelector: { type: 'string' },
+        itemXpath: { type: 'string' },
+        limit: { type: 'number' },
+        includeInvisible: { type: 'boolean' },
+        textLimit: { type: 'number' },
+        htmlLimit: { type: 'number' },
+        totalMatches: { type: 'number' },
+        returned: { type: 'number' },
+        truncated: { type: 'boolean' },
+        fields: { type: 'object' },
+        records: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: true
+          }
+        }
+      },
+      required: ['limit', 'includeInvisible', 'textLimit', 'htmlLimit', 'totalMatches', 'returned', 'truncated', 'fields', 'records']
     }
   },
   {
@@ -371,8 +466,12 @@ export const CAPTURE_TOOLS: ToolDef[] = [
   {
     name: 'screenshot',
     description:
-      'Capture a PNG of the active tab. Use this to confirm rendering. ' +
-      'opts.fullPage: true captures whole scrollable content.',
+      'LAST-RESORT vision fallback. Capture a PNG of the active tab ONLY for genuinely ' +
+      'vision-only content — canvas, charts, unlabeled image/icon buttons with no accessible ' +
+      'name, or to confirm a page rendered. For "what is this element and where is it" or ' +
+      '"what does the page say", grep_page and read_a11y are MORE precise than a screenshot ' +
+      '(literal node + literal coordinate vs. pixels you must infer) and far cheaper — reach ' +
+      'for them first. opts.fullPage: true captures the whole scrollable content.',
     parameters: {
       type: 'object',
       properties: {
@@ -395,8 +494,9 @@ export const CAPTURE_TOOLS: ToolDef[] = [
   {
     name: 'screenshot_app',
     description:
-      'Capture the full Gladdis app window (chat + browser) as an image. ' +
-      'Use this for complete app state checks.',
+      'Capture the full Gladdis app window (chat + browser) as an image. For checking the ' +
+      'app\'s own rendered state (e.g. confirming UI is not blank during dev work) — this is ' +
+      'app self-inspection, distinct from screenshot which targets web-page content.',
     parameters: { type: 'object', properties: {} },
     outputSchema: {
       type: 'object',

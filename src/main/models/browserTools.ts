@@ -6,21 +6,19 @@ import { AGENT_TOOLS } from './agentTools'
 import type { LlmComplete } from './llm'
 import type { PipelineProgressStep } from '../../../shared/chat'
 import { KeyStore } from './KeyStore'
-import type { CapabilityBroker } from './capabilities/CapabilityBroker'
-import type { AxSnapshotNode } from '../extract/axTree'
+import type { AxSnapshot, AxSnapshotNode } from '../extract/axTree'
 import { axRefStillValid, resolveAxRef, type AxRefStore } from '../extract/axRef'
+import { savePageCapture, type PageStoreConfig, type SavedPage } from '../extract/pageStore'
+import type { PageCapture } from '../../../shared/extraction'
 
 import {
-  runClickXY,
+  runAct,
   runCdpCommand,
   runExecuteInBrowser,
   runNavigate,
-  runPressKey,
-  runTypeText,
   runGrepClick,
   runGrepType
 } from './tools/driveTools'
-import { runReadClipboard, runWriteClipboard } from './tools/clipboardTools'
 import {
   instrumentMemoryTool,
   memoryListHitCount,
@@ -34,29 +32,10 @@ import {
   runSearchFiles,
   runWriteFile
 } from './tools/fsTools'
-import { type ReadPageCacheEntry, type ReadA11yCacheEntry, runGrepPage, runReadA11y, runReadPage, runScreenshot, runScreenshotApp, runWatchNetwork } from './tools/perceiveTools'
-import {
-  runReadSpans,
-  runRepoGrepTask,
-  runRepoOverview,
-  runResearchDossier,
-  runSearchRepo,
-  runVerifyChange
-} from './tools/repoCapabilityTools'
-import {
-  runDeepSearchTool,
-  runFetchPage,
-  runSearchOpenTool,
-  runSearchTool
-} from './tools/searchTools'
+import { type ReadPageCacheEntry, type ReadA11yCacheEntry, runExtractStructured, runGrepPage, runReadA11y, runReadPage, runScreenshot, runScreenshotApp, runWatchNetwork } from './tools/perceiveTools'
+import { runSearchTool } from './tools/searchTools'
 import { runShellCommand } from './tools/shellTools'
-import { runLaunchWebDevServer } from './tools/devServerTool'
-import {
-  runAuditCodebase,
-  runPublishChanges,
-  runValidation
-} from './tools/taskTools'
-import { runRecallHistory, runRequestTools } from './tools/historyTools'
+import { runRecallHistory } from './tools/historyTools'
 import type { ReadPageCacheStats } from './tools/perceiveTools'
 
 export interface ToolDef {
@@ -92,13 +71,6 @@ export interface ToolContext {
   llm?: LlmComplete
   onProgress?: (event: PipelineProgressStep) => void
   /**
-   * Tools the model has pulled in this turn via request_tools, on top of the
-   * lean starting profile. The provider loop rebuilds its tool list from
-   * profile ∪ grantedTools after each step, so a model that needs filesystem
-   * or browser tools asks for them and continues — it never narrates "I can't".
-   */
-  grantedTools?: Set<string>
-  /**
    * Absolute path of the workspace folder for this turn. Required for memory_*
    * tools; ChatService.toolContext() sources it from the user-selected
    * workspace and falls back to process.cwd() only once, centrally. Memory
@@ -126,7 +98,6 @@ export class BrowserTools {
   private static readonly TASK_DONE_LIMIT = 64
   /** Per-scope dedup keys, capped to prevent unbounded growth on long tasks. */
   private static readonly TASK_SCOPE_LIMIT = 200
-  private capabilityBroker: CapabilityBroker | null = null
 
   /** Read-through digest cache for `read_page`. Keyed `${tabId}:${focus}:${viewportOnly}`. */
   private readonly pageCache = new Map<string, ReadPageCacheEntry>()
@@ -153,6 +124,9 @@ export class BrowserTools {
   private readonly axRefByTab = new Map<string, AxRefStore>()
   private static readonly AX_REF_TTL_MS = 120_000
 
+  /** Root dir where navigate writes captured pages (set once at wire-up). */
+  private pageStoreBaseDir: string | null = null
+
   constructor(
     public readonly tabs: TabManager,
     public readonly extractor: PageExtractor,
@@ -164,8 +138,9 @@ export class BrowserTools {
     this.appCapture = fn
   }
 
-  setCapabilityBroker(broker: CapabilityBroker): void {
-    this.capabilityBroker = broker
+  /** Where navigate persists captured pages, e.g. <userData>/gladdis-pages. */
+  setPageStoreBaseDir(dir: string | null): void {
+    this.pageStoreBaseDir = dir
   }
 
   setWorkspaceRoot(root: string | null): void {
@@ -247,13 +222,20 @@ export class BrowserTools {
     return resolveAxRef(store!.nodes, query)
   }
 
-  // Bound dep bundles for each tool module. Recomputed per call only because
-  // a few of them depend on `this.capabilityBroker` which the renderer can
-  // wire up post-construction.
+  // Bound dep bundles for each tool module.
   private driveDeps() {
     return {
       tabs: this.tabs,
-      resolveAxRef: (tabId: string, query: string) => this.resolveAxRef(tabId, query)
+      resolveAxRef: (tabId: string, query: string) => this.resolveAxRef(tabId, query),
+      extractor: this.extractor,
+      // navigate captures the cleaned page and writes it to disk so later reads
+      // are local. Returns null (no save) when no store dir is configured.
+      savePage: this.pageStoreBaseDir
+        ? async (cap: PageCapture, conversationId: string | null | undefined): Promise<SavedPage> => {
+            const config: PageStoreConfig = { baseDir: this.pageStoreBaseDir! }
+            return savePageCapture(cap, conversationId || 'default', config)
+          }
+        : undefined
     }
   }
 
@@ -325,22 +307,6 @@ export class BrowserTools {
     }
   }
 
-  private repoCapabilityDeps() {
-    return {
-      capabilityBroker: this.capabilityBroker,
-      getWorkspaceRoot: () => this.getWorkspaceRoot()
-    }
-  }
-
-  private taskDeps() {
-    return {
-      files: this.files,
-      keys: this.keys,
-      capabilityBroker: this.capabilityBroker,
-      getWorkspaceRoot: () => this.getWorkspaceRoot()
-    }
-  }
-
   private historyDeps() {
     return { chats: this.chats }
   }
@@ -356,6 +322,8 @@ export class BrowserTools {
           return runReadA11y(this.perceiveDeps(), args, ctx.tabId)
         case 'grep_page':
           return runGrepPage(this.perceiveDeps(), args, ctx.tabId)
+        case 'extract_structured':
+          return runExtractStructured(this.perceiveDeps(), args, ctx.tabId)
         case 'watch_network':
           return runWatchNetwork(this.perceiveDeps(), args, ctx.tabId)
         case 'screenshot':
@@ -364,44 +332,16 @@ export class BrowserTools {
           return runScreenshotApp(this.perceiveDeps())
 
         // ── Search ──────────────────────────────────────────────────────────
-        case 'deep_search':
-          return runDeepSearchTool(this.searchDeps(), args, ctx)
         case 'search':
           return runSearchTool(this.searchDeps(), args, ctx)
-        case 'search_open':
-          return runSearchOpenTool(this.searchDeps(), args, ctx)
-        case 'fetch_page':
-          return runFetchPage(this.searchDeps(), args, ctx)
-
-        // ── Repo intelligence (capability broker) ───────────────────────────
-        case 'repo_overview':
-          return runRepoOverview(this.repoCapabilityDeps(), args, ctx)
-        case 'search_repo':
-          return runSearchRepo(this.repoCapabilityDeps(), args, ctx)
-        case 'repo_grep_task':
-          return runRepoGrepTask(this.repoCapabilityDeps(), args, ctx)
-        case 'read_spans':
-          return runReadSpans(this.repoCapabilityDeps(), args, ctx)
-        case 'research_dossier':
-          return runResearchDossier(this.repoCapabilityDeps(), args, ctx)
-        case 'verify_change':
-          return runVerifyChange(this.repoCapabilityDeps(), args, ctx)
-
-        // ── Task ─────────────────────────────────────────────────────────────
-        case 'audit_codebase':
-          return runAuditCodebase(this.taskDeps(), args, ctx)
 
         // ── Drive (CDP) ─────────────────────────────────────────────────────
+        case 'act':
+          return runAct(this.driveDeps(), args, { tabId: ctx.tabId })
         case 'execute_in_browser':
           return runExecuteInBrowser(this.driveDeps(), args, { tabId: ctx.tabId })
         case 'navigate':
-          return runNavigate(this.driveDeps(), args, { tabId: ctx.tabId })
-        case 'click_xy':
-          return runClickXY(this.driveDeps(), args, { tabId: ctx.tabId })
-        case 'press_key':
-          return runPressKey(this.driveDeps(), args, { tabId: ctx.tabId })
-        case 'type_text':
-          return runTypeText(this.driveDeps(), args, { tabId: ctx.tabId })
+          return runNavigate(this.driveDeps(), args, { tabId: ctx.tabId, conversationId: ctx.conversationId })
         case 'cdp_command':
           return runCdpCommand(this.driveDeps(), args, { tabId: ctx.tabId })
         case 'grep_click':
@@ -448,25 +388,11 @@ export class BrowserTools {
         case 'search_files':
           return runSearchFiles(this.fsDeps(), args)
 
-        // ── Clipboard ───────────────────────────────────────────────────────
-        case 'read_clipboard':
-          return runReadClipboard(args)
-        case 'write_clipboard':
-          return runWriteClipboard(args)
-
-        // ── Local validation / shell / publish ──────────────────────────────
-        case 'run_validation':
-          return runValidation(this.taskDeps(), args)
+        // ── Shell ───────────────────────────────────────────────────────────
         case 'run_command':
           return runShellCommand({ files: this.files }, args)
-        case 'launch_web_dev_server':
-          return runLaunchWebDevServer({ files: this.files, tabs: this.tabs }, args)
-        case 'publish_changes':
-          return runPublishChanges(this.taskDeps(), args)
 
-        // ── Tool escalation + memory ────────────────────────────────────────
-        case 'request_tools':
-          return runRequestTools(args, ctx)
+        // ── Memory ──────────────────────────────────────────────────────────
         case 'recall_history': {
           const root = this.resolveMemoryWorkspaceRoot(ctx)
           // recall_history can run without a workspace (it reads ChatStore),

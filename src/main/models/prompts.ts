@@ -87,7 +87,8 @@ const BROWSER_INTERACTION_GUIDANCE =
   'navigate. It is orientation, not targeting.\n' +
   '  • read_a11y → CDP accessibility tree with stable @aN refs + live coordinates. Reach for it on ' +
   'component-heavy UIs whose CSS selectors churn but whose controls have accessible names — buttons, ' +
-  'inputs, tabs, menus. The @aN refs returned go straight into act.\n\n' +
+  'inputs, tabs, menus. The @aN refs returned go straight into act and become invalid when the tab ' +
+  'navigates or the snapshot goes stale.\n\n' +
   'Target (precise, cheap — beats screenshots for "what is X / where is X"):\n' +
   '  • grep_page → SURGICAL, NOT exploratory. Search a distinctive multi-word PHRASE pulled from what ' +
   'the user actually wants — "released on 14 March 2026", "Pro plan $20 per user", "rate limit exceeded" — ' +
@@ -97,6 +98,10 @@ const BROWSER_INTERACTION_GUIDANCE =
   'without a follow-up call. A genuinely rare token (proper noun, error code, identifier) is fine; ' +
   'common words are the trap. Use type "selector" ONLY with a specific CSS selector or XPath; never with ' +
   'bare tag names (a / div / img / script dump the page).\n' +
+  '  • extract_structured → bounded JSON extractor for repeated DOM records. Use it for lists, tables, ' +
+  'cards, comments, and search results once you know the repeated item selector/XPath. Give it one specific ' +
+  'record selector plus a small field map; avoid broad selectors like div. This is the right tool when ' +
+  'you need many same-shaped rows and `grep_page` would take repeated passes or truncate.\n' +
   '  • watch_network → when the answer is data the page fetches from an API (lists, prices, search ' +
   'results, feeds), capture the JSON behind the render instead of scraping HTML.\n\n' +
   'Act — one primary verb:\n' +
@@ -145,7 +150,7 @@ const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: s
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
   { enabled: (names) => names.has('search'), text: BROWSER_OVERVIEW },
-  { enabled: (names) => names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
   { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
   { enabled: (names) => names.has('run_command'), text: SHELL_GUIDANCE },
@@ -176,7 +181,7 @@ function guidanceKey(tools: ToolDef[]): GuidanceBit {
   const names = new Set(tools.map((tool) => tool.name))
   let key = 0
   if (names.has('search')) key |= GUIDANCE_BITS.browserSearch
-  if (names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
+  if (names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
   if (names.has('read_file') || names.has('list_dir') || names.has('search_files')) key |= GUIDANCE_BITS.filesystemRead
   if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
   if (names.has('run_command')) key |= GUIDANCE_BITS.shell

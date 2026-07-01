@@ -21,4 +21,11 @@ describe('embedded prompt tool routing', () => {
     expect(prompt).not.toContain('memory_create_task')
     expect(prompt).not.toContain('`act` is the primary action verb')
   })
+
+  it('teaches extract_structured when that tool is attached', () => {
+    const prompt = buildCodexSystem({ gladdisToolNames: ['extract_structured'] })
+
+    expect(prompt).toContain('Attached Gladdis tools this turn: extract_structured.')
+    expect(prompt).toContain('`extract_structured` is for repeated DOM records')
+  })
 })

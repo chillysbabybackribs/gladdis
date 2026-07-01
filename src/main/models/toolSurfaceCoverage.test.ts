@@ -13,23 +13,17 @@ vi.mock('electron', () => ({
 
 // Every per-domain handler is mocked to an inert ack. This test asserts the
 // DISPATCH wiring (does run() reach a handler for each tool name), not handler
-// behaviour — so we must keep real handlers (navigate, run_command,
-// publish_changes, write_file, dev server, …) from doing any real I/O.
+// behaviour — so we must keep real handlers (navigate, run_command, write_file,
+// …) from doing any real I/O.
 const { ack } = vi.hoisted(() => ({ ack: async () => ({ ok: true, text: 'mocked' }) }))
 
 vi.mock('./tools/driveTools', () => ({
-  runClickXY: vi.fn(ack),
+  runAct: vi.fn(ack),
   runCdpCommand: vi.fn(ack),
   runExecuteInBrowser: vi.fn(ack),
   runNavigate: vi.fn(ack),
-  runPressKey: vi.fn(ack),
-  runTypeText: vi.fn(ack),
   runGrepClick: vi.fn(ack),
   runGrepType: vi.fn(ack)
-}))
-vi.mock('./tools/clipboardTools', () => ({
-  runReadClipboard: vi.fn(ack),
-  runWriteClipboard: vi.fn(ack)
 }))
 vi.mock('./tools/fsTools', () => ({
   runEditFile: vi.fn(ack),
@@ -39,6 +33,7 @@ vi.mock('./tools/fsTools', () => ({
   runWriteFile: vi.fn(ack)
 }))
 vi.mock('./tools/perceiveTools', () => ({
+  runExtractStructured: vi.fn(ack),
   runGrepPage: vi.fn(ack),
   runReadA11y: vi.fn(ack),
   runReadPage: vi.fn(ack),
@@ -46,30 +41,12 @@ vi.mock('./tools/perceiveTools', () => ({
   runScreenshotApp: vi.fn(ack),
   runWatchNetwork: vi.fn(ack)
 }))
-vi.mock('./tools/repoCapabilityTools', () => ({
-  runReadSpans: vi.fn(ack),
-  runRepoGrepTask: vi.fn(ack),
-  runRepoOverview: vi.fn(ack),
-  runResearchDossier: vi.fn(ack),
-  runSearchRepo: vi.fn(ack),
-  runVerifyChange: vi.fn(ack)
-}))
 vi.mock('./tools/searchTools', () => ({
-  runDeepSearchTool: vi.fn(ack),
-  runFetchPage: vi.fn(ack),
-  runSearchOpenTool: vi.fn(ack),
   runSearchTool: vi.fn(ack)
 }))
 vi.mock('./tools/shellTools', () => ({ runShellCommand: vi.fn(ack) }))
-vi.mock('./tools/devServerTool', () => ({ runLaunchWebDevServer: vi.fn(ack) }))
-vi.mock('./tools/taskTools', () => ({
-  runAuditCodebase: vi.fn(ack),
-  runPublishChanges: vi.fn(ack),
-  runValidation: vi.fn(ack)
-}))
 vi.mock('./tools/historyTools', () => ({
-  runRecallHistory: vi.fn(ack),
-  runRequestTools: vi.fn(ack)
+  runRecallHistory: vi.fn(ack)
 }))
 vi.mock('./memory/memoryUsageLog', () => ({
   instrumentMemoryTool: vi.fn(async (_name: string, _meta: unknown, thunk: () => Promise<unknown>) => thunk()),
@@ -86,13 +63,13 @@ vi.mock('./memoryStore', () => ({
 }))
 
 import { BrowserTools } from './browserTools'
-import { AGENT_TOOLS, isKnownToolName, selectAgentToolProfile, toolGroupNames } from './agentTools'
+import { AGENT_TOOLS, isKnownToolName } from './agentTools'
 import { CODEX_BROWSER_TOOL_NAMES } from './codex/dynamicBrowserTools'
 import { CURSOR_MCP_TOOL_NAMES } from './claudeCode/browserTools'
 
-// request_tools is added to every profile via withEscalation rather than living
-// in AGENT_TOOLS, so it must be checked explicitly alongside the registry.
-const DISPATCHABLE_NAMES = [...AGENT_TOOLS.map((tool) => tool.name), 'request_tools']
+// Profiles + request_tools were retired: AGENT_TOOLS is the whole dispatchable
+// surface, offered every turn.
+const DISPATCHABLE_NAMES = AGENT_TOOLS.map((tool) => tool.name)
 
 describe('tool surface coverage', () => {
   it('dispatches every registered tool — no tool resolves to "Unknown tool"', async () => {
@@ -117,30 +94,6 @@ describe('tool surface coverage', () => {
     expect(unknown, `these registered tools have no dispatch arm in BrowserTools.run: ${unknown.join(', ')}`).toEqual([])
   })
 
-  it('keeps every registered tool reachable from a cold start (conversation profile + group escalation)', () => {
-    // The lean cold-start profile when no folder/browser/research intent is detected.
-    const coldStart = new Set(selectAgentToolProfile('hello there').tools.map((tool) => tool.name))
-    const viaGroups = new Set([
-      ...toolGroupNames('filesystem'),
-      ...toolGroupNames('browser'),
-      ...toolGroupNames('research')
-    ])
-
-    const unreachable = DISPATCHABLE_NAMES.filter((name) => !coldStart.has(name) && !viaGroups.has(name))
-    expect(
-      unreachable,
-      `these tools are in no cold-start profile and no requestable group, so a fresh turn can only reach them by guessing the exact name: ${unreachable.join(', ')}`
-    ).toEqual([])
-  })
-
-  it('exposes only real tools through the requestable groups', () => {
-    for (const group of ['filesystem', 'browser', 'research'] as const) {
-      for (const name of toolGroupNames(group)) {
-        expect(isKnownToolName(name), `group "${group}" references unknown tool "${name}"`).toBe(true)
-      }
-    }
-  })
-
   it('keeps the Codex MCP allowlist free of dead tool references', () => {
     for (const name of CODEX_BROWSER_TOOL_NAMES) {
       expect(isKnownToolName(name), `CODEX_BROWSER_TOOL_NAMES references unknown tool "${name}"`).toBe(true)
@@ -156,15 +109,15 @@ describe('tool surface coverage', () => {
   it('keeps the Codex and Cursor/Claude MCP surfaces in parity', () => {
     // Both embedded-CLI runtimes supply their own native FS/shell, so neither
     // surface carries raw filesystem tools — but the Gladdis-native families
-    // (browser, search, repo-intel, memory notebook, recall_history) should be
-    // identical. Divergence here means one runtime is silently missing a
-    // capability its own instruction prose may already promise.
+    // (browser, search, memory notebook, recall_history) should be identical.
+    // Divergence here means one runtime is silently missing a capability its
+    // own instruction prose may already promise.
     const codex = [...CODEX_BROWSER_TOOL_NAMES].sort()
     const cursor = [...CURSOR_MCP_TOOL_NAMES].sort()
     expect(codex).toEqual(cursor)
 
     // And both must exclude raw FS/shell (those belong to the native CLI).
-    const nativeOnly = ['read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_command', 'run_validation', 'publish_changes', 'launch_web_dev_server']
+    const nativeOnly = ['read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_command']
     for (const name of nativeOnly) {
       expect(CODEX_BROWSER_TOOL_NAMES.has(name), `Codex surface should not attach native tool "${name}"`).toBe(false)
       expect(CURSOR_MCP_TOOL_NAMES.has(name), `Cursor surface should not attach native tool "${name}"`).toBe(false)

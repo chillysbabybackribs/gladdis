@@ -22,6 +22,7 @@ export const CODEX_BROWSER_TOOL_NAMES = new Set([
   'read_page',
   'read_a11y',
   'grep_page',
+  'extract_structured',
   'watch_network',
   'screenshot',
   'screenshot_app',
@@ -87,6 +88,7 @@ const CODEX_INTERACTION_TOOL_NAMES = [
   'read_page',
   'read_a11y',
   'grep_page',
+  'extract_structured',
   'watch_network',
   'screenshot',
   'screenshot_app',
@@ -149,6 +151,13 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
       '`grep_page` is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the user actually wants ' +
       '(for example "Pro plan $20 per user" or "released on 14 March 2026"), never a single common word like "price" or "date". ' +
       'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
+    )
+  }
+
+  if (allowed.has('extract_structured')) {
+    lines.push(
+      '`extract_structured` is for repeated DOM records, not exploration: use it for tables, cards, feed items, comments, or search results once you know the repeated row selector. ' +
+      'Pass one specific `item_selector`/`item_xpath` and a small `fields` map. Avoid broad selectors like `div`, and prefer this over many repeated `grep_page` calls when you need multiple same-shaped records.'
     )
   }
 

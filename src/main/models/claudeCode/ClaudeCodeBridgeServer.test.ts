@@ -118,6 +118,7 @@ describe('ClaudeCodeBridgeServer', () => {
         'read_page',
         'read_a11y',
         'grep_page',
+        'extract_structured',
         'watch_network',
         'act',
         'grep_click',
@@ -332,6 +333,7 @@ describe('ClaudeCodeBridgeServer', () => {
     expect(names).toContain('read_page')
     expect(names).toContain('read_a11y')
     expect(names).toContain('grep_page')
+    expect(names).toContain('extract_structured')
     expect(names).toContain('act')
     expect(names).toContain('search')
     expect(names).toContain('memory_read')

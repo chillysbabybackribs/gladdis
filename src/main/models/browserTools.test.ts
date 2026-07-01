@@ -1,9 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdtemp, writeFile } from 'fs/promises'
-import { execFile } from 'child_process'
+import { mkdtemp, writeFile, readFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { promisify } from 'util'
 
 vi.mock('electron', () => ({
   app: { getPath: () => '/tmp/gladdis-vitest' },
@@ -15,236 +13,8 @@ vi.mock('electron', () => ({
 }))
 
 import { BrowserTools } from './browserTools'
-import { CapabilityBroker } from './capabilities/CapabilityBroker'
-import { RepoIntelligenceService } from './capabilities/RepoIntelligenceService'
-
-const execFileAsync = promisify(execFile)
 
 describe('BrowserTools', () => {
-  it('routes repo_overview through the capability broker for workspace summaries', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'gladdis-repo-overview-'))
-    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'repo-tool-test', scripts: { test: 'vitest' } }))
-    await writeFile(join(dir, 'tsconfig.json'), '{}')
-    const emitted: any[] = []
-
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(dir)
-    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), (event) => emitted.push(event)))
-
-    const result = await tools.run(
-      'repo_overview',
-      { focus: 'chat service' },
-      { tabId: 'tab-1', requestId: 'req-1', conversationId: 'conv-1', taskId: 'task-1' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('Package: repo-tool-test')
-    expect(result.text).toContain('Focus: chat service')
-    expect(emitted.map((event) => event.event)).toEqual([
-      'capability_requested',
-      'capability_started',
-      'capability_completed'
-    ])
-  })
-
-  it('routes search_repo through the capability broker and returns workspace hits', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'gladdis-search-repo-tool-'))
-    await writeFile(join(dir, 'SearchThing.ts'), 'export const searchRepoNeedle = true\n')
-
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(dir)
-    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
-
-    const result = await tools.run(
-      'search_repo',
-      { query: 'searchRepoNeedle', glob: '*.ts', max_results: 5 },
-      { tabId: 'tab-1', requestId: 'req-2', conversationId: 'conv-2', taskId: 'task-2' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('Search query: searchRepoNeedle')
-    expect(result.text).toContain('SearchThing.ts:1')
-  })
-
-  it('scopes search_repo to the selected folder path when provided', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'gladdis-search-repo-scope-tool-'))
-    await writeFile(join(dir, 'inside.ts'), 'export const scopedSearchRepoNeedle = true\n')
-    await writeFile(join(dir, 'outside.ts'), 'export const scopedSearchRepoNeedle = true\n')
-    await execFileAsync('mkdir', ['-p', join(dir, 'nested')])
-    await execFileAsync('mv', [join(dir, 'inside.ts'), join(dir, 'nested', 'inside.ts')])
-
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(dir)
-    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
-
-    const result = await tools.run(
-      'search_repo',
-      { query: 'scopedSearchRepoNeedle', path: 'nested', glob: '*.ts', max_results: 5 },
-      { tabId: 'tab-1', requestId: 'req-2b', conversationId: 'conv-2b', taskId: 'task-2b' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('Path: nested')
-    expect(result.text).toContain('nested/inside.ts:1')
-    expect(result.text).not.toContain('outside.ts:1')
-  })
-
-  it('routes repo_grep_task through the capability broker and returns exact sections', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'gladdis-repo-grep-task-tool-'))
-    await writeFile(join(dir, 'TaskTool.ts'), 'export function repoGrepTaskNeedle() {\n  return true\n}\n')
-
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(dir)
-    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
-
-    const result = await tools.run(
-      'repo_grep_task',
-      { task: 'find repoGrepTaskNeedle implementation', glob: '*.ts', max_results: 2 },
-      { tabId: 'tab-1', requestId: 'req-2c', conversationId: 'conv-2c', taskId: 'task-2c' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('Repo grep task: find repoGrepTaskNeedle implementation')
-    expect(result.text).toContain('TaskTool.ts')
-    expect(result.text).toContain('repoGrepTaskNeedle')
-    expect(result.structuredContent?.spans).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        path: 'TaskTool.ts',
-        content: expect.stringContaining('repoGrepTaskNeedle')
-      })
-    ]))
-  })
-
-  it('routes read_spans through the capability broker and returns bounded code windows', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'gladdis-read-spans-tool-'))
-    await writeFile(join(dir, 'example.ts'), ['alpha', 'beta', 'gamma', 'delta'].join('\n'))
-
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(dir)
-    tools.setCapabilityBroker(new CapabilityBroker(new RepoIntelligenceService(), () => {}))
-
-    const result = await tools.run(
-      'read_spans',
-      { path: 'example.ts', start_line: 2, end_line: 3 },
-      { tabId: 'tab-1', requestId: 'req-3', conversationId: 'conv-3', taskId: 'task-3' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('=== example.ts (lines 2-3) ===')
-    expect(result.text).toContain('beta')
-    expect(result.text).toContain('gamma')
-  })
-
-  it('routes research_dossier through the capability broker and returns synthesized guidance', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'gladdis-research-dossier-tool-'))
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(dir)
-    tools.setCapabilityBroker(
-      new CapabilityBroker(
-        {
-          repoOverview: async () => ({
-            summary: 'unused',
-            structuredPayload: {
-              workspaceRoot: dir,
-              packageManager: null,
-              packageName: null,
-              scripts: [],
-              keyFiles: [],
-              topDirectories: [],
-              entryPoints: []
-            }
-          }),
-          searchRepo: async () => ({
-            summary: 'unused',
-            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [], context: { chars: 0, estimatedTokens: 0, hitCount: 0, suggestedSpanCount: 0 } }
-          }),
-          readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
-          researchDossier: async () => ({
-            summary: '## Dossier\nInvestigate `src/main/models/ChatService.ts` first.',
-            structuredPayload: {
-              workspaceRoot: dir,
-              query: 'chat service architecture',
-              searchedFiles: ['src/main/models/ChatService.ts'],
-              suggestedSpans: [],
-              context: {
-                promptChars: 0,
-                estimatedPromptTokens: 0,
-                searchSummaryChars: 0,
-                readSpanChars: 0,
-                estimatedReadSpanTokens: 0,
-                suggestedSpanCount: 0,
-                selectedFileBytes: 0,
-                estimatedFullFileTokens: 0,
-                estimatedTokensSavedBySpans: 0
-              }
-            }
-          })
-        },
-        () => {}
-      )
-    )
-
-    const result = await tools.run(
-      'research_dossier',
-      { query: 'chat service architecture' },
-      { tabId: 'tab-1', requestId: 'req-4', conversationId: 'conv-4', taskId: 'task-4' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('## Dossier')
-    expect(result.text).toContain('ChatService.ts')
-  })
-
-  it('routes verify_change through the capability broker and returns validation output', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'gladdis-verify-change-tool-'))
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(dir)
-    tools.setCapabilityBroker(
-      new CapabilityBroker(
-        {
-          repoOverview: async () => ({
-            summary: 'unused',
-            structuredPayload: {
-              workspaceRoot: dir,
-              packageManager: null,
-              packageName: null,
-              scripts: [],
-              keyFiles: [],
-              topDirectories: [],
-              entryPoints: []
-            }
-          }),
-          searchRepo: async () => ({
-            summary: 'unused',
-            structuredPayload: { workspaceRoot: dir, query: 'unused', totalHits: 0, hits: [], suggestedSpans: [], context: { chars: 0, estimatedTokens: 0, hitCount: 0, suggestedSpanCount: 0 } }
-          }),
-          readSpans: async () => ({ summary: 'unused', structuredPayload: {} }),
-          verifyChange: async () => ({
-            ok: true,
-            status: 'pass',
-            summary: 'typecheck: pass\n(no output)',
-            language: 'node',
-            structuredPayload: {
-              workspaceRoot: dir,
-              language: 'node',
-              checks: [{ check: 'typecheck', ok: true, output: '(no output)' }]
-            }
-          })
-        },
-        () => {}
-      )
-    )
-
-    const result = await tools.run(
-      'verify_change',
-      { check: 'typecheck' },
-      { tabId: 'tab-1', requestId: 'req-5', conversationId: 'conv-5', taskId: 'task-5' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('typecheck: pass')
-  })
-
   it('formats undefined execute_in_browser results without failing the tool call', async () => {
     const tools = new BrowserTools({
       executeJavaScript: vi.fn(async () => ({ success: true, result: undefined })),
@@ -355,7 +125,7 @@ describe('BrowserTools', () => {
 
     expect(result.ok).toBe(true)
     expect(result.text).toContain('showing lines 1-120 of 260; default window')
-    expect(result.text).toContain('Prefer search_repo/search_files or read_spans before reading more.')
+    expect(result.text).toContain('Prefer search_files or a narrower read_file window before reading more.')
     expect(result.text).toContain('"start_line":121')
     expect(result.text).toContain('line 120')
     expect(result.text).not.toContain('line 121')
@@ -586,40 +356,6 @@ describe('BrowserTools', () => {
     expect(pathHitIndex).toBeLessThan(contentHitIndex)
   })
 
-  it('rejects unknown validation checks before running a command', async () => {
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    const result = await tools.run('run_validation', { check: 'rm -rf nope' }, { tabId: 'tab-1' })
-
-    expect(result.ok).toBe(false)
-    expect(result.text).toContain('must be one of typecheck, test, build, or check')
-  })
-
-  it('commits and pushes local changes with publish_changes', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'gladdis-publish-'))
-    const remote = join(base, 'remote.git')
-    const worktree = join(base, 'worktree')
-    await execFileAsync('git', ['init', '--bare', remote])
-    await execFileAsync('git', ['init', '-b', 'main', worktree])
-    await execFileAsync('git', ['config', 'user.email', 'gladdis@example.test'], { cwd: worktree })
-    await execFileAsync('git', ['config', 'user.name', 'Gladdis Test'], { cwd: worktree })
-    await execFileAsync('git', ['remote', 'add', 'origin', remote], { cwd: worktree })
-    await writeFile(join(worktree, 'source.txt'), 'automated publish\n')
-
-    const tools = new BrowserTools({} as any, {} as any, {} as any)
-    tools.setWorkspaceRoot(worktree)
-    const result = await tools.run(
-      'publish_changes',
-      { message: 'Automate GitHub publishing' },
-      { tabId: 'tab-1' }
-    )
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('Published')
-    expect(result.text).toContain('Automate GitHub publishing')
-    expect((await execFileAsync('git', ['status', '--short'], { cwd: worktree })).stdout.trim()).toBe('')
-    expect((await execFileAsync('git', ['--git-dir', remote, 'rev-parse', '--verify', 'main'])).stdout.trim()).toMatch(/[a-f0-9]{40}/)
-  })
-
   it('recalls linked continuation history as a brief overview across fresh chats', async () => {
     const chats = {
       lineage: vi.fn(() => [
@@ -846,6 +582,279 @@ describe('BrowserTools', () => {
     expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Accessibility.getFullAXTree', { frameId: 'main' })
   })
 
+  it('routes read_page through the extractor and returns an orientation digest', async () => {
+    const cap = {
+      url: 'https://example.com/pricing',
+      title: 'Pricing — Example',
+      capturedAt: 0,
+      tookMs: 1,
+      content: { title: 'Pricing — Example', byline: null, text: 'Upgrade to Pro for more.', markdown: '', headings: [], wordCount: 5 },
+      data: { meta: {}, openGraph: {}, jsonLd: [], canonical: null, feeds: [], lang: null },
+      actions: [{ label: 'Upgrade', selector: 'button.upgrade', kind: 'button', rect: { x: 0, y: 0, w: 10, h: 10 }, ref: 'a1' }],
+      dom: { nodeCount: 10, htmlBytes: 100, frameCount: 1 }
+    }
+    const extractor = { run: vi.fn(async () => cap) }
+    const tabs = { getTabUrl: () => 'https://example.com/pricing' }
+    const tools = new BrowserTools(tabs as any, extractor as any, {} as any)
+
+    const result = await tools.run('read_page', { focus: 'upgrade' }, { tabId: 'tab-1' })
+
+    expect(extractor.run).toHaveBeenCalledWith('tab-1')
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.pageUrl).toContain('example.com/pricing')
+    expect(typeof result.structuredContent?.digest).toBe('string')
+    // Cache the result so a second identical read is a hit (cheap-to-repeat contract).
+    const second = await tools.run('read_page', { focus: 'upgrade' }, { tabId: 'tab-1' })
+    expect(second.ok).toBe(true)
+    expect(extractor.run).toHaveBeenCalledTimes(1)
+  })
+
+  // ── act: the fused action verb (target spec §2.2) ────────────────────────
+  // Distinguishes the grep-resolution payload from the after-state probe by
+  // content: grep payloads contain `const query =`, the after-state probe
+  // contains `location.href`.
+  function makeActTabs(opts: {
+    grepMatches?: unknown[]
+    afterUrl?: string
+    afterTitle?: string
+    afterElements?: Array<Record<string, unknown>>
+    beforeUrl?: string
+  } = {}) {
+    const cdp: Array<{ method: string; params?: Record<string, unknown> }> = []
+    const cdpSend = vi.fn(async (_id: string, method: string, params?: Record<string, unknown>) => {
+      cdp.push({ method, params })
+      return {}
+    })
+    const executeJavaScript = vi.fn(async (_id: string, code: string) => {
+      // The navigation-settle probe: `return { u: location.href, r: ... }`.
+      // Report the after-url as already settled so the settle loop exits at once.
+      if (code.includes('return { u: location.href')) {
+        return {
+          success: true,
+          result: { u: opts.afterUrl ?? 'https://example.com/after', r: 'complete' }
+        }
+      }
+      if (code.includes('location.href')) {
+        return {
+          success: true,
+          result: {
+            url: opts.afterUrl ?? 'https://example.com/after',
+            title: opts.afterTitle ?? 'After',
+            readyState: 'complete',
+            bodyTextChars: 1234,
+            activeElement: 'input#email',
+            elements: opts.afterElements ?? [],
+            captured: true
+          }
+        }
+      }
+      if (code.includes('const query =')) {
+        return { success: true, result: opts.grepMatches ?? [] }
+      }
+      return { success: true, result: { ok: true, value: 'v', label: 'l' } }
+    })
+    const tabs = {
+      list: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com' }],
+      getTabUrl: () => opts.beforeUrl ?? 'https://example.com',
+      cdpSend,
+      executeJavaScript,
+      runWithPendingNetworkCapture: async (_id: string, action: () => Promise<unknown> | unknown) => ({
+        value: await action(),
+        network: null
+      })
+    }
+    return { tabs, cdpSend, executeJavaScript, cdp }
+  }
+
+  const VISIBLE_BUTTON = {
+    type: 'selector_match',
+    tagName: 'button',
+    selector: 'button.submit',
+    visible: true,
+    coordinates: { x: 200, y: 300, width: 80, height: 30 },
+    matchedLine: 'Submit'
+  }
+
+  it('act(click) resolves a query target, dispatches a trusted click, and returns fresh after-state', async () => {
+    const { tabs, cdpSend } = makeActTabs({ grepMatches: [VISIBLE_BUTTON], afterUrl: 'https://example.com/done' })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'click', query: 'Submit' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 200, y: 300 }))
+    // C1: fresh post-action state bundled in the same call.
+    expect(result.structuredContent?.after).toMatchObject({ url: 'https://example.com/done', captured: true })
+    expect(result.text).toContain('Now at https://example.com/done')
+  })
+
+  it('act(click) resolves a read_a11y @ref target', async () => {
+    const { tabs } = makeActTabs({ afterUrl: 'https://example.com/ref' })
+    // Drive read_a11y first so the @a1 ref exists. Reuse the cdpSend that serves the AX tree.
+    const cdpSend = vi.fn(async (_id: string, method: string) => {
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main', url: 'https://example.com' }, childFrames: [] } }
+      if (method === 'Accessibility.getFullAXTree') {
+        return { nodes: [{ nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }] }
+      }
+      if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
+      if (method === 'DOM.getBoxModel') return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
+      return {}
+    })
+    ;(tabs as any).cdpSend = cdpSend
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    await tools.run('read_a11y', {}, { tabId: 'tab-1' })
+    const result = await tools.run('act', { kind: 'click', ref: '@a1' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.match).toMatchObject({ ref: '@a1', name: 'Sign in' })
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 140, y: 220 }))
+  })
+
+  it('act(type) focuses the resolved target and inserts text', async () => {
+    const { tabs, cdpSend } = makeActTabs({ grepMatches: [{ ...VISIBLE_BUTTON, tagName: 'input', selector: 'input#email' }] })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'type', query: 'Email', text: 'hi@example.com' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.insertText', { text: 'hi@example.com' })
+    expect(result.structuredContent).toMatchObject({ kind: 'type', text: 'hi@example.com' })
+    expect(result.structuredContent?.after).toMatchObject({ captured: true })
+  })
+
+  it('act(key) dispatches a key event with no element target', async () => {
+    const { tabs, cdpSend } = makeActTabs({})
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'key', key: 'Enter' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchKeyEvent', expect.objectContaining({ type: 'keyDown', key: 'Enter' }))
+    expect(result.structuredContent).toMatchObject({ kind: 'key', key: 'Enter' })
+  })
+
+  it('act(select) chooses an option on the resolved <select>', async () => {
+    const { tabs } = makeActTabs({ grepMatches: [{ ...VISIBLE_BUTTON, tagName: 'select', selector: 'select#country' }] })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'select', query: 'Country', option: 'Canada' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent).toMatchObject({ kind: 'select', option: 'Canada' })
+  })
+
+  it('act fails with a re-orient hint when the query target does not resolve (C6: no act-on-a-guess)', async () => {
+    const { tabs, cdpSend } = makeActTabs({ grepMatches: [] })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'click', query: 'Nonexistent' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('no visible element matched')
+    expect(result.text).toMatch(/re-orient|read_a11y|grep_page/)
+    // It must NOT have clicked anything.
+    expect(cdpSend).not.toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.anything())
+  })
+
+  it('act(click) bundles the new page targets when the action navigates (C1 enrichment)', async () => {
+    // before-url (getTabUrl) differs from the after-state url → navigation.
+    const { tabs } = makeActTabs({
+      grepMatches: [VISIBLE_BUTTON],
+      beforeUrl: 'https://news.example.com/',
+      afterUrl: 'https://news.example.com/item?id=42',
+      afterElements: [
+        { tag: 'a', role: null, label: '436 comments', x: 120, y: 80 },
+        { tag: 'a', role: null, label: 'reply', x: 200, y: 300 }
+      ]
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'click', query: 'Top story' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.after).toMatchObject({ navigated: true })
+    // The model gets the new page's targets in the same call — no re-read needed.
+    const after = result.structuredContent?.after as { elements: Array<{ label: string }> }
+    expect(after.elements.map((e) => e.label)).toContain('436 comments')
+    expect(result.text).toContain('Page changed — top targets')
+    expect(result.text).toContain('436 comments')
+  })
+
+  it('act(click) drops the element digest on a same-page action (stays cheap)', async () => {
+    // before-url === after-url → no navigation → no element list shipped.
+    const { tabs } = makeActTabs({
+      grepMatches: [VISIBLE_BUTTON],
+      beforeUrl: 'https://example.com/form',
+      afterUrl: 'https://example.com/form',
+      afterElements: [{ tag: 'button', role: null, label: 'Submit', x: 200, y: 300 }]
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'click', query: 'Submit' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.structuredContent?.after).toMatchObject({ navigated: false })
+    expect(result.structuredContent?.after).not.toHaveProperty('elements')
+    expect(result.text).not.toContain('Page changed')
+  })
+
+  it('navigate builds a DOM-order wireframe from the extractor and saves the page to disk', async () => {
+    const tabs = {
+      getTabUrl: () => 'https://news.example.com/',
+      navigate: vi.fn(async () => {}),
+      takeArmedNetworkCapture: () => null,
+      async executeJavaScript(_id: string, code: string) {
+        if (code.includes('location.href')) {
+          return { success: true, result: { u: 'https://news.example.com/', r: 'complete', n: 5000 } }
+        }
+        return { success: true, result: null }
+      },
+      runWithPendingNetworkCapture: async (_id: string, action: () => Promise<unknown> | unknown) => ({ value: await action(), network: null })
+    }
+    // The extractor returns a cleaned PageCapture in DOCUMENT ORDER: top story
+    // first (with its comments link), then repeated boilerplate, then footer.
+    const extractor = {
+      run: vi.fn(async () => ({
+        url: 'https://news.example.com/',
+        title: 'Hacker News',
+        capturedAt: 1,
+        tookMs: 1,
+        content: { title: 'Hacker News', byline: null, text: 'body', markdown: '# HN\nbody', headings: [{ level: 1, text: 'HN' }], wordCount: 2 },
+        data: { meta: {}, openGraph: {}, jsonLd: [], canonical: null, feeds: [], lang: null },
+        actions: [
+          { idx: 1, role: 'link', name: 'Claude Sonnet 5', tag: 'a', value: 'https://anthropic.com', selector: 's1', rect: { x: 0, y: 0, w: 10, h: 10 }, inViewport: true },
+          { idx: 2, role: 'link', name: '482 comments', tag: 'a', value: 'item?id=1', selector: 's2', rect: { x: 0, y: 10, w: 10, h: 10 }, inViewport: true },
+          ...Array.from({ length: 6 }, (_, k) => ({ idx: k + 3, role: 'link', name: `${k + 1} hours ago`, tag: 'a', value: `t${k}`, selector: `s${k + 3}`, rect: { x: 0, y: 20 + k * 10, w: 10, h: 10 }, inViewport: true })),
+          { idx: 9, role: 'link', name: 'Guidelines', tag: 'a', value: 'guidelines', selector: 's9', rect: { x: 0, y: 90, w: 10, h: 10 }, inViewport: true }
+        ],
+        dom: { nodeCount: 10, htmlBytes: 100, frameCount: 1 }
+      }))
+    }
+    const base = await mkdtemp(join(tmpdir(), 'gladdis-nav-pages-'))
+    const tools = new BrowserTools(tabs as any, extractor as any, {} as any)
+    tools.setPageStoreBaseDir(base)
+
+    const result = await tools.run('navigate', { url: 'https://news.example.com/' }, { tabId: 'tab-1', conversationId: 'conv-nav' })
+
+    expect(result.ok).toBe(true)
+    expect(extractor.run).toHaveBeenCalledWith('tab-1')
+    // Brief.
+    expect(result.structuredContent).toMatchObject({ url: 'https://news.example.com/', readyState: 'complete', redirected: false })
+    // Wireframe in DOCUMENT ORDER: top story first, comments link next, repeats collapse, footer last.
+    const wireframe = result.structuredContent?.wireframe as { lines: Array<any> }
+    expect(wireframe.lines[0]).toMatchObject({ kind: 'action', name: 'Claude Sonnet 5', href: 'https://anthropic.com' })
+    expect(wireframe.lines[1]).toMatchObject({ kind: 'action', name: '482 comments' })
+    expect(wireframe.lines[2]).toMatchObject({ kind: 'group', count: 6 })
+    expect(wireframe.lines[3]).toMatchObject({ kind: 'action', name: 'Guidelines' })
+    expect(result.text).toContain('document order')
+    // The whole page was saved to disk; the paths are returned.
+    expect(typeof result.structuredContent?.savedMarkdownPath).toBe('string')
+    const md = await readFile(result.structuredContent!.savedMarkdownPath as string, 'utf8')
+    expect(md).toContain('# Hacker News')
+    expect(result.text).toContain('Saved full page:')
+  })
+
   it('routes grep_click through read_a11y refs', async () => {
     const cdpSend = vi.fn(async (_tabId: string, method: string, params?: Record<string, unknown>) => {
       if (method.startsWith('Input.')) return {}
@@ -883,49 +892,6 @@ describe('BrowserTools', () => {
 
     await tools.run('read_a11y', {}, { tabId: 'tab-1' })
     const result = await tools.run('grep_click', { query: '@a1' }, { tabId: 'tab-1' })
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('@a1')
-    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 140, y: 220 }))
-  })
-
-  it('routes click_xy through read_a11y refs', async () => {
-    const cdpSend = vi.fn(async (_tabId: string, method: string) => {
-      if (method.startsWith('Input.')) return {}
-      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.enable' || method === 'DOM.disable') {
-        return {}
-      }
-      if (method === 'Page.getFrameTree') {
-        return { frameTree: { frame: { id: 'main', url: 'https://example.com' }, childFrames: [] } }
-      }
-      if (method === 'Accessibility.getFullAXTree') {
-        return {
-          nodes: [
-            { nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }
-          ]
-        }
-      }
-      if (method === 'Page.getLayoutMetrics') {
-        return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
-      }
-      if (method === 'DOM.getBoxModel') {
-        return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
-      }
-      return {}
-    })
-    const tabs = {
-      list: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com' }],
-      getTabUrl: () => 'https://example.com',
-      cdpSend,
-      runWithPendingNetworkCapture: async (_id: string, action: () => Promise<unknown> | unknown) => ({
-        value: await action(),
-        network: null
-      })
-    }
-    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
-
-    await tools.run('read_a11y', {}, { tabId: 'tab-1' })
-    const result = await tools.run('click_xy', { ref: '@a1' }, { tabId: 'tab-1' })
 
     expect(result.ok).toBe(true)
     expect(result.text).toContain('@a1')
@@ -1057,6 +1023,69 @@ describe('BrowserTools', () => {
     expect(result.text).not.toContain('Broad query')
     expect(result.text).not.toContain('SAMPLE')
     expect(result.structuredContent).toMatchObject({ totalMatches: 1, truncated: false })
+  })
+
+  it('extracts repeated structured records from the live page', async () => {
+    const executeJavaScript = vi.fn(async () => ({
+      success: true,
+      result: {
+        records: [
+          { author: 'alice', summary: 'First comment', link: '/item?id=1' },
+          { author: 'bob', summary: 'Second comment', link: '/item?id=2' }
+        ],
+        totalMatches: 3
+      }
+    }))
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'extract_structured',
+      {
+        item_selector: 'tr.athing.comtr',
+        fields: {
+          author: { selector: '.hnuser', mode: 'text' },
+          summary: { selector: '.commtext', mode: 'text' },
+          link: { selector: '.age a', mode: 'attr', attr: 'href' }
+        },
+        limit: 2
+      },
+      { tabId: 'tab-1' }
+    )
+
+    expect(executeJavaScript).toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Structured extraction completed')
+    expect(result.text).toContain('alice')
+    expect(result.structuredContent).toMatchObject({
+      itemSelector: 'tr.athing.comtr',
+      totalMatches: 3,
+      returned: 2,
+      truncated: true,
+      records: [
+        { author: 'alice', summary: 'First comment', link: '/item?id=1' },
+        { author: 'bob', summary: 'Second comment', link: '/item?id=2' }
+      ]
+    })
+  })
+
+  it('validates extract_structured attr fields before executing page JS', async () => {
+    const executeJavaScript = vi.fn()
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    const result = await tools.run(
+      'extract_structured',
+      {
+        item_selector: '.story',
+        fields: {
+          href: { selector: 'a', mode: 'attr' }
+        }
+      },
+      { tabId: 'tab-1' }
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('mode "attr" must include a non-empty attr')
+    expect(executeJavaScript).not.toHaveBeenCalled()
   })
 
   it('routes grep_click through the capability broker and triggers click events on coordinates of the best match', async () => {

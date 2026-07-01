@@ -40,7 +40,7 @@ export interface PerceiveToolsDeps {
   a11yCache: Map<string, ReadA11yCacheEntry>
   a11yCacheLimit: number
   a11yCacheTtlMs: number
-  /** Latest read_a11y snapshot per tab for @aN ref resolution in grep_click/grep_type/click_xy. */
+  /** Latest read_a11y snapshot per tab for @aN ref resolution in action tools. */
   setAxRefStore: (tabId: string, entry: ReadA11yCacheEntry) => void
   appCapture: (() => Promise<string>) | null
   getPageCacheStats: () => ReadPageCacheStats
@@ -381,10 +381,11 @@ export async function executeGrepInTab(
       const elements = document.querySelectorAll('p, span, a, button, h1, h2, h3, h4, h5, h6, li, td, th, label, div, input, textarea');
       let bestEl = null;
       let bestDepth = -1;
+      const wantWs = normalizeWs(textStr);
 
       for (let i = 0; i < elements.length; i++) {
         const el = elements[i];
-        if (el.innerText && el.innerText.includes(textStr) && isElementVisible(el)) {
+        if (el.innerText && normalizeWs(el.innerText).includes(wantWs) && isElementVisible(el)) {
           let depth = 0;
           let parent = el.parentNode;
           while (parent) {
@@ -417,6 +418,15 @@ export async function executeGrepInTab(
       return (start > 0 ? '…' : '') + str.slice(start, end) + (end < str.length ? '…' : '');
     }
 
+    // Collapse every run of whitespace (incl. non-breaking space \\u00a0, which
+    // HN/Wikipedia use between a count and its label like "436\\u00a0comments")
+    // to a single regular space. Applied to BOTH the page text and a literal
+    // query so "436 comments" matches "436\\u00a0comments" instead of silently
+    // missing — the most common real-page text-match failure.
+    function normalizeWs(s) {
+      return (s || '').replace(/[\\s\\u00a0]+/g, ' ');
+    }
+
     function findTextMatches(pattern, isRegex, caseSensitive, contextLines) {
       const results = [];
       const text = document.body ? (document.body.innerText || "") : "";
@@ -428,17 +438,19 @@ export async function executeGrepInTab(
         try {
           regex = new RegExp(pattern, caseSensitive ? 'g' : 'gi');
         } catch (e) {
-          const escaped = pattern.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
+          const escaped = normalizeWs(pattern).replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
           regex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
         }
       } else {
-        const escaped = pattern.replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&');
+        // Literal query: whitespace-normalize the needle and match it against the
+        // whitespace-normalized line, so spacing/nbsp differences never miss.
+        const escaped = normalizeWs(pattern).replace(/[-\\/\\\\^$*+?.()|[\\]{}]/g, '\\\\$&').replace(/ /g, '\\\\s+');
         regex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
       }
 
       lines.forEach((line, index) => {
         regex.lastIndex = 0;
-        if (regex.test(line)) {
+        if (regex.test(normalizeWs(line))) {
           matchedIndices.push(index);
         }
       });
@@ -647,6 +659,262 @@ export async function runGrepPage(
     }
   } catch (err: any) {
     return { ok: false, text: `grep_page error: ${err.message}` }
+  }
+}
+
+type StructuredFieldMode = 'text' | 'attr' | 'html' | 'exists'
+
+interface StructuredFieldSpec {
+  selector?: string
+  xpath?: string
+  scope?: 'item' | 'page'
+  mode?: StructuredFieldMode
+  attr?: string
+}
+
+function isStructuredFieldSpec(value: unknown): value is StructuredFieldSpec {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validateStructuredFieldSpec(name: string, value: unknown): string | null {
+  if (!isStructuredFieldSpec(value)) {
+    return `extract_structured: field "${name}" must be an object.`
+  }
+  if (value.selector !== undefined && typeof value.selector !== 'string') {
+    return `extract_structured: field "${name}".selector must be a string.`
+  }
+  if (value.xpath !== undefined && typeof value.xpath !== 'string') {
+    return `extract_structured: field "${name}".xpath must be a string.`
+  }
+  if (value.selector && value.xpath) {
+    return `extract_structured: field "${name}" cannot set both selector and xpath.`
+  }
+  if (value.scope !== undefined && value.scope !== 'item' && value.scope !== 'page') {
+    return `extract_structured: field "${name}".scope must be "item" or "page".`
+  }
+  const mode = value.mode ?? 'text'
+  if (mode !== 'text' && mode !== 'attr' && mode !== 'html' && mode !== 'exists') {
+    return `extract_structured: field "${name}".mode must be "text", "attr", "html", or "exists".`
+  }
+  if (mode === 'attr' && (typeof value.attr !== 'string' || !value.attr.trim())) {
+    return `extract_structured: field "${name}" with mode "attr" must include a non-empty attr.`
+  }
+  if (value.attr !== undefined && typeof value.attr !== 'string') {
+    return `extract_structured: field "${name}".attr must be a string.`
+  }
+  return null
+}
+
+async function executeStructuredExtractInTab(
+  tabs: TabManager,
+  tabId: string,
+  args: {
+    itemSelector?: string
+    itemXpath?: string
+    fields: Record<string, StructuredFieldSpec>
+    limit: number
+    includeInvisible: boolean
+    textLimit: number
+    htmlLimit: number
+  }
+): Promise<
+  | { success: true; result: { records: Array<Record<string, unknown>>; totalMatches: number } }
+  | { success: false; error: string }
+> {
+  const jsPayload = `
+    const args = ${JSON.stringify(args)};
+    const norm = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim();
+    const clamp = (value, n) => {
+      const s = String(value ?? '');
+      return s.length > n ? s.slice(0, n) + '…' : s;
+    };
+    const isVisible = (el) => {
+      if (!(el instanceof Element)) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return false;
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') !== 0;
+    };
+    const xpathAll = (root, xpath) => {
+      const doc = root && root.ownerDocument ? root.ownerDocument : document;
+      const out = [];
+      const snap = doc.evaluate(
+        xpath,
+        root || doc,
+        null,
+        XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+        null
+      );
+      for (let i = 0; i < snap.snapshotLength; i += 1) {
+        const node = snap.snapshotItem(i);
+        if (node) out.push(node);
+      }
+      return out;
+    };
+    const xpathFirst = (root, xpath) => {
+      const doc = root && root.ownerDocument ? root.ownerDocument : document;
+      const result = doc.evaluate(
+        xpath,
+        root || doc,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null
+      );
+      return result.singleNodeValue;
+    };
+    const resolveMany = () => {
+      if (args.itemSelector) return Array.from(document.querySelectorAll(args.itemSelector));
+      return xpathAll(document, args.itemXpath || '');
+    };
+    const resolveOne = (root, spec) => {
+      const scopeRoot = spec.scope === 'page' ? document : root;
+      if (spec.selector) return scopeRoot.querySelector(spec.selector);
+      if (spec.xpath) return xpathFirst(scopeRoot, spec.xpath);
+      return scopeRoot;
+    };
+    const readValue = (root, spec) => {
+      const target = resolveOne(root, spec);
+      const mode = spec.mode || 'text';
+      if (mode === 'exists') return Boolean(target);
+      if (!target) return null;
+      if (mode === 'attr') {
+        if (target instanceof Element) {
+          const attrName = spec.attr || '';
+          if (attrName in target && typeof target[attrName] !== 'function') {
+            const prop = target[attrName];
+            return prop == null ? null : clamp(prop, args.textLimit);
+          }
+          const attrValue = target.getAttribute(attrName);
+          return attrValue == null ? null : clamp(attrValue, args.textLimit);
+        }
+        return null;
+      }
+      if (mode === 'html') {
+        return target instanceof Element
+          ? clamp(target.outerHTML || '', args.htmlLimit)
+          : clamp(target.textContent || '', args.htmlLimit);
+      }
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+        return clamp(norm(target.value || target.textContent || ''), args.textLimit);
+      }
+      return clamp(norm(target.textContent || ''), args.textLimit);
+    };
+    const matches = resolveMany().filter((node) => node instanceof Element);
+    const filtered = args.includeInvisible ? matches : matches.filter((node) => isVisible(node));
+    const records = [];
+    for (const node of filtered.slice(0, args.limit)) {
+      const record = {};
+      for (const [name, spec] of Object.entries(args.fields)) {
+        record[name] = readValue(node, spec);
+      }
+      records.push(record);
+    }
+    return { records, totalMatches: filtered.length };
+  `
+
+  const runResult = await tabs.executeJavaScript(tabId, jsPayload)
+  if (!runResult.success) {
+    return { success: false, error: runResult.error }
+  }
+  const payload = runResult.result as { records?: Array<Record<string, unknown>>; totalMatches?: number } | undefined
+  return {
+    success: true,
+    result: {
+      records: Array.isArray(payload?.records) ? payload!.records : [],
+      totalMatches: typeof payload?.totalMatches === 'number' ? payload.totalMatches : 0
+    }
+  }
+}
+
+export async function runExtractStructured(
+  deps: PerceiveToolsDeps,
+  args: Record<string, any>,
+  tabId: string
+): Promise<ToolOutcome> {
+  const itemSelector = typeof args.item_selector === 'string' && args.item_selector.trim()
+    ? args.item_selector.trim()
+    : undefined
+  const itemXpath = typeof args.item_xpath === 'string' && args.item_xpath.trim()
+    ? args.item_xpath.trim()
+    : undefined
+  if (!itemSelector && !itemXpath) {
+    return { ok: false, text: 'extract_structured: provide item_selector or item_xpath.' }
+  }
+  if (itemSelector && itemXpath) {
+    return { ok: false, text: 'extract_structured: pass only one of item_selector or item_xpath.' }
+  }
+
+  const rawFields = args.fields
+  if (!rawFields || typeof rawFields !== 'object' || Array.isArray(rawFields)) {
+    return { ok: false, text: 'extract_structured: fields must be an object mapping field names to extraction specs.' }
+  }
+  const fieldEntries = Object.entries(rawFields)
+  if (fieldEntries.length === 0) {
+    return { ok: false, text: 'extract_structured: fields must define at least one field.' }
+  }
+  if (fieldEntries.length > 12) {
+    return { ok: false, text: 'extract_structured: keep fields small and purpose-built (max 12 fields).' }
+  }
+
+  const fields: Record<string, StructuredFieldSpec> = {}
+  for (const [name, spec] of fieldEntries) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      return { ok: false, text: `extract_structured: invalid field name "${name}". Use simple identifier-style names.` }
+    }
+    const error = validateStructuredFieldSpec(name, spec)
+    if (error) return { ok: false, text: error }
+    fields[name] = spec as StructuredFieldSpec
+  }
+
+  const limitInput = typeof args.limit === 'number' ? args.limit : Number(args.limit)
+  const limit = Number.isFinite(limitInput) ? Math.max(1, Math.min(100, Math.floor(limitInput))) : 20
+  const textLimitInput = typeof args.text_limit === 'number' ? args.text_limit : Number(args.text_limit)
+  const textLimit = Number.isFinite(textLimitInput) ? Math.max(40, Math.min(4000, Math.floor(textLimitInput))) : 500
+  const htmlLimitInput = typeof args.html_limit === 'number' ? args.html_limit : Number(args.html_limit)
+  const htmlLimit = Number.isFinite(htmlLimitInput) ? Math.max(100, Math.min(12000, Math.floor(htmlLimitInput))) : 2000
+  const includeInvisible = args.include_invisible === true
+
+  try {
+    const runResult = await executeStructuredExtractInTab(deps.tabs, tabId, {
+      itemSelector,
+      itemXpath,
+      fields,
+      limit,
+      includeInvisible,
+      textLimit,
+      htmlLimit
+    })
+    if (!runResult.success) {
+      return { ok: false, text: `extract_structured: failed to execute in page: ${runResult.error}` }
+    }
+
+    const { records, totalMatches } = runResult.result
+    const truncated = totalMatches > records.length
+    const selectorLabel = itemSelector ? `selector "${itemSelector}"` : `XPath "${itemXpath}"`
+    const text =
+      `Structured extraction completed for ${selectorLabel}. Returned ${records.length} record(s)` +
+      `${truncated ? ` of ${totalMatches}` : ''}.\n\n` +
+      JSON.stringify(records, null, 2)
+
+    return {
+      ok: true,
+      text,
+      structuredContent: {
+        itemSelector,
+        itemXpath,
+        limit,
+        includeInvisible,
+        textLimit,
+        htmlLimit,
+        totalMatches,
+        returned: records.length,
+        truncated,
+        fields,
+        records
+      }
+    }
+  } catch (err: any) {
+    return { ok: false, text: `extract_structured error: ${err?.message ?? err}` }
   }
 }
 

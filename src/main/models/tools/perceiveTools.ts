@@ -308,7 +308,7 @@ export async function runScreenshotApp(deps: PerceiveToolsDeps): Promise<ToolOut
 }
 
 export interface GrepMatch {
-  type: 'text_match' | 'selector_match' | 'error'
+  type: 'text_match' | 'text_lead' | 'selector_match' | 'error'
   message?: string
   matchedLine?: string
   lineIndex?: number
@@ -319,6 +319,8 @@ export interface GrepMatch {
   tagName?: string | null
   outerHTML?: string
   innerText?: string
+  leadScore?: number
+  overlapTerms?: string[]
 }
 
 export async function executeGrepInTab(
@@ -328,7 +330,7 @@ export async function executeGrepInTab(
   type: 'text' | 'regex' | 'selector' = 'text',
   caseSensitive: boolean = false,
   contextLines: number = 2
-): Promise<{ success: boolean; result?: any[]; totalMatches?: number; error?: string }> {
+): Promise<{ success: boolean; result?: any[]; totalMatches?: number; qualifiedLeads?: any[]; error?: string }> {
   const jsPayload = `
     const query = ${JSON.stringify(query)};
     const type = ${JSON.stringify(type)};
@@ -432,6 +434,108 @@ export async function executeGrepInTab(
     // missing — the most common real-page text-match failure.
     function normalizeWs(s) {
       return (s || '').replace(/[\\s\\u00a0]+/g, ' ');
+    }
+
+    function tokenizeText(s) {
+      const cleaned = normalizeWs(String(s || ''))
+        .toLowerCase()
+        .replace(/(\\d),(\\d)/g, '$1$2');
+      return cleaned.match(/[a-z0-9]+(?:\\.[0-9]+)?/g) || [];
+    }
+
+    function canonicalizeToken(token) {
+      const t = String(token || '').toLowerCase();
+      if (!t) return '';
+      if (/^\\d+(?:\\.\\d+)?$/.test(t)) return t;
+      const synonyms = {
+        height: 'height',
+        tall: 'height',
+        taller: 'height',
+        metre: 'metre',
+        metres: 'metre',
+        meter: 'metre',
+        meters: 'metre',
+        foot: 'foot',
+        feet: 'foot',
+        ft: 'foot',
+        complete: 'complete',
+        completed: 'complete',
+        completion: 'complete',
+        finish: 'complete',
+        finished: 'complete',
+        year: 'year',
+        years: 'year',
+        design: 'design',
+        designed: 'design',
+        designer: 'design'
+      };
+      return synonyms[t] || t;
+    }
+
+    function isInformativeToken(token) {
+      return /^\\d/.test(token) || token.length >= 3;
+    }
+
+    function queryTokenProfile(pattern) {
+      const stopwords = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'about', 'have', 'what', 'when', 'where']);
+      return Array.from(new Set(
+        tokenizeText(pattern)
+          .map(canonicalizeToken)
+          .filter((token) => token && isInformativeToken(token) && !stopwords.has(token))
+      ));
+    }
+
+    function findQualifiedTextLeads(pattern, contextLines) {
+      const text = document.body ? (document.body.innerText || "") : "";
+      const lines = text.split('\\n');
+      const queryTokens = queryTokenProfile(pattern);
+      if (queryTokens.length < 2) return [];
+
+      const unitTokens = new Set(['metre', 'foot', 'year']);
+      const leads = [];
+
+      lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        const lineTokens = Array.from(new Set(
+          tokenizeText(trimmed)
+            .map(canonicalizeToken)
+            .filter((token) => token && isInformativeToken(token))
+        ));
+        const overlapTerms = queryTokens.filter((token) => lineTokens.includes(token));
+        if (overlapTerms.length < 2) return;
+
+        const nonUnitOverlap = overlapTerms.filter((token) => !unitTokens.has(token) && !/^\\d/.test(token));
+        const score = overlapTerms.length / queryTokens.length;
+        if (score < 0.5 && nonUnitOverlap.length === 0) return;
+
+        const startLine = Math.max(0, index - contextLines);
+        const endLine = Math.min(lines.length - 1, index + contextLines);
+        const context = lines.slice(startLine, endLine + 1).join('\\n');
+        const element = findBestElementForText(trimmed);
+        const coords = element ? getElementCoords(element) : null;
+        const selector = element ? getCssSelector(element) : null;
+        const isVisible = element ? isElementVisible(element) : false;
+
+        leads.push({
+          type: 'text_lead',
+          matchedLine: trimmed,
+          lineIndex: index + 1,
+          context,
+          selector,
+          coordinates: coords,
+          visible: isVisible,
+          tagName: element ? element.tagName.toLowerCase() : null,
+          leadScore: Number(score.toFixed(3)),
+          overlapTerms
+        });
+      });
+
+      leads.sort((a, b) => {
+        if ((b.leadScore || 0) !== (a.leadScore || 0)) return (b.leadScore || 0) - (a.leadScore || 0);
+        return (a.lineIndex || 0) - (b.lineIndex || 0);
+      });
+      return leads.slice(0, 5);
     }
 
     function findTextMatches(pattern, isRegex, caseSensitive, contextLines) {
@@ -541,20 +645,24 @@ export async function executeGrepInTab(
     }
 
     const combined = [...selectorResults, ...textResults];
+    const qualifiedLeads = type === 'text' && combined.length === 0
+      ? findQualifiedTextLeads(query, contextLines)
+      : [];
     // Return the pre-slice total so the caller can honestly report truncation
     // instead of a flat 50 that hides "there were far more".
-    return { matches: combined.slice(0, 50), totalMatches: combined.length };
+    return { matches: combined.slice(0, 50), totalMatches: combined.length, qualifiedLeads };
   `;
 
   const runResult = await tabs.executeJavaScript(tabId, jsPayload)
   if (!runResult.success) {
     return { success: false, error: runResult.error }
   }
-  const payload = runResult.result as { matches?: any[]; totalMatches?: number } | any[]
+  const payload = runResult.result as { matches?: any[]; totalMatches?: number; qualifiedLeads?: any[] } | any[]
   // Tolerate both the new {matches,totalMatches} shape and a bare array.
   const matches = Array.isArray(payload) ? payload : (payload?.matches ?? [])
   const totalMatches = Array.isArray(payload) ? payload.length : (payload?.totalMatches ?? matches.length)
-  return { success: true, result: matches, totalMatches }
+  const qualifiedLeads = Array.isArray(payload) ? [] : (payload?.qualifiedLeads ?? [])
+  return { success: true, result: matches, totalMatches, qualifiedLeads }
 }
 
 export async function runGrepPage(
@@ -581,8 +689,47 @@ export async function runGrepPage(
     }
 
     const matches = runResult.result as any[]
+    const qualifiedLeads = Array.isArray(runResult.qualifiedLeads) ? runResult.qualifiedLeads : []
     const totalMatches = runResult.totalMatches ?? (Array.isArray(matches) ? matches.length : 0)
     if (!Array.isArray(matches) || matches.length === 0) {
+      if (type === 'text' && qualifiedLeads.length > 0) {
+        let output = `No exact matches found for query "${query}" on the page, but ${qualifiedLeads.length} qualified lead(s) were found nearby:\n\n`
+        qualifiedLeads.forEach((m, idx) => {
+          output += `--- Lead #${idx + 1} (${m.type}) ---\n`
+          output += `Matched Line (Line ${m.lineIndex}): "${m.matchedLine}"\n`
+          if (Array.isArray(m.overlapTerms) && m.overlapTerms.length > 0) {
+            output += `Overlapping terms: ${m.overlapTerms.join(', ')}\n`
+          }
+          if (typeof m.leadScore === 'number') {
+            output += `Lead score: ${m.leadScore}\n`
+          }
+          if (m.tagName) {
+            output += `Associated Tag: <${m.tagName}>\n`
+          }
+          if (m.selector) {
+            output += `Associated CSS Selector: ${m.selector}\n`
+          }
+          if (m.coordinates) {
+            output += `Coordinates (center x,y): (${m.coordinates.x}, ${m.coordinates.y})\n`
+          }
+          output += `Context (grep -C ${contextLines}):\n\`\`\`\n${m.context}\n\`\`\`\n\n`
+        })
+
+        return {
+          ok: true,
+          text: output.trim(),
+          structuredContent: {
+            query,
+            type,
+            caseSensitive,
+            contextLines,
+            matches: [],
+            qualifiedLeads: qualifiedLeads.filter((lead) => lead && typeof lead === 'object'),
+            totalMatches: 0,
+            truncated: false
+          }
+        }
+      }
       return {
         ok: true,
         text: `No matches found for query "${query}" on the page.`,
@@ -592,6 +739,7 @@ export async function runGrepPage(
           caseSensitive,
           contextLines,
           matches: [],
+          qualifiedLeads: [],
           totalMatches: 0,
           truncated: false
         }
@@ -660,6 +808,7 @@ export async function runGrepPage(
         caseSensitive,
         contextLines,
         matches: matches.filter((match) => match && typeof match === 'object'),
+        qualifiedLeads: [],
         totalMatches,
         truncated
       }

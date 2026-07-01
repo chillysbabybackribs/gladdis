@@ -966,6 +966,48 @@ describe('BrowserTools', () => {
     expect(jsPayload).toContain('const type = "text";')
   })
 
+  it('surfaces qualified leads when no exact text match exists', async () => {
+    const executeJavaScript = vi.fn(async () => ({
+      success: true,
+      result: {
+        matches: [],
+        totalMatches: 0,
+        qualifiedLeads: [
+          {
+            type: 'text_lead',
+            matchedLine: 'The tower is 330 metres (1,083 ft) tall.',
+            lineIndex: 17,
+            context: 'The tower is 330 metres (1,083 ft) tall.',
+            selector: 'p:nth-of-type(3)',
+            coordinates: { x: 120, y: 240 },
+            visible: true,
+            tagName: 'p',
+            leadScore: 0.667,
+            overlapTerms: ['height', 'metre']
+          }
+        ]
+      }
+    }))
+    const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)
+
+    const result = await tools.run('grep_page', { query: 'Height 300 meters', type: 'text' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('No exact matches found')
+    expect(result.text).toContain('qualified lead')
+    expect(result.text).toContain('Overlapping terms: height, metre')
+    expect(result.structuredContent).toMatchObject({
+      totalMatches: 0,
+      matches: [],
+      qualifiedLeads: [
+        expect.objectContaining({
+          type: 'text_lead',
+          overlapTerms: ['height', 'metre']
+        })
+      ]
+    })
+  })
+
   it('rejects unclear grep_page search modes', async () => {
     const executeJavaScript = vi.fn()
     const tools = new BrowserTools({ executeJavaScript } as any, {} as any, {} as any)

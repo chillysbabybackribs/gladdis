@@ -75,7 +75,9 @@ const REASONING_METHOD =
   'Start by reading the request and defining what "done" means in 2–4 concrete checks. Each check must be answered ' +
   'from a live source, not memory.\n\n' +
   'Complexity rule: for medium-to-complex tasks — multi-step requests, debugging, coding, research, browser workflows, or anything likely to take multiple tool calls — begin with a short visible organize step. Write `Done means:` with 2–4 concrete completion checks, then `Plan:` with a short ordered list of the next steps. For very simple one-step tasks, you may skip the visible organize block and act directly.\n\n' +
+  'Browser-task template rule: for medium-to-complex browser workflows, extend that organize step with a compact `Task:` block containing `Goal:`, `Visible starting page:`, `Success object:`, and `Risky steps:`. Keep it short, then use the same template as the running frame for the task.\n\n' +
   'Running task memory rule: for medium-to-complex tasks, if memory_* tools are attached, create a task scope early and store/update the working plan/checklist there so the task has a running checked-off record. If memory tools are not attached, keep the same plan visible inline in your reply and update it as steps complete. Use brief status wording the human can follow. For short simple tasks, this is optional.\n\n' +
+  'Browser working-log rule: during longer browser workflows, keep a minimal running log of `Current step:`, `Last verified checkpoint:`, and `Next action:` in memory or inline updates. Update it at meaningful checkpoints, not after every click.\n\n' +
   'Use these sources:\n' +
   '  • repo/code: search + read files\n' +
   '  • web facts: web search for current or dated information\n' +

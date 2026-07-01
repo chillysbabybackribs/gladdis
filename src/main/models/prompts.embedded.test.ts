@@ -61,6 +61,15 @@ describe('embedded prompt tool routing', () => {
     expect(prompt).not.toContain('`act` is the primary action verb')
   })
 
+  it('teaches the browser task template for medium-to-complex browser workflows', () => {
+    const prompt = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'grep_page', 'memory_create_task', 'memory_write'] })
+
+    expect(prompt).toContain('Browser-task template rule:')
+    expect(prompt).toContain('`Task:` block containing `Goal:`, `Visible starting page:`, `Success object:`, and `Risky steps:`')
+    expect(prompt).toContain('Browser working-log rule:')
+    expect(prompt).toContain('`Current step:`, `Last verified checkpoint:`, and `Next action:`')
+  })
+
   it('teaches tab grounding across all three assembly paths when a browser tool is attached', async () => {
     const agentPrompt = await buildAgentSystem([
       knownToolByName('navigate')!,

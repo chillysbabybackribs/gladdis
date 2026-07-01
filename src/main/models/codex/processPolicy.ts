@@ -127,3 +127,16 @@ export function buildBrowserProcessContract(args: {
 
   return sections.join('\n\n')
 }
+
+export const DIRECT_API_LOCAL_WORK_CONTRACT =
+  '## Direct API local-work contract\n' +
+  'This direct API turn does local repo, file, edit, validation, and shell work through Gladdis tools. ' +
+  'Use them as your primary local environment for this turn.\n\n' +
+  'For codebase inspection, stay surgical: use search_files to locate the exact area before any raw reads, then ' +
+  'read_file with explicit start_line/end_line windows. Avoid full:true unless the file is small, config-like, or ' +
+  'the user explicitly asked for the whole file.\n\n' +
+  'For local work, prefer the narrowest tool that matches the job: search_files/read_file for inspection, edit_file for exact patches, ' +
+  'write_file only when creating or fully replacing a file, and verify_change or run_validation for validation when available. Treat ' +
+  'run_command as a fallback for explicit shell tasks like git/package/install/dev-server work, not as the default path for checks or ' +
+  'codebase reading. Keep Gladdis browser tools first-class for web search and page work inside the visible Chromium tab; do not treat ' +
+  'shell/browser commands as substitutes for web tasks.'

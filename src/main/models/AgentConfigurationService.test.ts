@@ -122,6 +122,22 @@ describe('AgentConfigurationService', () => {
     expect(system).toContain('Keep Gladdis browser tools first-class for web search')
   })
 
+  it('adds the same direct-API local-work guidance to the turn system prompt for Grok', async () => {
+    const { service } = makeConfigService('/home/user/project')
+    const req = { messages: [{ role: 'user', content: 'inspect the repo and fix the UI' }] } as any
+    const system = await service.buildTurnAgentSystem(
+      req,
+      (await service.agentToolProfile(req, 'grok')).tools,
+      'grok'
+    )
+
+    expect(system).toContain('## Direct API local-work contract')
+    expect(system).toContain('use search_files to locate the exact area before any raw reads')
+    expect(system).toContain('read_file with explicit start_line/end_line windows')
+    expect(system).toContain('Avoid full:true unless the file is small')
+    expect(system).toContain('Keep Gladdis browser tools first-class for web search')
+  })
+
   it('adds same-tool calibration guidance to the turn system prompt', async () => {
     const { service } = makeConfigService('/home/user/project')
     const req = { messages: [{ role: 'user', content: 'inspect the page controls and then patch the code' }] } as any

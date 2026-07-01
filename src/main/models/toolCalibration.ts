@@ -127,7 +127,7 @@ export function buildToolCalibrationBlock(args: {
     lines.push('- Before leaving a page you may need later, preserve the current evidence shape now: save the page or extract the exact records you will compare against.')
     lines.push('- For the next browser subtask, name the evidence shape you need: single fact, control target, repeated flat records, hierarchical records, or API-backed data.')
     lines.push('- If read_a11y is noisy or incomplete, retry read_a11y first with a better focus, viewportOnly, or interactiveOnly setting to get the right slice.')
-    lines.push('- If grep_page misses, keep grep_page and try 2-3 sharper phrase variations or a precise selector/XPath before abandoning it.')
+    lines.push('- If grep_page misses, keep grep_page and try 2-3 sharper subject-based phrase variations, not the whole prompt and not a one-word probe, or use a precise selector/XPath before abandoning it.')
     lines.push('- If extract_structured is wrong, tighten the item selector/XPath, field selectors, or scope before switching tools.')
     lines.push('- If discover_data_sources says the page is server-rendered, stay in DOM/a11y tools; if it surfaces strong JSON/GraphQL candidates, prefer those before broad scraping.')
     lines.push('- If act misses its target, refresh the page state with read_a11y or a phrased grep_page, then retry act with a fresh ref/query.')

@@ -1042,7 +1042,7 @@ describe('BrowserTools', () => {
     expect(result.ok).toBe(true)
     // The banner names the bad query shape and tells the model what to do instead.
     expect(result.text).toContain('Broad query')
-    expect(result.text).toContain('full sentence or a distinctive phrase')
+    expect(result.text).toContain("Extract the subject from the user's request")
     expect(result.text).toContain('137')
     // Machine-readable signal is present too.
     expect(result.structuredContent).toMatchObject({ totalMatches: 137, truncated: true })

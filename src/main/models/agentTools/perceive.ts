@@ -129,14 +129,15 @@ export const PERCEIVE_TOOLS: ToolDef[] = [
       '"find/locate X on this page" and for answering "what does the page say about X", ' +
       'especially on long, text-heavy pages. ' +
       'Use type "text" or "regex" when you want page words and surrounding context. ' +
-      'Search a full sentence or a distinctive phrase taken from what the user ' +
-      'actually wants to know (type "text"/"regex") — NOT a single common word. A bare ' +
-      'keyword like "Germany" or "price" floods with dozens of noise hits and answers ' +
-      'nothing; a phrase like "Germany surrendered on 8 May 1945" lands the exact passage. ' +
-      'Run a few phrasing variations that pertain to the need. Each match returns the ' +
-      'surrounding section, so the answer comes back without reading the rest. (A distinctive ' +
-      'single word — a rare proper noun, error code, or identifier — is fine; it is common ' +
-      'words that are the problem.) ' +
+      'Extract the specific subject from the user request and search that subject with 1-3 ' +
+      'tight multi-word phrase variations (type "text"/"regex"), not the entire prompt and ' +
+      'not a single common word. A bare keyword like "Germany" or "price" floods with dozens ' +
+      'of noise hits and answers nothing; a phrase like "Germany surrendered on 8 May 1945" ' +
+      'lands the exact passage. The wording does not need to match exactly: if the same terms ' +
+      'appear very close together or clearly in the same section, review that returned section ' +
+      'for the answer. Each match returns the surrounding section, so the answer comes back ' +
+      'without reading the rest. (A distinctive single word — a rare proper noun, error code, ' +
+      'or identifier — is fine; it is common words that are the problem.) ' +
       'Use type "selector" only for a specific CSS selector or XPath when you are targeting ' +
       'a known DOM element to inspect or act on. ' +
       'AVOID broad tag selectors like "a", "div", "img", "script" — every match returns full ' +

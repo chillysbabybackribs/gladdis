@@ -5,7 +5,7 @@ function makeConfigService(workspaceRoot: string | null = null) {
   const tools = {
     getWorkspaceRoot: () => workspaceRoot,
     tabs: { liveTabId: vi.fn((id?: string | null) => id ?? 'tab-1') },
-    calibrationBlock: vi.fn(() => '## Tool calibration\nCalibrate the current tool before switching to another one.\nIf read_a11y is noisy or incomplete, retry read_a11y first.\nIf grep_page misses, keep grep_page and try 2-3 sharper phrase variations.')
+    calibrationBlock: vi.fn(() => '## Tool calibration\nCalibrate the current tool before switching to another one.\nIf read_a11y is noisy or incomplete, retry read_a11y first.\nIf grep_page misses, keep grep_page and try 2-3 sharper subject-based phrase variations, not the whole prompt and not a one-word probe.')
   } as any
   const repoIntelligence = {} as any
   const emit = vi.fn()
@@ -133,6 +133,6 @@ describe('AgentConfigurationService', () => {
     expect(system).toContain('## Tool calibration')
     expect(system).toContain('Calibrate the current tool before switching to another one')
     expect(system).toContain('If read_a11y is noisy or incomplete, retry read_a11y first')
-    expect(system).toContain('If grep_page misses, keep grep_page and try 2-3 sharper phrase variations')
+    expect(system).toContain('If grep_page misses, keep grep_page and try 2-3 sharper subject-based phrase variations')
   })
 })

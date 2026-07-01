@@ -150,9 +150,9 @@ export function buildCodexBrowserInstructions(allowedToolNames?: Iterable<string
 
   if (allowed.has('grep_page')) {
     lines.push(
-      '`grep_page` is SURGICAL, not exploratory: query a distinctive multi-word phrase pulled from what the user actually wants ' +
-      '(for example "Pro plan $20 per user" or "released on 14 March 2026"), never a single common word like "price" or "date". ' +
-      'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
+      '`grep_page` is SURGICAL, not exploratory: extract the subject from the user request and query 1–3 tight multi-word phrase variations ' +
+      '(for example "Pro plan $20 per user" or "released on 14 March 2026"), never the whole prompt and never a single common word like "price" or "date". ' +
+      'If the first phrasing misses, run 2–3 variations of the same meaning rather than broadening. The wording does not need to match exactly; if the same terms appear close together or clearly in the same section, inspect that section. Use type "selector" only with a specific CSS selector or XPath; never with bare tag names.'
     )
   }
 

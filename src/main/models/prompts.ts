@@ -90,12 +90,14 @@ const BROWSER_INTERACTION_GUIDANCE =
   'inputs, tabs, menus. The @aN refs returned go straight into act and become invalid when the tab ' +
   'navigates or the snapshot goes stale.\n\n' +
   'Target (precise, cheap — beats screenshots for "what is X / where is X"):\n' +
-  '  • grep_page → SURGICAL, NOT exploratory. Search a distinctive multi-word PHRASE pulled from what ' +
-  'the user actually wants — "released on 14 March 2026", "Pro plan $20 per user", "rate limit exceeded" — ' +
-  'never a single common word like "price" / "date" / "Germany" (those flood with dozens of noise hits ' +
-  'and answer nothing). If the first phrasing misses, run 2–3 variations of the same meaning instead of ' +
-  'broadening to a single word. Each match returns surrounding context, so the answer is read in-place ' +
-  'without a follow-up call. A genuinely rare token (proper noun, error code, identifier) is fine; ' +
+  '  • grep_page → SURGICAL, NOT exploratory. Extract the subject from the user request and search with ' +
+  '1–3 tight multi-word PHRASE variations like "released on 14 March 2026", "Pro plan $20 per user", ' +
+  'or "rate limit exceeded" — never the whole prompt, and never a single common word like "price" / ' +
+  '"date" / "Germany" (those flood with dozens of noise hits and answer nothing). If the first phrasing ' +
+  'misses, run 2–3 variations of the same meaning instead of broadening to a single word. The wording ' +
+  'does not need to match exactly: if the same terms appear close together or clearly in the same ' +
+  'section, inspect that returned section. Each match returns surrounding context, so the answer is read ' +
+  'in-place without a follow-up call. A genuinely rare token (proper noun, error code, identifier) is fine; ' +
   'common words are the trap. Use type "selector" ONLY with a specific CSS selector or XPath; never with ' +
   'bare tag names (a / div / img / script dump the page).\n' +
   '  • extract_structured → bounded JSON extractor for repeated DOM records. Use it for lists, tables, ' +

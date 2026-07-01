@@ -760,8 +760,8 @@ export async function runGrepPage(
     if (floodedOnSingleWord) {
       banner =
         `⚠ Broad query: the single word "${query.trim()}" matched ${totalMatches}${truncated ? '+ (truncated to ' + matches.length + ')' : ''} places — ` +
-        `this is too broad to answer a question. Re-grep with a full sentence or a distinctive phrase from what the user is actually looking for, ` +
-        `and run a few variations.\n\n`
+        `this is too broad to answer a question. Extract the subject from the user's request and re-grep with 1-3 tight multi-word phrase variations, ` +
+        `not the whole prompt. If the same terms appear close together or in the same section, review that returned section.\n\n`
     } else if (truncated) {
       banner =
         `⚠ ${totalMatches} matches found, showing first ${matches.length} — results are a SAMPLE, not all of them. Narrow the query for full coverage.\n\n`

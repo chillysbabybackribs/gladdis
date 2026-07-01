@@ -18,6 +18,7 @@ describe('embedded prompt tool routing', () => {
     expect(prompt).toContain('Attached Gladdis tools this turn: grep_page, search.')
     expect(prompt).toContain('Use `search` for live web lookup')
     expect(prompt).toContain('`grep_page` is SURGICAL, not exploratory')
+    expect(prompt).toContain('stop and deliver the result')
     expect(prompt).not.toContain('memory_create_task')
     expect(prompt).not.toContain('`act` is the primary action verb')
   })

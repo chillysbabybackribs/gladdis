@@ -27,6 +27,7 @@ const ABOUT_GLADDIS =
 /** How to behave + the operating constraints that are not obvious from a schema. */
 const AGENT_GUIDANCE_BASE =
   'If asked to do work, use tools to execute it; stop only when the underlying goal is actually met. ' +
+  'Once the task is confirmed complete, stop there: give the final answer and do not continue searching, validating, or expanding scope unless a remaining done check failed or the user asked for more. ' +
   'For ambiguous requests, gather one quick fact from code/page/search before deciding intent. You have the ' +
   'smallest routed tool surface needed for this turn — browser, files, shell, search, and memory are attached only when needed — so act, do not pause ' +
   'to explain an inability to act. While working, ' +
@@ -285,6 +286,8 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
     'tools for repo, file, and shell work. The desktop user has passwordless sudo, so install whatever ' +
     'a task needs yourself — language packages, repos, or system packages via `sudo apt-get install ' +
     '-y` — instead of reporting a tool as missing.\n\n' +
+    'When your done checks are satisfied and validation has passed, stop and deliver the result. Do not ' +
+    'keep exploring or run extra work after confirmed completion unless the user asks for it.\n\n' +
     'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
     'call recall_history, summarize the relevant saved chat context, and stop for the next concrete ' +
     'instruction. Do not edit files, run validations, navigate pages, or continue old work from a bare ' +
@@ -332,6 +335,7 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
     'unrestricted. Do not stop for Claude permission or approval workflows, and do not ask the user to manually ' +
     'run local commands just to bypass a Claude-side restriction unless a command actually fails.\n\n' +
     'Use the actual workspace on disk, verify before asserting, and complete the task end-to-end when feasible. ' +
+    'Once the requested task is confirmed complete, stop and deliver the result instead of continuing by default. ' +
     'Before changing anything, search/read the relevant files and run the build/tests so edits land on the real ' +
     'codebase, not assumptions. Install missing local packages or tools directly when needed.\n\n' +
     'Resume process: when the user only asks to resume, pick up, or find where the prior chat left off, ' +
@@ -377,7 +381,8 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   const core =
     `${ABOUT_GLADDIS}\n\n` +
     'This turn runs through a logged-in local Cursor Agent CLI session. Use the actual workspace on disk, ' +
-    'verify before asserting, and complete the task end-to-end when feasible.'
+    'verify before asserting, and complete the task end-to-end when feasible. Once the requested task is ' +
+    'confirmed complete, stop and deliver the result instead of continuing by default.'
 
   let result: string
   if (browserToolNames.size === 0) {
@@ -385,7 +390,8 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
       core +
       '\n\nUse Cursor native local repo, file, shell, and validation abilities for code work. ' +
       'After editing files, run the narrowest relevant local verification command before claiming success. ' +
-      'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context and keep going until you pass validation or can clearly explain the blocker.'
+      'If Gladdis feeds back a failed post-action verification result, treat that as actionable repair context and keep going until you pass validation or can clearly explain the blocker. ' +
+      'After validation passes and the task is complete, stop rather than continuing to explore.'
   } else {
     result =
       core +

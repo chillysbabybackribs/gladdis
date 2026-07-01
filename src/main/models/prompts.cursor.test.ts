@@ -9,6 +9,7 @@ describe('buildCursorSystem', () => {
     expect(prompt).toContain('Use Cursor native local repo, file, shell, and validation abilities')
     expect(prompt).toContain('run the narrowest relevant local verification command')
     expect(prompt).toContain('failed post-action verification result')
+    expect(prompt).toContain('confirmed complete, stop and deliver the result')
   })
 
   it('includes browser MCP instructions when the bridge is enabled', () => {
@@ -26,6 +27,8 @@ describe('buildCursorSystem', () => {
         'read_page',
         'read_a11y',
         'grep_page',
+        'extract_structured',
+        'discover_data_sources',
         'watch_network',
         'screenshot',
         'screenshot_app',
@@ -93,6 +96,7 @@ describe('CURSOR_BROWSER_INSTRUCTIONS', () => {
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('validation abilities')
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('run the narrowest relevant local verification command')
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('failed post-action verification result')
+    expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('stop and deliver the result instead of continuing by default')
     expect(CURSOR_BROWSER_INSTRUCTIONS).toContain('read_a11y')
   })
 })

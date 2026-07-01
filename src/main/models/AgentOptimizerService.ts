@@ -131,6 +131,7 @@ export class AgentOptimizerService {
       '- Treat exact paths, component names, commands, schemas, domains, APIs, and acceptance checks as valuable context when they are known.',
       '- Keep the agent general enough for the intended task family; do not hard-code a single file workflow unless the goal truly requires it.',
       '- Prefer precise action policy over motivational prose.',
+      '- Ensure the saved prompt tells the model to stop after confirmed task completion instead of continuing by default.',
       '- Preserve user intent. Do not invent repository files, APIs, product facts, or requirements.',
       `- Optimize mode: ${optimizationMode}. ${deepNote}`,
       'Schema checks:',

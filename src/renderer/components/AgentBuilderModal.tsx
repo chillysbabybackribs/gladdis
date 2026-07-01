@@ -62,6 +62,7 @@ function buildLocalDraft(goal: string, workspaceFolder: string | null): string {
     '- Ask for or gather missing context only when it is necessary to complete the task safely.',
     '- Keep changes and recommendations scoped to the user goal.',
     '- Validate the result with the most relevant available check before finishing.',
+    '- Once the task is confirmed complete, stop and report the result instead of continuing by default.',
     workspaceFolder ? `- Treat the active workspace as: ${workspaceFolder}` : '- If no workspace is selected, operate as a portable expert for this task family.',
     '',
     'Output contract:',

@@ -2,19 +2,156 @@ import type { ToolDef } from '../browserTools'
 
 /**
  * DRIVE tools — browser actions.
- * `act` is the companion action verb (resolve a target + act + return fresh
- * state in one call). It works best after navigate/grep_page/read_a11y have
- * already oriented the model to the right control. Use execute_in_browser /
- * cdp_command only when a direct act is not suitable. grep_click / grep_type
- * remain as the legacy split verbs.
+ * Higher-level browser verbs come first: set_field / submit / open_result.
+ * `act` remains the companion low-level action verb (resolve a target + act +
+ * return fresh state in one call) when the semantic verbs do not fit. Use
+ * execute_in_browser / cdp_command only when a direct interaction tool is not
+ * suitable. grep_click / grep_type remain as the legacy split verbs.
  */
 export const DRIVE_TOOLS: ToolDef[] = [
+  {
+    name: 'set_field',
+    description:
+      'Set the value of an input, textarea, select, or contenteditable field in one semantic step, then return the page\'s fresh state. ' +
+      'Use this instead of raw typing when the goal is "fill this field". Target by (preferred) a read_a11y @ref, or a `query` ' +
+      '(text/CSS/XPath resolved live on the page), or explicit `coords` {x,y}. Pass `value` to set. ' +
+      'By default it replaces the current value; set `clear:false` to append instead. For selects it chooses the matching option label/value. ' +
+      'The returned `after` field reports the new url/title/readyState/focus so you can confirm the field was set without a separate read.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'read_a11y ref like @a1 (preferred target).' },
+        query: {
+          type: 'string',
+          description: 'Text, CSS selector, or XPath to resolve the target live. Used when no ref.'
+        },
+        type: {
+          type: 'string',
+          enum: ['text', 'regex', 'selector'],
+          description: 'How to interpret `query`. Defaults to "text".'
+        },
+        caseSensitive: { type: 'boolean', description: 'Case sensitivity for text/regex query. Default false.' },
+        coords: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          description: 'Explicit viewport coordinates (last-resort target).'
+        },
+        value: { type: 'string', description: 'The value to set on the resolved field.' },
+        clear: { type: 'boolean', description: 'Replace the existing value first (default true). Set false to append.' }
+      },
+      required: ['value']
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        value: { type: 'string' },
+        clear: { type: 'boolean' },
+        mode: { type: 'string' },
+        coordinates: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y']
+        },
+        match: { type: 'object' },
+        after: { type: 'object' }
+      },
+      required: ['value', 'clear', 'mode', 'coordinates', 'match', 'after']
+    }
+  },
+  {
+    name: 'submit',
+    description:
+      'Submit the current form or activate a targeted submit control, then return the page\'s fresh state. ' +
+      'Use this when the user intent is "submit/search/send/save" rather than "click this exact thing". ' +
+      'With no target it tries the nearest form around the current focus first, then falls back to Enter. ' +
+      'You may also target a specific submit button via read_a11y @ref, `query`, or `coords`.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'read_a11y ref like @a1.' },
+        query: {
+          type: 'string',
+          description: 'Text, CSS selector, or XPath to resolve a specific submit control.'
+        },
+        type: {
+          type: 'string',
+          enum: ['text', 'regex', 'selector'],
+          description: 'How to interpret `query`. Defaults to "text".'
+        },
+        caseSensitive: { type: 'boolean', description: 'Case sensitivity for text/regex query. Default false.' },
+        coords: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          description: 'Explicit viewport coordinates (last-resort target).'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string' },
+        label: { type: 'string' },
+        coordinates: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y']
+        },
+        match: { type: 'object' },
+        after: { type: 'object' }
+      },
+      required: ['after']
+    }
+  },
+  {
+    name: 'open_result',
+    description:
+      'Open a matching result, card, headline, or list item from the current page, then return the page\'s fresh state. ' +
+      'Use this for "open the first result" or "open the third matching story" instead of manually clicking. ' +
+      'Pass a `query` plus optional `index` (1-based, default 1). You may also target by read_a11y @ref or `coords` when there is only one result to open.',
+    parameters: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'read_a11y ref like @a1.' },
+        query: {
+          type: 'string',
+          description: 'Text, CSS selector, or XPath to resolve the result to open.'
+        },
+        type: {
+          type: 'string',
+          enum: ['text', 'regex', 'selector'],
+          description: 'How to interpret `query`. Defaults to "text".'
+        },
+        caseSensitive: { type: 'boolean', description: 'Case sensitivity for text/regex query. Default false.' },
+        index: { type: 'number', description: '1-based match index when multiple visible results match. Defaults to 1.' },
+        coords: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          description: 'Explicit viewport coordinates (last-resort target).'
+        }
+      }
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        index: { type: 'number' },
+        coordinates: {
+          type: 'object',
+          properties: { x: { type: 'number' }, y: { type: 'number' } },
+          required: ['x', 'y']
+        },
+        match: { type: 'object' },
+        after: { type: 'object' }
+      },
+      required: ['coordinates', 'match', 'after']
+    }
+  },
   {
     name: 'act',
     description:
       'Do one browser action on the visible tab AND get the page\'s fresh state back ' +
       'in the same call — no separate read needed afterwards. Use it as a companion ' +
-      'to navigate/grep_page/read_a11y, not as your first orientation tool. ' +
+      'to navigate/grep_page/read_a11y, and prefer `set_field`, `submit`, or `open_result` when those semantic verbs fit better. ' +
       'kind: "click" | "type" | "key" | "select". ' +
       'Target an element by (preferred) a read_a11y @ref, or a `query` (text/CSS/XPath ' +
       'resolved live on the page), or explicit `coords` {x,y}. For kind "type" pass `text`; ' +

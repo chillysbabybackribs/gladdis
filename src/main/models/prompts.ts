@@ -71,7 +71,7 @@ const BROWSER_OVERVIEW =
   '  • navigate → load a known URL in the visible tab. The result already includes a clustered page ' +
   'map in document order, so on many pages you can decide the next step without a separate read.\n\n' +
   'For targeting on a page that is already loaded, use grep_page (distinctive multi-word phrases, ' +
-  'not single common words) or read_a11y (control discovery via @aN refs), then act. After an act, ' +
+  'not single common words) or read_a11y (control discovery via @aN refs), then prefer semantic verbs like set_field / submit / open_result before dropping to act. After an action, ' +
   'use the returned `after` field instead of re-reading. Prefer finishing the user goal over literal ' +
   'wording; ask one clarifying option if still ambiguous.'
 
@@ -114,9 +114,12 @@ const BROWSER_INTERACTION_GUIDANCE =
   '  • Before leaving a page you may need later, preserve it now: save the page or extract the exact records you will compare against.\n' +
   '  • For each subtask, identify the evidence shape you need: one fact, one control, repeated flat records, hierarchical records, or API-backed data.\n' +
   '  • After each meaningful read/action, grade the result: right entity, right structure, enough coverage. If not, recalibrate the same tool once before switching surfaces.\n\n' +
-  'Act — companion interaction layer, after orientation/targeting:\n' +
+  'Act — semantic verbs first, low-level companion actions second:\n' +
+  '  • set_field → set an input / textarea / select / contenteditable value in one semantic step. Use it instead of raw typing when the goal is "fill this field". Pass `value`; by default it replaces the current value and fires the normal DOM events.\n' +
+  '  • submit → submit the current focused form or a targeted submit control. Use it for search / send / save intent instead of a generic click or Enter when possible.\n' +
+  '  • open_result → open the first or Nth matching result / card / headline from the current page and return fresh after-state. Use it for "open the first result" instead of manually clicking.\n' +
   '  • act → click | type | key | select. Use it after navigate/grep_page/read_a11y have identified the right control. Target by (preferred) a read_a11y @ref, or a `query` ' +
-  '(text / CSS / XPath resolved live), or explicit coords {x,y}. For type pass `text`; for key pass `key` ' +
+  '(text / CSS / XPath resolved live), or explicit coords {x,y}. Prefer the semantic verbs above when they fit; use `act` as the lower-level escape hatch. For type pass `text`; for key pass `key` ' +
   '(Enter / Tab / Escape / Arrow*) with no target; for select pass `option`. `type` inserts the provided text in one shot rather than manually keying each letter. To load a URL use navigate() — ' +
   'never pass a URL as an act query (act targets on-page elements, not link addresses).\n' +
   '  • READ the act result before the next move — IT IS THE POST-ACTION READ. The text channel ends ' +
@@ -160,7 +163,7 @@ const GUIDANCE_BLOCKS: Array<{ enabled: (names: Set<string>) => boolean; text: s
   { enabled: () => true, text: REASONING_METHOD },
   { enabled: () => true, text: AGENT_GUIDANCE_BASE },
   { enabled: (names) => names.has('search'), text: BROWSER_OVERVIEW },
-  { enabled: (names) => names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
+  { enabled: (names) => names.has('act') || names.has('set_field') || names.has('submit') || names.has('open_result') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command'), text: BROWSER_INTERACTION_GUIDANCE },
   { enabled: (names) => names.has('read_file') || names.has('list_dir') || names.has('search_files'), text: FILESYSTEM_OVERVIEW },
   { enabled: (names) => names.has('write_file') || names.has('edit_file'), text: FILESYSTEM_EDITING },
   { enabled: (names) => names.has('run_command'), text: SHELL_GUIDANCE },
@@ -191,7 +194,7 @@ function guidanceKey(tools: ToolDef[]): GuidanceBit {
   const names = new Set(tools.map((tool) => tool.name))
   let key = 0
   if (names.has('search')) key |= GUIDANCE_BITS.browserSearch
-  if (names.has('act') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
+  if (names.has('act') || names.has('set_field') || names.has('submit') || names.has('open_result') || names.has('read_page') || names.has('read_a11y') || names.has('grep_page') || names.has('extract_structured') || names.has('discover_data_sources') || names.has('grep_click') || names.has('grep_type') || names.has('watch_network') || names.has('navigate') || names.has('execute_in_browser') || names.has('cdp_command')) key |= GUIDANCE_BITS.browserInteract
   if (names.has('read_file') || names.has('list_dir') || names.has('search_files')) key |= GUIDANCE_BITS.filesystemRead
   if (names.has('write_file') || names.has('edit_file')) key |= GUIDANCE_BITS.filesystemWrite
   if (names.has('run_command')) key |= GUIDANCE_BITS.shell
@@ -312,7 +315,7 @@ export function buildCodexSystem(options: { gladdisToolNames?: Iterable<string> 
   return result
 }
 
-export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CODEX_SYSTEM = buildCodexSystem({ gladdisToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Claude Code turns run through the local Claude CLI, preserving Claude's
@@ -361,7 +364,7 @@ export function buildClaudeCodeSystem(options: { browserToolNames?: Iterable<str
   return result
 }
 
-export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CLAUDE_CODE_SYSTEM = buildClaudeCodeSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
 
 /**
  * Cursor turns run through the local Cursor Agent CLI. Keep this lean: Cursor
@@ -408,4 +411,4 @@ export function buildCursorSystem(options: { browserToolNames?: Iterable<string>
   return result
 }
 
-export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })
+export const CURSOR_SYSTEM = buildCursorSystem({ browserToolNames: ['search', 'navigate', 'read_page', 'read_a11y', 'grep_page', 'extract_structured', 'discover_data_sources', 'watch_network', 'screenshot', 'screenshot_app', 'set_field', 'submit', 'open_result', 'act', 'grep_click', 'grep_type', 'execute_in_browser', 'cdp_command', 'recall_history', 'memory_write', 'memory_read', 'memory_list', 'memory_forget', 'memory_create_task'] })

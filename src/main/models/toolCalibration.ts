@@ -26,6 +26,9 @@ export function toolSurfaceForName(name: string): ToolSurface | null {
     name === 'search' ||
     name === 'navigate' ||
     name === 'act' ||
+    name === 'set_field' ||
+    name === 'submit' ||
+    name === 'open_result' ||
     name === 'grep_page' ||
     name === 'read_page' ||
     name === 'read_a11y' ||
@@ -85,7 +88,7 @@ export function buildToolCalibrationBlock(args: {
 
   if (surfaces.has('browser')) {
     lines.push(
-      `- Browser surface is attached to the visible tab${args.tabId ? ` (${args.tabId})` : ''}; start from navigate()/act() results before deeper reads.`
+      `- Browser surface is attached to the visible tab${args.tabId ? ` (${args.tabId})` : ''}; start from navigate()/set_field()/submit()/open_result()/act() results before deeper reads.`
     )
   }
   if (surfaces.has('filesystem')) {
@@ -199,7 +202,7 @@ export function maybeAddRecalibrationHint(
 
 function staleReasonForTool(name: string): string | null {
   if (name === 'navigate') return 'a navigation landed; rely on the new page state, not older assumptions'
-  if (name === 'act' || name === 'execute_in_browser' || name === 'cdp_command' || name === 'grep_click' || name === 'grep_type') {
+  if (name === 'act' || name === 'set_field' || name === 'submit' || name === 'open_result' || name === 'execute_in_browser' || name === 'cdp_command' || name === 'grep_click' || name === 'grep_type') {
     return 'the page may have changed; prefer a fresh browser read before retrying a brittle action'
   }
   if (name === 'edit_file' || name === 'write_file') {

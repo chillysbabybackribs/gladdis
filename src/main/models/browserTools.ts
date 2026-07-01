@@ -15,9 +15,12 @@ import {
   runAct,
   runCdpCommand,
   runExecuteInBrowser,
+  runOpenResult,
   runNavigate,
   runGrepClick,
-  runGrepType
+  runGrepType,
+  runSetField,
+  runSubmit
 } from './tools/driveTools'
 import {
   instrumentMemoryTool,
@@ -394,6 +397,15 @@ export class BrowserTools {
         // ── Drive (CDP) ─────────────────────────────────────────────────────
         case 'act':
           outcome = await runAct(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
+        case 'set_field':
+          outcome = await runSetField(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
+        case 'submit':
+          outcome = await runSubmit(this.driveDeps(), args, { tabId: ctx.tabId })
+          break
+        case 'open_result':
+          outcome = await runOpenResult(this.driveDeps(), args, { tabId: ctx.tabId })
           break
         case 'execute_in_browser':
           outcome = await runExecuteInBrowser(this.driveDeps(), args, { tabId: ctx.tabId })

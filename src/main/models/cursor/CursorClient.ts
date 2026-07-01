@@ -997,7 +997,7 @@ function extractMcpToolResultText(
     return formatToolError(scope || `${qualified} failed`)
   }
 
-  if (toolName === 'act' || toolName === 'grep_click' || toolName === 'grep_type') {
+  if (toolName === 'act' || toolName === 'set_field' || toolName === 'submit' || toolName === 'open_result' || toolName === 'grep_click' || toolName === 'grep_type') {
     if (body) return ok ? body : formatToolError(scope ? prefixScope(scope, body) : body)
     if (ok) return scope ? `${qualified}: ${scope}` : `${qualified} completed.`
     return formatToolError(scope || `${qualified} failed`)

@@ -539,6 +539,159 @@ export async function runAct(
   )
 }
 
+export async function runSetField(
+  deps: DriveToolsDeps,
+  args: Record<string, any>,
+  ctx: DriveToolsContext
+): Promise<ToolOutcome> {
+  const value = String(args.value ?? '')
+  const beforeUrl = deps.tabs.getTabUrl(ctx.tabId) ?? null
+  const target = await resolveActTarget(deps, ctx.tabId, args)
+  if (!target.ok) return { ok: false, text: `set_field: ${target.text}` }
+  const { x, y, describe, matchInfo } = target
+  const clear = args.clear === undefined ? true : !!args.clear
+
+  const { network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+    await dispatchClick(deps.tabs, ctx.tabId, x, y)
+  })
+  const setResult = await deps.tabs.executeJavaScript(ctx.tabId, setFieldValueScript(x, y, value, clear))
+  if (!setResult.success) {
+    return { ok: false, text: `set_field: could not set the field — ${setResult.error}.` }
+  }
+  const payload = setResult.result as { ok?: boolean; reason?: string; mode?: string } | null
+  if (!payload || payload.ok !== true) {
+    return { ok: false, text: `set_field: could not set the field — ${payload?.reason ?? 'no editable field at the resolved target'}.` }
+  }
+
+  const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+  const mode = typeof payload.mode === 'string' ? payload.mode : 'field'
+  return withOptionalNetworkCapture(
+    {
+      ok: true,
+      text: `set_field: set ${describe} to ${value.length} chars via ${mode} at (${x}, ${y}).${afterStateLine(after)}`,
+      structuredContent: {
+        value,
+        clear,
+        mode,
+        coordinates: { x, y },
+        match: matchInfo,
+        after
+      }
+    },
+    network
+  )
+}
+
+export async function runSubmit(
+  deps: DriveToolsDeps,
+  args: Record<string, any>,
+  ctx: DriveToolsContext
+): Promise<ToolOutcome> {
+  const beforeUrl = deps.tabs.getTabUrl(ctx.tabId) ?? null
+  const hasExplicitTarget =
+    (typeof args.ref === 'string' && args.ref.trim()) ||
+    (typeof args.query === 'string' && args.query.trim()) ||
+    (Number.isFinite(Number(args?.coords?.x)) && Number.isFinite(Number(args?.coords?.y)))
+
+  if (hasExplicitTarget) {
+    const target = await resolveActTarget(deps, ctx.tabId, args)
+    if (!target.ok) return { ok: false, text: `submit: ${target.text}` }
+    const { x, y, describe, matchInfo } = target
+    const { network } = await deps.tabs.runWithPendingNetworkCapture(
+      ctx.tabId,
+      () => dispatchClick(deps.tabs, ctx.tabId, x, y)
+    )
+    const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+    return withOptionalNetworkCapture(
+      {
+        ok: true,
+        text: `submit: activated ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
+        structuredContent: {
+          mode: 'target',
+          coordinates: { x, y },
+          match: matchInfo,
+          after
+        }
+      },
+      network
+    )
+  }
+
+  const { value: submitPayload, network } = await deps.tabs.runWithPendingNetworkCapture(ctx.tabId, async () => {
+    const submitResult = await deps.tabs.executeJavaScript(ctx.tabId, submitIntentScript())
+    if (!submitResult.success) return { ok: false, reason: submitResult.error ?? 'submit script failed' }
+    return submitResult.result as { ok?: boolean; mode?: string; label?: string; reason?: string } | null
+  })
+  if (submitPayload?.ok === true) {
+    const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+    const label = typeof submitPayload.label === 'string' && submitPayload.label ? ` "${submitPayload.label}"` : ''
+    return withOptionalNetworkCapture(
+      {
+        ok: true,
+        text: `submit: used ${submitPayload.mode ?? 'submit'}${label}.${afterStateLine(after)}`,
+        structuredContent: {
+          mode: submitPayload.mode ?? 'submit',
+          ...(submitPayload.label ? { label: submitPayload.label } : {}),
+          after
+        }
+      },
+      network
+    )
+  }
+
+  const enterOutcome = await runAct(deps, { kind: 'key', key: 'Enter' }, ctx)
+  if (!enterOutcome.ok) {
+    return { ok: false, text: 'submit: could not find a submittable form and Enter fallback also failed.' }
+  }
+  return {
+    ...enterOutcome,
+    text: enterOutcome.text.replace(/^act\(key\): pressed Enter\./, 'submit: pressed Enter as a fallback.')
+  }
+}
+
+export async function runOpenResult(
+  deps: DriveToolsDeps,
+  args: Record<string, any>,
+  ctx: DriveToolsContext
+): Promise<ToolOutcome> {
+  const rawIndex = clampInt(args.index, 1, 50, 1)
+  const beforeUrl = deps.tabs.getTabUrl(ctx.tabId) ?? null
+  const hasRef = typeof args.ref === 'string' && args.ref.trim()
+  const hasCoords = Number.isFinite(Number(args?.coords?.x)) && Number.isFinite(Number(args?.coords?.y))
+  let target: ActTargetResolved | { ok: false; text: string }
+
+  if (rawIndex > 1 && (hasRef || hasCoords)) {
+    return { ok: false, text: 'open_result: `index` only applies to query-based matches. For ref/coords use the default index of 1.' }
+  }
+
+  if (typeof args.query === 'string' && args.query.trim()) {
+    target = await resolveLiveQueryTarget(deps, ctx.tabId, args, rawIndex - 1)
+  } else {
+    target = await resolveActTarget(deps, ctx.tabId, args)
+  }
+  if (!target.ok) return { ok: false, text: `open_result: ${target.text}` }
+  const { x, y, describe, matchInfo } = target
+
+  const { network } = await deps.tabs.runWithPendingNetworkCapture(
+    ctx.tabId,
+    () => dispatchClick(deps.tabs, ctx.tabId, x, y)
+  )
+  const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+  return withOptionalNetworkCapture(
+    {
+      ok: true,
+      text: `open_result: opened result ${rawIndex} via ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
+      structuredContent: {
+        ...(typeof args.query === 'string' && args.query.trim() ? { query: args.query.trim(), index: rawIndex } : {}),
+        coordinates: { x, y },
+        match: matchInfo,
+        after
+      }
+    },
+    network
+  )
+}
+
 interface ActTargetResolved {
   ok: true
   x: number
@@ -579,40 +732,7 @@ async function resolveActTarget(
 
   // query: resolve via the live grep engine (text/regex/selector).
   if (queryArg) {
-    const explicitType = args.type || 'text'
-    if (explicitType !== 'text' && explicitType !== 'regex' && explicitType !== 'selector') {
-      return { ok: false, text: 'query "type" must be "text", "regex", or "selector".' }
-    }
-    const caseSensitive = !!args.caseSensitive
-    const runResult = await executeGrepInTab(deps.tabs, tabId, queryArg, explicitType, caseSensitive, 2)
-    if (!runResult.success) {
-      return { ok: false, text: `search execution failed: ${runResult.error}` }
-    }
-    const matches = ((runResult.result as any[]) || []).filter(
-      (m) => m.type !== 'error' && m.coordinates && m.visible
-    )
-    if (matches.length === 0) {
-      // C6: no act-on-a-guess. Tell the model to re-orient.
-      return {
-        ok: false,
-        text: `no visible element matched "${queryArg}". Re-run read_a11y/grep_page to re-orient, then target a @ref.`
-      }
-    }
-    const best = matches[0]
-    let describe = `<${best.tagName || 'element'}>`
-    if (best.selector) describe += ` (${best.selector})`
-    if (best.matchedLine) describe += ` "${best.matchedLine}"`
-    return {
-      ok: true,
-      x: best.coordinates.x,
-      y: best.coordinates.y,
-      describe,
-      matchInfo: {
-        ...(best.tagName ? { tagName: best.tagName } : {}),
-        ...(best.selector ? { selector: best.selector } : {}),
-        ...(best.matchedLine ? { matchedLine: best.matchedLine } : {})
-      }
-    }
+    return resolveLiveQueryTarget(deps, tabId, args, 0)
   }
 
   // coords (last resort): explicit, no resolution.
@@ -625,6 +745,58 @@ async function resolveActTarget(
   return {
     ok: false,
     text: 'provide a target: ref (@a1 from read_a11y), query (text/selector), or coords {x,y}.'
+  }
+}
+
+async function resolveLiveQueryTarget(
+  deps: DriveToolsDeps,
+  tabId: string,
+  args: Record<string, any>,
+  matchIndex: number
+): Promise<ActTargetResolved | { ok: false; text: string }> {
+  const queryArg = typeof args.query === 'string' ? args.query.trim() : ''
+  if (!queryArg) {
+    return { ok: false, text: 'query is required.' }
+  }
+  const explicitType = args.type || 'text'
+  if (explicitType !== 'text' && explicitType !== 'regex' && explicitType !== 'selector') {
+    return { ok: false, text: 'query "type" must be "text", "regex", or "selector".' }
+  }
+  const caseSensitive = !!args.caseSensitive
+  const runResult = await executeGrepInTab(deps.tabs, tabId, queryArg, explicitType, caseSensitive, 2)
+  if (!runResult.success) {
+    return { ok: false, text: `search execution failed: ${runResult.error}` }
+  }
+  const matches = ((runResult.result as any[]) || []).filter(
+    (m) => m.type !== 'error' && m.coordinates && m.visible
+  )
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      text: `no visible element matched "${queryArg}". Re-run read_a11y/grep_page to re-orient, then target a @ref.`
+    }
+  }
+  if (matchIndex >= matches.length) {
+    return {
+      ok: false,
+      text: `only ${matches.length} visible match(es) were found for "${queryArg}". Try a lower index or a sharper query.`
+    }
+  }
+  const best = matches[matchIndex]
+  let describe = `<${best.tagName || 'element'}>`
+  if (best.selector) describe += ` (${best.selector})`
+  if (best.matchedLine) describe += ` "${best.matchedLine}"`
+  return {
+    ok: true,
+    x: best.coordinates.x,
+    y: best.coordinates.y,
+    describe,
+    matchInfo: {
+      ...(best.tagName ? { tagName: best.tagName } : {}),
+      ...(best.selector ? { selector: best.selector } : {}),
+      ...(best.matchedLine ? { matchedLine: best.matchedLine } : {}),
+      matchIndex
+    }
   }
 }
 
@@ -800,6 +972,97 @@ function selectOptionScript(x: number, y: number, option: string): string {
     sel.dispatchEvent(new Event('input', { bubbles: true }));
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     return { ok: true, value: sel.options[chosen].value, label: sel.options[chosen].text };
+  `
+}
+
+function setFieldValueScript(x: number, y: number, value: string, clear: boolean): string {
+  return `
+    const root = document.elementFromPoint(${x}, ${y});
+    const el = root && root.closest
+      ? root.closest('input, textarea, select, [contenteditable], [role="textbox"]')
+      : null;
+    if (!el) return { ok: false, reason: 'no editable field at the resolved coordinate' };
+
+    const nextValue = ${JSON.stringify(value)};
+    const clearExisting = ${clear ? 'true' : 'false'};
+    const label = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('name') || el.getAttribute('placeholder'))) || '';
+
+    const fire = (name) => el.dispatchEvent(new Event(name, { bubbles: true }));
+
+    if (el instanceof HTMLSelectElement) {
+      const wantLc = nextValue.trim().toLowerCase();
+      let chosen = -1;
+      for (let i = 0; i < el.options.length; i++) {
+        const o = el.options[i];
+        const text = (o.text || '').trim().toLowerCase();
+        const valueLc = (o.value || '').trim().toLowerCase();
+        if (o.text === nextValue || o.value === nextValue || text === wantLc || valueLc === wantLc) {
+          chosen = i;
+          break;
+        }
+      }
+      if (chosen === -1) return { ok: false, reason: 'no option matched "' + nextValue + '"' };
+      el.selectedIndex = chosen;
+      fire('input');
+      fire('change');
+      return { ok: true, mode: 'select', label: label || el.options[chosen].text || el.name || '' };
+    }
+
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const proto = el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      const prior = el.value || '';
+      const finalValue = clearExisting ? nextValue : prior + nextValue;
+      el.focus();
+      if (desc && typeof desc.set === 'function') desc.set.call(el, finalValue);
+      else el.value = finalValue;
+      fire('input');
+      fire('change');
+      return { ok: true, mode: 'value', label: label || el.name || el.id || '' };
+    }
+
+    if (el instanceof HTMLElement && (el.isContentEditable || el.getAttribute('role') === 'textbox')) {
+      const prior = el.textContent || '';
+      const finalValue = clearExisting ? nextValue : prior + nextValue;
+      el.focus();
+      el.textContent = finalValue;
+      fire('input');
+      fire('change');
+      return { ok: true, mode: 'contenteditable', label: label || el.id || el.innerText.slice(0, 40) };
+    }
+
+    return { ok: false, reason: 'resolved element is not a supported field type' };
+  `
+}
+
+function submitIntentScript(): string {
+  return `
+    const visible = (el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const s = getComputedStyle(el);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    };
+    const enabled = (el) => !(el instanceof HTMLButtonElement || el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) || !el.disabled;
+    const labelOf = (el) => ((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('value') || el.getAttribute('name'))) || el.innerText || '').replace(/[\\s\\u00a0]+/g, ' ').trim();
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const form = (active && active.closest('form')) || document.querySelector('form');
+    if (!form) return { ok: false, reason: 'no form found near the current focus' };
+
+    const submitter = form.querySelector('button[type="submit"], input[type="submit"], button:not([type]), [role="button"]');
+    if (submitter instanceof HTMLElement && visible(submitter) && enabled(submitter)) {
+      submitter.click();
+      return { ok: true, mode: 'click', label: labelOf(submitter) };
+    }
+
+    if (typeof form.requestSubmit === 'function') {
+      form.requestSubmit();
+      return { ok: true, mode: 'requestSubmit' };
+    }
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    return { ok: true, mode: 'submitEvent' };
   `
 }
 

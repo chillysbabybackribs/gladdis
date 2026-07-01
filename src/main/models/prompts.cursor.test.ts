@@ -13,8 +13,9 @@ describe('buildCursorSystem', () => {
   })
 
   it('includes browser MCP instructions when the bridge is enabled', () => {
-    const prompt = buildCursorSystem({ browserToolNames: ['search', 'act'] })
-    expect(prompt).toContain('Attached Gladdis MCP tools this turn: act, search.')
+    const prompt = buildCursorSystem({ browserToolNames: ['search', 'set_field', 'act'] })
+    expect(prompt).toContain('Attached Gladdis MCP tools this turn: act, search, set_field.')
+    expect(prompt).toContain('Prefer the semantic browser verbs when they fit')
     expect(prompt).toContain('`act` is a companion action tool')
     expect(prompt).not.toContain('memory_create_task')
   })
@@ -32,6 +33,9 @@ describe('buildCursorSystem', () => {
         'watch_network',
         'screenshot',
         'screenshot_app',
+        'set_field',
+        'submit',
+        'open_result',
         'act',
         'grep_click',
         'grep_type',

@@ -129,6 +129,9 @@ describe('ChatService provider hardening', () => {
         'grep_page',
         'read_a11y',
         'watch_network',
+        'set_field',
+        'submit',
+        'open_result',
         'grep_click',
         'grep_type',
         'execute_in_browser',
@@ -163,6 +166,9 @@ describe('ChatService provider hardening', () => {
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_page')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('watch_network')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('read_a11y')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('set_field')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('submit')).toBe(true)
+    expect(CODEX_BROWSER_TOOL_NAMES.has('open_result')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('act')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_click')).toBe(true)
     expect(CODEX_BROWSER_TOOL_NAMES.has('grep_type')).toBe(true)
@@ -185,7 +191,7 @@ describe('ChatService provider hardening', () => {
     expect(names).toEqual(
       expect.arrayContaining([
         'search', 'read_page', 'read_a11y', 'grep_page', 'watch_network',
-        'act', 'navigate', 'execute_in_browser', 'cdp_command',
+        'set_field', 'submit', 'open_result', 'act', 'navigate', 'execute_in_browser', 'cdp_command',
         'read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_command',
         'recall_history', 'memory_write'
       ])

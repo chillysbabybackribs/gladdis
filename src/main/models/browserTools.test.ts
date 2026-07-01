@@ -758,6 +758,98 @@ describe('BrowserTools', () => {
     expect(result.structuredContent).toMatchObject({ kind: 'select', option: 'Canada' })
   })
 
+  it('set_field sets an input semantically and returns fresh after-state', async () => {
+    const { tabs } = makeActTabs({ grepMatches: [{ ...VISIBLE_BUTTON, tagName: 'input', selector: 'input#email' }] })
+    const executeJavaScript = (tabs as any).executeJavaScript as ReturnType<typeof vi.fn>
+    executeJavaScript.mockImplementation(async (_id: string, code: string) => {
+      if (code.includes('return { u: location.href')) {
+        return { success: true, result: { u: 'https://example.com/after', r: 'complete' } }
+      }
+      if (code.includes('const root = document.elementFromPoint')) {
+        return { success: true, result: { ok: true, mode: 'value' } }
+      }
+      if (code.includes('location.href')) {
+        return {
+          success: true,
+          result: {
+            url: 'https://example.com/after',
+            title: 'After',
+            readyState: 'complete',
+            bodyTextChars: 1234,
+            activeElement: 'input#email',
+            elements: [],
+            captured: true
+          }
+        }
+      }
+      if (code.includes('const query =')) {
+        return { success: true, result: [{ ...VISIBLE_BUTTON, tagName: 'input', selector: 'input#email' }] }
+      }
+      return { success: true, result: { ok: true } }
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('set_field', { query: 'Email', value: 'hi@example.com' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('set_field: set')
+    expect(result.structuredContent).toMatchObject({ value: 'hi@example.com', clear: true, mode: 'value' })
+    expect(result.structuredContent?.after).toMatchObject({ captured: true })
+  })
+
+  it('submit falls back to form submission intent without an explicit target', async () => {
+    const { tabs } = makeActTabs({})
+    const executeJavaScript = (tabs as any).executeJavaScript as ReturnType<typeof vi.fn>
+    executeJavaScript.mockImplementation(async (_id: string, code: string) => {
+      if (code.includes('return { u: location.href')) {
+        return { success: true, result: { u: 'https://example.com/search?q=reef', r: 'complete' } }
+      }
+      if (code.includes('labelOf')) {
+        return { success: true, result: { ok: true, mode: 'requestSubmit' } }
+      }
+      if (code.includes('location.href')) {
+        return {
+          success: true,
+          result: {
+            url: 'https://example.com/search?q=reef',
+            title: 'Results',
+            readyState: 'complete',
+            bodyTextChars: 1234,
+            activeElement: null,
+            elements: [],
+            captured: true
+          }
+        }
+      }
+      return { success: true, result: { ok: true } }
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('submit', {}, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('submit: used requestSubmit')
+    expect(result.structuredContent?.after).toMatchObject({ url: 'https://example.com/search?q=reef' })
+  })
+
+  it('open_result opens the requested indexed match and returns fresh after-state', async () => {
+    const secondMatch = {
+      ...VISIBLE_BUTTON,
+      selector: 'a.result-2',
+      coordinates: { x: 260, y: 360, width: 80, height: 30 },
+      matchedLine: 'Second story'
+    }
+    const { tabs, cdpSend } = makeActTabs({ grepMatches: [VISIBLE_BUTTON, secondMatch], afterUrl: 'https://example.com/story-2' })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('open_result', { query: 'story', index: 2 }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 260, y: 360 }))
+    expect(result.structuredContent).toMatchObject({ query: 'story', index: 2 })
+    expect(result.structuredContent?.after).toMatchObject({ url: 'https://example.com/story-2' })
+  })
+
   it('act fails with a re-orient hint when the query target does not resolve (C6: no act-on-a-guess)', async () => {
     const { tabs, cdpSend } = makeActTabs({ grepMatches: [] })
     const tools = new BrowserTools(tabs as any, {} as any, {} as any)

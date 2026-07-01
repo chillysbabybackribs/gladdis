@@ -25,6 +25,9 @@ describe('Codex Gladdis dynamic tools', () => {
         expect.objectContaining({ namespace: 'gladdis', name: 'navigate' }),
         expect.objectContaining({ namespace: 'gladdis', name: 'read_a11y' }),
         expect.objectContaining({ namespace: 'gladdis', name: 'grep_page' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'set_field' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'submit' }),
+        expect.objectContaining({ namespace: 'gladdis', name: 'open_result' }),
         expect.objectContaining({ namespace: 'gladdis', name: 'grep_click' }),
         expect.objectContaining({ namespace: 'gladdis', name: 'grep_type' }),
         expect.objectContaining({ namespace: 'gladdis', name: 'execute_in_browser' }),
@@ -72,11 +75,11 @@ describe('Codex Gladdis dynamic tools', () => {
   })
 
   it('builds a per-turn Codex dynamic surface from the routed tool names', () => {
-    const allowed = selectCodexDynamicToolNames(['grep_page', 'act', 'memory_read', 'run_command'])
-    expect([...allowed].sort()).toEqual(['act', 'grep_page', 'memory_read'])
+    const allowed = selectCodexDynamicToolNames(['grep_page', 'set_field', 'act', 'memory_read', 'run_command'])
+    expect([...allowed].sort()).toEqual(['act', 'grep_page', 'memory_read', 'set_field'])
 
     const tools = buildCodexBrowserTools(allowed) as Array<{ name: string }>
-    expect(tools.map((tool) => tool.name).sort()).toEqual(['act', 'grep_page', 'memory_read'])
+    expect(tools.map((tool) => tool.name).sort()).toEqual(['act', 'grep_page', 'memory_read', 'set_field'])
   })
 
   it('runs recall_history with the current Gladdis conversation id', async () => {

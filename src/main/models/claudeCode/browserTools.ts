@@ -20,6 +20,9 @@ export const CLAUDE_CODE_BROWSER_TOOL_NAMES = new Set([
   'watch_network',
   'screenshot',
   'screenshot_app',
+  'set_field',
+  'submit',
+  'open_result',
   'act',
   'grep_click',
   'grep_type',
@@ -60,6 +63,9 @@ export const CURSOR_MCP_TOOL_NAMES = new Set([
   'watch_network',
   'screenshot',
   'screenshot_app',
+  'set_field',
+  'submit',
+  'open_result',
   'act',
   'grep_click',
   'grep_type',
@@ -147,9 +153,17 @@ function buildEmbeddedBrowserInstructions(args: {
     lines.push(`For browser work beyond search, stay within the attached MCP tools: ${browserTools.join(', ')}.`)
   }
 
+  if (allowed.has('set_field') || allowed.has('submit') || allowed.has('open_result')) {
+    const verbs: string[] = []
+    if (allowed.has('set_field')) verbs.push('`set_field` for filling fields semantically')
+    if (allowed.has('submit')) verbs.push('`submit` for search/send/save intent')
+    if (allowed.has('open_result')) verbs.push('`open_result` for opening the 1st/Nth matching result')
+    lines.push(`Prefer the semantic browser verbs when they fit: ${verbs.join(', ')}.`)
+  }
+
   if (allowed.has('act')) {
     lines.push(
-      '`act` is a companion action tool (click | type | key | select), not the orientation tool. Use `navigate`, `grep_page`, or `read_a11y` first to identify the target, then use `act`. ' +
+      '`act` is a companion action tool (click | type | key | select), not the orientation tool. Use `navigate`, `grep_page`, or `read_a11y` first to identify the target, then prefer `set_field`, `submit`, or `open_result` when they fit before dropping to `act`. ' +
       'Its `type` mode inserts the provided text in one shot, not letter-by-letter, and it returns a fresh `after` object with ' +
       '{url, title, readyState, activeElement, navigated, elements?}. Read that `after` object before deciding the next step instead of immediately re-reading the page.'
     )

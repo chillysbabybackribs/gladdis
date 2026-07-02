@@ -508,7 +508,7 @@ describe('runReadPage', () => {
           content: { title: 'Example Form', byline: null, text: '', markdown: '', headings: [], wordCount: 0 },
           data: { meta: {}, openGraph: {}, jsonLd: [], canonical: null, feeds: [], lang: null },
           actions: [{ idx: 1, role: 'textbox', name: 'Requester', tag: 'input', selector: '#requester', rect: { x: 0, y: 0, w: 10, h: 10 }, inViewport: true }],
-          dom: { nodeCount: 10, htmlBytes: 100, frameCount: 2 }
+          dom: { nodeCount: 10, htmlBytes: 100, frameCount: 1 }
         }))
       } as any,
       pageCache: new Map(),

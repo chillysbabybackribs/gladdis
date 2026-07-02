@@ -158,7 +158,7 @@ async function collectIframeControlsForReadPage(
   cap: PageCapture,
   opts: { focus?: string; viewportOnly: boolean }
 ): Promise<ReadPageIframeControl[]> {
-  if ((cap.dom?.frameCount ?? 0) < 2) return []
+  if ((cap.dom?.frameCount ?? 0) < 1) return []
   try {
     const snapshot = await captureAxSnapshotForTab(deps.tabs, tabId, {
       focus: opts.focus,

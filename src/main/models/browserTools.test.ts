@@ -1148,6 +1148,70 @@ describe('BrowserTools', () => {
     expect(result.structuredContent?.after).toMatchObject({ url: 'https://example.com/search?q=reef' })
   })
 
+  it('submit with an explicit target carries same-page pageDiff like act(click)', async () => {
+    const { tabs } = makeActTabs({ grepMatches: [VISIBLE_BUTTON], afterUrl: 'https://example.com' })
+    let clicked = false
+    const cdpSend = (tabs as any).cdpSend as ReturnType<typeof vi.fn>
+    cdpSend.mockImplementation(async (_id: string, method: string) => {
+      if (method === 'Input.dispatchMouseEvent') clicked = true
+      return {}
+    })
+    const executeJavaScript = (tabs as any).executeJavaScript as ReturnType<typeof vi.fn>
+    executeJavaScript.mockImplementation(async (_id: string, code: string) => {
+      if (code.includes('gladdis:page_digest')) {
+        return {
+          success: true,
+          result: clicked
+            ? {
+                url: 'https://example.com',
+                textLen: 180,
+                controls: [
+                  { k: 'button|Submit', l: 'Submit', v: '' },
+                  { k: 'button|Sign Document', l: 'Sign Document', v: '' }
+                ]
+              }
+            : {
+                url: 'https://example.com',
+                textLen: 120,
+                controls: [{ k: 'button|Submit', l: 'Submit', v: '' }]
+              }
+        }
+      }
+      if (code.trim().startsWith('return (document.body && document.body.innerText) ? document.body.innerText.length')) {
+        return { success: true, result: 500 }
+      }
+      if (code.includes('return { u: location.href')) {
+        return { success: true, result: { u: 'https://example.com', r: 'complete' } }
+      }
+      if (code.includes('location.href')) {
+        return {
+          success: true,
+          result: {
+            url: 'https://example.com',
+            title: 'Contract Registration Form',
+            readyState: 'complete',
+            bodyTextChars: clicked ? 180 : 120,
+            activeElement: null,
+            elements: clicked ? [{ index: 1, role: 'button', name: 'Sign Document' }] : [],
+            captured: true
+          }
+        }
+      }
+      if (code.includes('const query =')) {
+        return { success: true, result: [VISIBLE_BUTTON] }
+      }
+      return { success: true, result: { ok: true } }
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('submit', { query: 'Submit' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('Page changes')
+    expect(result.text).toContain('"Sign Document"')
+    expect(result.structuredContent?.pageDiff).toMatchObject({ appeared: ['"Sign Document"'] })
+  })
+
   it('open_result opens the requested indexed match and returns fresh after-state', async () => {
     const secondMatch = {
       ...VISIBLE_BUTTON,

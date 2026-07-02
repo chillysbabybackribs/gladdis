@@ -926,6 +926,7 @@ export async function runSubmit(
   ctx: DriveToolsContext
 ): Promise<ToolOutcome> {
   const beforeUrl = deps.tabs.getTabUrl(ctx.tabId) ?? null
+  const beforeDigest = await capturePageDigest(deps.tabs, ctx.tabId)
   const hasExplicitTarget =
     (typeof args.ref === 'string' && args.ref.trim()) ||
     (typeof args.query === 'string' && args.query.trim()) ||
@@ -940,14 +941,16 @@ export async function runSubmit(
       () => dispatchClick(deps.tabs, ctx.tabId, x, y)
     )
     const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+    const pd = await resolvePageDiff(deps, ctx.tabId, beforeDigest, after)
     return withOptionalNetworkCapture(
       {
         ok: true,
-        text: `submit: activated ${describe} at (${x}, ${y}).${afterStateLine(after)}`,
+        text: `submit: activated ${describe} at (${x}, ${y}).${afterStateLine(after)}${pd.line}`,
         structuredContent: {
           mode: 'target',
           coordinates: { x, y },
           match: matchInfo,
+          ...(pd.diff ? { pageDiff: pd.diff } : {}),
           after
         }
       },
@@ -962,14 +965,16 @@ export async function runSubmit(
   })
   if (submitPayload?.ok === true) {
     const after = await captureAfterState(deps, ctx.tabId, beforeUrl)
+    const pd = await resolvePageDiff(deps, ctx.tabId, beforeDigest, after)
     const label = typeof submitPayload.label === 'string' && submitPayload.label ? ` "${submitPayload.label}"` : ''
     return withOptionalNetworkCapture(
       {
         ok: true,
-        text: `submit: used ${submitPayload.mode ?? 'submit'}${label}.${afterStateLine(after)}`,
+        text: `submit: used ${submitPayload.mode ?? 'submit'}${label}.${afterStateLine(after)}${pd.line}`,
         structuredContent: {
           mode: submitPayload.mode ?? 'submit',
           ...(submitPayload.label ? { label: submitPayload.label } : {}),
+          ...(pd.diff ? { pageDiff: pd.diff } : {}),
           after
         }
       },

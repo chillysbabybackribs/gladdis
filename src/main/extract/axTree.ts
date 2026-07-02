@@ -115,7 +115,15 @@ type TaggedAxNode = {
   frameLabel?: string
 }
 
-type CdpSend = (method: string, params?: Record<string, unknown>) => Promise<unknown>
+type CdpSend = (method: string, params?: Record<string, unknown>, sessionId?: string) => Promise<unknown>
+
+type FrameTarget = {
+  id: string
+  url?: string
+  name?: string
+  isMain: boolean
+  sessionId?: string
+}
 
 function axString(field?: CdpAxValue): string {
   const value = field?.value
@@ -254,7 +262,7 @@ function frameLabelFromUrl(url: string | undefined, name: string | undefined, is
   }
 }
 
-function collectFrames(root: FrameTreeNode | undefined, out: Array<{ id: string; url?: string; name?: string; isMain: boolean }>): void {
+function collectFrames(root: FrameTreeNode | undefined, out: FrameTarget[]): void {
   if (!root || out.length >= MAX_FRAMES) return
   const walk = (entry: FrameTreeNode, isMain: boolean): void => {
     if (out.length >= MAX_FRAMES) return
@@ -271,6 +279,27 @@ function collectFrames(root: FrameTreeNode | undefined, out: Array<{ id: string;
     }
   }
   walk(root, true)
+}
+
+function mergeTargetFrames(
+  out: FrameTarget[],
+  targetInfos: Array<{ targetId?: string; type?: string; url?: string; title?: string }> | undefined,
+  sessionForTarget: (targetId: string) => string | null
+): void {
+  if (!Array.isArray(targetInfos)) return
+  const seen = new Set(out.map((frame) => frame.id))
+  for (const info of targetInfos) {
+    if (out.length >= MAX_FRAMES) return
+    if (info.type !== 'iframe' || !info.targetId || seen.has(info.targetId)) continue
+    out.push({
+      id: info.targetId,
+      url: info.url,
+      name: info.title,
+      isMain: false,
+      sessionId: sessionForTarget(info.targetId) ?? undefined
+    })
+    seen.add(info.targetId)
+  }
 }
 
 
@@ -314,8 +343,16 @@ function orderAxNodes(nodes: CdpAxNode[]): CdpAxNode[] {
 
 async function loadTaggedAxNodes(send: CdpSend): Promise<TaggedAxNode[]> {
   const tree = (await send('Page.getFrameTree', {})) as { frameTree?: FrameTreeNode }
-  const frames: Array<{ id: string; url?: string; name?: string; isMain: boolean }> = []
+  const frames: FrameTarget[] = []
   collectFrames(tree.frameTree, frames)
+  try {
+    const targets = (await send('Target.getTargets', {})) as {
+      targetInfos?: Array<{ targetId?: string; type?: string; url?: string; title?: string }>
+    }
+    mergeTargetFrames(frames, targets.targetInfos, () => null)
+  } catch {
+    /* best effort */
+  }
   if (frames.length === 0) {
     const response = (await send('Accessibility.getFullAXTree', {})) as { nodes?: CdpAxNode[] }
     return orderAxNodes(response.nodes ?? []).map((node) => ({ node }))
@@ -323,9 +360,17 @@ async function loadTaggedAxNodes(send: CdpSend): Promise<TaggedAxNode[]> {
 
   const tagged: TaggedAxNode[] = []
   for (const frame of frames) {
-    const response = (await send('Accessibility.getFullAXTree', { frameId: frame.id })) as { nodes?: CdpAxNode[] }
+    let response: { nodes?: CdpAxNode[] } | null = null
+    try {
+      response = frame.sessionId
+        ? (await send('Accessibility.getFullAXTree', {}, frame.sessionId)) as { nodes?: CdpAxNode[] }
+        : (await send('Accessibility.getFullAXTree', { frameId: frame.id })) as { nodes?: CdpAxNode[] }
+    } catch {
+      if (frame.sessionId) continue
+      response = (await send('Accessibility.getFullAXTree', {})) as { nodes?: CdpAxNode[] }
+    }
     const label = frameLabelFromUrl(frame.url, frame.name, frame.isMain)
-    for (const node of orderAxNodes(response.nodes ?? [])) {
+    for (const node of orderAxNodes(response?.nodes ?? [])) {
       tagged.push({
         node,
         frameId: frame.isMain ? undefined : frame.id,
@@ -339,55 +384,101 @@ async function loadTaggedAxNodes(send: CdpSend): Promise<TaggedAxNode[]> {
 async function attachBounds(
   send: CdpSend,
   entries: AxSnapshotNode[],
-  viewport: { width: number; height: number }
+  viewport: { width: number; height: number },
+  sessionForFrame: (frameId: string | undefined) => string | undefined
 ): Promise<void> {
   const targets = entries.filter((node) => typeof node.backendDOMNodeId === 'number')
 
-  let domEnabled = false
-  try {
-    await send('DOM.enable', {})
-    domEnabled = true
-    for (const node of targets) {
-      try {
-        const response = (await send('DOM.getBoxModel', {
-          backendNodeId: node.backendDOMNodeId
-        })) as { model?: { content?: number[] } }
-        const bounds = boxFromContentQuad(response.model?.content)
-        if (!bounds) continue
-        node.bounds = bounds
-        node.inViewport = isBoundsInViewport(bounds, viewport)
-      } catch {
-        /* skip nodes Chromium cannot box-model */
+  const enabledSessions = new Set<string>()
+  for (const node of targets) {
+    const sessionId = sessionForFrame(node.frameId)
+    const key = sessionId ?? '__main__'
+    try {
+      if (!enabledSessions.has(key)) {
+        await send('DOM.enable', {}, sessionId)
+        enabledSessions.add(key)
       }
-    }
-  } finally {
-    if (domEnabled) {
-      try {
-        await send('DOM.disable', {})
-      } catch {
-        /* best effort */
-      }
+      const response = (await send('DOM.getBoxModel', {
+        backendNodeId: node.backendDOMNodeId
+      }, sessionId)) as { model?: { content?: number[] } }
+      const bounds = boxFromContentQuad(response.model?.content)
+      if (!bounds) continue
+      node.bounds = bounds
+      node.inViewport = isBoundsInViewport(bounds, viewport)
+    } catch {
+      /* skip nodes Chromium cannot box-model */
     }
   }
+  for (const key of enabledSessions) {
+    const sessionId = key === '__main__' ? undefined : key
+    try {
+      await send('DOM.disable', {}, sessionId)
+    } catch {
+      /* best effort */
+    }
+  }
+}
+
+async function loadTaggedAxNodesForTab(tabs: TabManager, tabId: string): Promise<TaggedAxNode[]> {
+  const send: CdpSend = (method, params, sessionId) => tabs.cdpSend(tabId, method, params, sessionId)
+  const tree = (await send('Page.getFrameTree', {})) as { frameTree?: FrameTreeNode }
+  const frames: FrameTarget[] = []
+  collectFrames(tree.frameTree, frames)
+  try {
+    const targets = (await send('Target.getTargets', {})) as {
+      targetInfos?: Array<{ targetId?: string; type?: string; url?: string; title?: string }>
+    }
+    mergeTargetFrames(frames, targets.targetInfos, (targetId) => tabs.cdpSessionIdForTarget(tabId, targetId))
+  } catch {
+    /* best effort */
+  }
+  if (frames.length === 0) {
+    const response = (await send('Accessibility.getFullAXTree', {})) as { nodes?: CdpAxNode[] }
+    return orderAxNodes(response.nodes ?? []).map((node) => ({ node }))
+  }
+
+  const tagged: TaggedAxNode[] = []
+  for (const frame of frames) {
+    let response: { nodes?: CdpAxNode[] } | null = null
+    try {
+      response = frame.sessionId
+        ? (await send('Accessibility.getFullAXTree', {}, frame.sessionId)) as { nodes?: CdpAxNode[] }
+        : (await send('Accessibility.getFullAXTree', { frameId: frame.id })) as { nodes?: CdpAxNode[] }
+    } catch {
+      if (!frame.isMain) continue
+      response = (await send('Accessibility.getFullAXTree', {})) as { nodes?: CdpAxNode[] }
+    }
+    const label = frameLabelFromUrl(frame.url, frame.name, frame.isMain)
+    for (const node of orderAxNodes(response?.nodes ?? [])) {
+      tagged.push({
+        node,
+        frameId: frame.isMain ? undefined : frame.id,
+        frameLabel: label
+      })
+    }
+  }
+  return tagged
 }
 
 async function captureAxSnapshot(
   send: CdpSend,
   meta: { url: string; title: string },
-  opts: AxCaptureOptions = {}
+  opts: AxCaptureOptions = {},
+  sessionForFrame: (frameId: string | undefined) => string | undefined = () => undefined,
+  taggedLoader: (() => Promise<TaggedAxNode[]>) | null = null
 ): Promise<AxSnapshot> {
   const includeBounds = opts.includeBounds !== false
   let accessibilityEnabled = false
   try {
     await send('Accessibility.enable', {})
     accessibilityEnabled = true
-    const taggedNodes = await loadTaggedAxNodes(send)
+    const taggedNodes = taggedLoader ? await taggedLoader() : await loadTaggedAxNodes(send)
     const viewport = await readViewport(send)
     const flattened = flattenAxNodes(taggedNodes, opts, viewport)
     const boundsTargets = flattened.entries.slice(0, MAX_BOUNDS_FETCHES)
 
     if (includeBounds && boundsTargets.length > 0) {
-      await attachBounds(send, boundsTargets, viewport)
+      await attachBounds(send, boundsTargets, viewport, sessionForFrame)
     }
 
     // NO SORT — keep document order (the page's own top-to-bottom order, which
@@ -431,7 +522,13 @@ export async function captureAxSnapshotForTab(
   const tab = tabs.list().find((entry) => entry.id === tabId)
   const url = tabs.getTabUrl(tabId)
   const title = tab?.title ?? url
-  return captureAxSnapshot((method, params) => tabs.cdpSend(tabId, method, params), { url, title }, opts)
+  return captureAxSnapshot(
+    (method, params, sessionId) => tabs.cdpSend(tabId, method, params, sessionId),
+    { url, title },
+    opts,
+    (frameId) => (frameId ? tabs.cdpSessionIdForTarget(tabId, frameId) ?? undefined : undefined),
+    () => loadTaggedAxNodesForTab(tabs, tabId)
+  )
 }
 
 function trunc(value: string, max: number): string {

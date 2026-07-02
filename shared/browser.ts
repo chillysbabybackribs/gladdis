@@ -37,6 +37,7 @@ export interface CdpEventPayload {
   tabId: string
   method: string
   params: unknown
+  sessionId?: string
 }
 
 /** Result of running JS in a tab's page context via the exec bridge. */

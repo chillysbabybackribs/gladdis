@@ -23,7 +23,7 @@ export function resolveAxRef(nodes: AxSnapshotNode[], query: string): AxSnapshot
 }
 
 export function axRefTargetError(query: string, reason: string): string {
-  return `No accessibility ref "${query}" is available (${reason}). Call read_a11y on this tab first; only @aN refs from the current tab snapshot are valid, then use act on the @aN ref directly or grep_click/grep_type with type "ref".`
+  return `No accessibility ref "${query}" is available (${reason}). Call read_a11y on this tab first; only @aN refs from the current tab snapshot are valid, then pass the fresh @aN ref to act / set_field / submit / open_result.`
 }
 
 export type AxRefStore = {
@@ -65,22 +65,23 @@ export function describeAxRefMatch(node: AxSnapshotNode): string {
   return desc
 }
 
-export type CdpSend = (method: string, params?: Record<string, unknown>) => Promise<unknown>
+export type CdpSend = (method: string, params?: Record<string, unknown>, sessionId?: string) => Promise<unknown>
 
 export async function refreshAxNodeBounds(
   send: CdpSend,
   node: AxSnapshotNode,
-  viewport: { width: number; height: number }
+  viewport: { width: number; height: number },
+  sessionId?: string
 ): Promise<AxBounds | null> {
   if (typeof node.backendDOMNodeId !== 'number') return null
 
   let domEnabled = false
   try {
-    await send('DOM.enable', {})
+    await send('DOM.enable', {}, sessionId)
     domEnabled = true
     const response = (await send('DOM.getBoxModel', {
       backendNodeId: node.backendDOMNodeId
-    })) as { model?: { content?: number[] } }
+    }, sessionId)) as { model?: { content?: number[] } }
     const content = response.model?.content
     if (!Array.isArray(content) || content.length < 8) return null
     const xs = [content[0], content[2], content[4], content[6]]
@@ -109,7 +110,7 @@ export async function refreshAxNodeBounds(
   } finally {
     if (domEnabled) {
       try {
-        await send('DOM.disable', {})
+        await send('DOM.disable', {}, sessionId)
       } catch {
         /* best effort */
       }

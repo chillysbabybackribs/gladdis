@@ -631,7 +631,8 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('@a1')
     expect(result.text).toContain('Sign in')
     expect(result.text).toContain('[read_a11y cache]')
-    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Accessibility.getFullAXTree', { frameId: 'main' })
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Target.getTargets', {}, undefined)
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Accessibility.getFullAXTree', { frameId: 'main' }, undefined)
   })
 
   // ── diagnose_target: cross-frame occlusion / actionability probe ──────────
@@ -867,6 +868,19 @@ describe('BrowserTools', () => {
     expect(result.structuredContent?.after).toMatchObject({ captured: true })
   })
 
+  it('act(key) accepts every key advertised in the schema enum (no drift with KEY_MAP)', async () => {
+    const { DRIVE_TOOLS } = await import('./agentTools/drive')
+    const actDef = DRIVE_TOOLS.find((t) => t.name === 'act')!
+    const enumKeys = (actDef.parameters as any).properties.key.enum as string[]
+    expect(enumKeys.length).toBeGreaterThan(0)
+    const { tabs } = makeActTabs({})
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+    for (const key of enumKeys) {
+      const result = await tools.run('act', { kind: 'key', key }, { tabId: 'tab-1' })
+      expect(result.ok, `act(key) rejected schema-advertised key "${key}"`).toBe(true)
+    }
+  })
+
   it('act(key) dispatches a key event with no element target', async () => {
     const { tabs, cdpSend } = makeActTabs({})
     const tools = new BrowserTools(tabs as any, {} as any, {} as any)
@@ -951,7 +965,7 @@ describe('BrowserTools', () => {
       if (code.includes('return { u: location.href')) {
         return { success: true, result: { u: 'https://example.com/after', r: 'complete' } }
       }
-      if (code.includes('const root = document.elementFromPoint')) {
+      if (code.includes('gladdis:set_field')) {
         return { success: true, result: { ok: true, mode: 'value' } }
       }
       if (code.includes('location.href')) {
@@ -981,6 +995,122 @@ describe('BrowserTools', () => {
     expect(result.text).toContain('set_field: set')
     expect(result.structuredContent).toMatchObject({ value: 'hi@example.com', clear: true, mode: 'value' })
     expect(result.structuredContent?.after).toMatchObject({ captured: true })
+  })
+
+  it('set_field with no target commits into the currently focused field', async () => {
+    const { tabs, cdpSend } = makeActTabs({})
+    const executeJavaScript = (tabs as any).executeJavaScript as ReturnType<typeof vi.fn>
+    const baseImpl = executeJavaScript.getMockImplementation() as (id: string, code: string) => Promise<any>
+    executeJavaScript.mockImplementation(async (id: string, code: string) => {
+      if (code.includes('gladdis:set_field')) {
+        // The script must run in focused-field mode, not the hit-test ladder.
+        expect(code).toContain('if (true) {')
+        return { success: true, result: { ok: true, mode: 'value', via: 'focused element', label: 'Email' } }
+      }
+      return baseImpl(id, code)
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('set_field', { value: 'hi@example.com' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('the focused field')
+    expect(result.text).toContain('"Email"')
+    expect(result.structuredContent).toMatchObject({ mode: 'value', match: { target: 'activeElement' } })
+    // No target resolution → no click was dispatched.
+    expect(cdpSend).not.toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.anything())
+  })
+
+  it('set_field with no target fails safe when nothing editable is focused', async () => {
+    const { tabs } = makeActTabs({})
+    const executeJavaScript = (tabs as any).executeJavaScript as ReturnType<typeof vi.fn>
+    const baseImpl = executeJavaScript.getMockImplementation() as (id: string, code: string) => Promise<any>
+    executeJavaScript.mockImplementation(async (id: string, code: string) => {
+      if (code.includes('gladdis:set_field')) {
+        return { success: true, result: { ok: false, reason: 'no target was given and no editable field is focused — pass a @ref (from read_a11y) or a query naming the field' } }
+      }
+      return baseImpl(id, code)
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('set_field', { value: 'hi@example.com' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('no editable field is focused')
+  })
+
+  it('act self-heals a stale @ref by re-resolving its accessible name on the live page', async () => {
+    const { tabs, cdpSend: mouseCdp } = makeActTabs({ grepMatches: [{ ...VISIBLE_BUTTON, matchedLine: 'Sign in' }] })
+    // Serve the AX tree for read_a11y, then keep serving mouse/key CDP.
+    const cdpSend = vi.fn(async (_id: string, method: string) => {
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main', url: 'https://example.com' }, childFrames: [] } }
+      if (method === 'Accessibility.getFullAXTree') {
+        return { nodes: [{ nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }] }
+      }
+      if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
+      if (method === 'DOM.getBoxModel') return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
+      return {}
+    })
+    ;(tabs as any).cdpSend = cdpSend
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    await tools.run('read_a11y', {}, { tabId: 'tab-1' })
+    // A navigation invalidates the snapshot (ServiceRegistry wires this hook).
+    tools.clearPageCacheForTab('tab-1')
+
+    const result = await tools.run('act', { kind: 'click', ref: '@a1' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(true)
+    expect(result.text).toContain('ref @a1 was stale')
+    expect(result.text).toContain('re-resolved live by its name "Sign in"')
+    // The click landed on the LIVE grep match, not the stale snapshot bounds.
+    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 200, y: 300 }))
+    expect(result.structuredContent?.match).toMatchObject({ staleRef: '@a1', reResolvedByName: 'Sign in' })
+    void mouseCdp
+  })
+
+  it('act reports what a stale @ref was when its name no longer matches anything', async () => {
+    const { tabs } = makeActTabs({ grepMatches: [] })
+    const cdpSend = vi.fn(async (_id: string, method: string) => {
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main', url: 'https://example.com' }, childFrames: [] } }
+      if (method === 'Accessibility.getFullAXTree') {
+        return { nodes: [{ nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }] }
+      }
+      if (method === 'Page.getLayoutMetrics') return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
+      if (method === 'DOM.getBoxModel') return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
+      return {}
+    })
+    ;(tabs as any).cdpSend = cdpSend
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    await tools.run('read_a11y', {}, { tabId: 'tab-1' })
+    tools.clearPageCacheForTab('tab-1')
+
+    const result = await tools.run('act', { kind: 'click', ref: '@a1' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('button "Sign in"')
+    expect(result.text).toContain('no longer matches anything visible')
+  })
+
+  it('act(type) fails honestly when the click leaves focus on a non-editable element', async () => {
+    const { tabs, cdpSend } = makeActTabs({ grepMatches: [VISIBLE_BUTTON] })
+    const executeJavaScript = (tabs as any).executeJavaScript as ReturnType<typeof vi.fn>
+    const baseImpl = executeJavaScript.getMockImplementation() as (id: string, code: string) => Promise<any>
+    executeJavaScript.mockImplementation(async (id: string, code: string) => {
+      if (code.includes('gladdis:focus_probe')) {
+        return { success: true, result: { editable: false, focus: 'div#banner' } }
+      }
+      return baseImpl(id, code)
+    })
+    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
+
+    const result = await tools.run('act', { kind: 'type', query: 'Search', text: 'reef tank' }, { tabId: 'tab-1' })
+
+    expect(result.ok).toBe(false)
+    expect(result.text).toContain('left focus on div#banner')
+    expect(result.text).toContain('the text was NOT typed')
+    expect(cdpSend).not.toHaveBeenCalledWith('tab-1', 'Input.insertText', expect.anything())
   })
 
   it('submit falls back to form submission intent without an explicit target', async () => {
@@ -1145,49 +1275,6 @@ describe('BrowserTools', () => {
     const md = await readFile(result.structuredContent!.savedMarkdownPath as string, 'utf8')
     expect(md).toContain('# Hacker News')
     expect(result.text).toContain('Saved full page:')
-  })
-
-  it('routes grep_click through read_a11y refs', async () => {
-    const cdpSend = vi.fn(async (_tabId: string, method: string, params?: Record<string, unknown>) => {
-      if (method.startsWith('Input.')) return {}
-      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.enable' || method === 'DOM.disable') {
-        return {}
-      }
-      if (method === 'Page.getFrameTree') {
-        return { frameTree: { frame: { id: 'main', url: 'https://example.com' }, childFrames: [] } }
-      }
-      if (method === 'Accessibility.getFullAXTree') {
-        return {
-          nodes: [
-            { nodeId: '1', role: { value: 'button' }, name: { value: 'Sign in' }, backendDOMNodeId: 42, ignored: false }
-          ]
-        }
-      }
-      if (method === 'Page.getLayoutMetrics') {
-        return { cssLayoutViewport: { clientWidth: 1200, clientHeight: 800 } }
-      }
-      if (method === 'DOM.getBoxModel') {
-        return { model: { content: [100, 200, 180, 200, 180, 240, 100, 240] } }
-      }
-      return {}
-    })
-    const tabs = {
-      list: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com' }],
-      getTabUrl: () => 'https://example.com',
-      cdpSend,
-      runWithPendingNetworkCapture: async (_id: string, action: () => Promise<unknown> | unknown) => ({
-        value: await action(),
-        network: null
-      })
-    }
-    const tools = new BrowserTools(tabs as any, {} as any, {} as any)
-
-    await tools.run('read_a11y', {}, { tabId: 'tab-1' })
-    const result = await tools.run('grep_click', { query: '@a1' }, { tabId: 'tab-1' })
-
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('@a1')
-    expect(cdpSend).toHaveBeenCalledWith('tab-1', 'Input.dispatchMouseEvent', expect.objectContaining({ type: 'mousePressed', x: 140, y: 220 }))
   })
 
   it('routes grep_page through the capability broker and returns grep results', async () => {
@@ -1422,78 +1509,4 @@ describe('BrowserTools', () => {
     expect(executeJavaScript).not.toHaveBeenCalled()
   })
 
-  it('routes grep_click through the capability broker and triggers click events on coordinates of the best match', async () => {
-    const executeJavaScript = vi.fn(async () => ({
-      success: true,
-      result: [
-        {
-          type: 'selector_match',
-          tagName: 'button',
-          selector: 'div#root > button.btn-pricing',
-          visible: true,
-          coordinates: { x: 150, y: 350, width: 100, height: 40 },
-          outerHTML: '<button class="btn-pricing">Upgrade Now</button>',
-          innerText: 'Upgrade Now'
-        }
-      ]
-    }))
-    const cdpSend = vi.fn(async () => ({}))
-    const runWithPendingNetworkCapture = vi.fn(async (_tabId: string, fn: () => Promise<any>) => {
-      await fn()
-      return { network: null }
-    })
-    const tools = new BrowserTools({ executeJavaScript, cdpSend, runWithPendingNetworkCapture } as any, {} as any, {} as any)
-
-    const result = await tools.run(
-      'grep_click',
-      { query: 'Upgrade' },
-      { tabId: 'tab-1' }
-    )
-
-    expect(executeJavaScript).toHaveBeenCalled()
-    expect(cdpSend).toHaveBeenCalledTimes(3) // mouseMoved, mousePressed, mouseReleased
-    expect(cdpSend).toHaveBeenNthCalledWith(1, 'tab-1', 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: 150, y: 350 })
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('grep_click successful. Found and clicked element.')
-    expect(result.text).toContain('div#root > button.btn-pricing')
-    expect(result.text).toContain('(150, 350)')
-  })
-
-  it('routes grep_type through the capability broker, focuses element, and types text via CDP', async () => {
-    const executeJavaScript = vi.fn(async () => ({
-      success: true,
-      result: [
-        {
-          type: 'selector_match',
-          tagName: 'input',
-          selector: 'input#username',
-          visible: true,
-          coordinates: { x: 200, y: 400, width: 150, height: 30 },
-          outerHTML: '<input id="username" />',
-          innerText: ''
-        }
-      ]
-    }))
-    const cdpSend = vi.fn(async () => ({}))
-    const runWithPendingNetworkCapture = vi.fn(async (_tabId: string, fn: () => Promise<any>) => {
-      await fn()
-      return { network: null }
-    })
-    const tools = new BrowserTools({ executeJavaScript, cdpSend, runWithPendingNetworkCapture } as any, {} as any, {} as any)
-
-    const result = await tools.run(
-      'grep_type',
-      { query: 'username', text: 'myusername' },
-      { tabId: 'tab-1' }
-    )
-
-    expect(executeJavaScript).toHaveBeenCalled()
-    // 3 calls for click (move, press, release), 1 call for insertText
-    expect(cdpSend).toHaveBeenCalledTimes(4)
-    expect(cdpSend).toHaveBeenNthCalledWith(4, 'tab-1', 'Input.insertText', { text: 'myusername' })
-    expect(result.ok).toBe(true)
-    expect(result.text).toContain('grep_type successful. Focused element and typed text.')
-    expect(result.text).toContain('input#username')
-    expect(result.text).toContain('(200, 400)')
-  })
 })

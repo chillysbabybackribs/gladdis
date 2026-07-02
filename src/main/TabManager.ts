@@ -429,10 +429,16 @@ export class TabManager {
     })
   }
 
-  async cdpSend(id: string, method: string, params?: Record<string, unknown>): Promise<unknown> {
+  async cdpSend(id: string, method: string, params?: Record<string, unknown>, sessionId?: string): Promise<unknown> {
     const tab = this.tabs.get(id)
     if (!tab) throw new Error(`Unknown tab ${id}`)
-    return tab.cdp.send(method, params)
+    return tab.cdp.send(method, params, sessionId)
+  }
+
+  cdpSessionIdForTarget(id: string, targetId: string): string | null {
+    const tab = this.tabs.get(id)
+    if (!tab) throw new Error(`Unknown tab ${id}`)
+    return tab.cdp.sessionIdForTarget(targetId)
   }
 
   /**

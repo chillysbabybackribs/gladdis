@@ -107,10 +107,17 @@ export async function runReadPage(
 
   const capData = await deps.extractor.run(tabId)
   const resolvedUrl = normalizePageUrl(typeof capData.url === 'string' ? capData.url : currentUrl)
-  const digest = digestPage(capData, {
-    focus: args.focus ? String(args.focus) : undefined,
+  const iframeControls = await collectIframeControlsForReadPage(deps, tabId, capData, {
+    focus: typeof args.focus === 'string' ? args.focus : undefined,
     viewportOnly: args.viewportOnly === true
   })
+  const digest = appendIframeControlsSection(
+    digestPage(capData, {
+      focus: args.focus ? String(args.focus) : undefined,
+      viewportOnly: args.viewportOnly === true
+    }),
+    iframeControls
+  )
   const nowCaptured = Date.now()
 
   if (deps.pageCache.size >= deps.pageCacheLimit) {
@@ -127,6 +134,7 @@ export async function runReadPage(
       focus: typeof args.focus === 'string' ? args.focus : undefined,
       viewportOnly: args.viewportOnly === true,
       digest,
+      ...(iframeControls.length ? { iframeControls } : {}),
       cache: {
         status: 'miss',
         capturedAt: nowCaptured,
@@ -134,6 +142,67 @@ export async function runReadPage(
       }
     }
   }
+}
+
+type ReadPageIframeControl = {
+  ref: string
+  role: string
+  name: string
+  value?: string
+  frameLabel?: string
+}
+
+async function collectIframeControlsForReadPage(
+  deps: PerceiveToolsDeps,
+  tabId: string,
+  cap: PageCapture,
+  opts: { focus?: string; viewportOnly: boolean }
+): Promise<ReadPageIframeControl[]> {
+  if ((cap.dom?.frameCount ?? 0) < 2) return []
+  try {
+    const snapshot = await captureAxSnapshotForTab(deps.tabs, tabId, {
+      focus: opts.focus,
+      viewportOnly: opts.viewportOnly,
+      interactiveOnly: true,
+      maxNodes: 24
+    })
+    const seen = new Set<string>()
+    const controls: ReadPageIframeControl[] = []
+    for (const node of snapshot.nodes) {
+      if (!node.frameLabel) continue
+      const label = (node.name || node.value || '').trim()
+      if (!label) continue
+      const key = `${node.frameLabel}|${node.role}|${label.toLowerCase()}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      controls.push({
+        ref: node.ref,
+        role: node.role,
+        name: node.name,
+        value: node.value,
+        frameLabel: node.frameLabel
+      })
+    }
+    return controls.slice(0, 10)
+  } catch {
+    return []
+  }
+}
+
+function appendIframeControlsSection(digest: string, controls: ReadPageIframeControl[]): string {
+  if (!controls.length) return digest
+  const lines = controls.map((node) => {
+    const label = node.name || node.value || '(unnamed control)'
+    const frame = node.frameLabel ? ` | ${node.frameLabel}` : ''
+    return `  ${node.ref} | ${node.role} | ${label}${frame}`
+  })
+  return [
+    digest,
+    '',
+    '── IFRAME CONTROLS ──',
+    'Embedded content exposes additional interactive controls not present in the top-document action table.',
+    ...lines
+  ].join('\n')
 }
 
 /**

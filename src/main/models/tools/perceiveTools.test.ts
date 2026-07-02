@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as axTree from '../../extract/axTree'
 import { normalizeWatchNetworkArgs, runDiscoverDataSources, runReadPage, runWatchNetwork, type PerceiveToolsDeps } from './perceiveTools'
 
 function mockPerceiveDeps(overrides: Partial<PerceiveToolsDeps> & Pick<PerceiveToolsDeps, 'tabs'>): PerceiveToolsDeps {
@@ -467,5 +468,63 @@ describe('runReadPage', () => {
     const sc = outcome.structuredContent as Record<string, unknown>
     expect(sc.digest).toBe('CACHED DIGEST BODY')
     expect((sc.cache as Record<string, unknown>).status).toBe('hit')
+  })
+
+  it('supplements the digest with iframe controls when embedded widgets expose extra fields', async () => {
+    vi.spyOn(axTree, 'captureAxSnapshotForTab').mockResolvedValue({
+      url: 'https://example.com/form',
+      title: 'Example Form',
+      capturedAt: 0,
+      totalSeen: 2,
+      truncated: false,
+      nodes: [
+        {
+          ref: '@a9',
+          role: 'textbox',
+          name: 'Family Name',
+          states: [],
+          inViewport: true,
+          frameLabel: 'iframe:widget'
+        },
+        {
+          ref: '@a11',
+          role: 'textbox',
+          name: 'First Name',
+          states: [],
+          inViewport: true,
+          frameLabel: 'iframe:widget'
+        }
+      ]
+    })
+
+    const deps = mockPerceiveDeps({
+      tabs: { getTabUrl: () => 'https://example.com/form' } as any,
+      extractor: {
+        run: vi.fn(async () => ({
+          url: 'https://example.com/form',
+          title: 'Example Form',
+          capturedAt: 0,
+          tookMs: 1,
+          content: { title: 'Example Form', byline: null, text: '', markdown: '', headings: [], wordCount: 0 },
+          data: { meta: {}, openGraph: {}, jsonLd: [], canonical: null, feeds: [], lang: null },
+          actions: [{ idx: 1, role: 'textbox', name: 'Requester', tag: 'input', selector: '#requester', rect: { x: 0, y: 0, w: 10, h: 10 }, inViewport: true }],
+          dom: { nodeCount: 10, htmlBytes: 100, frameCount: 2 }
+        }))
+      } as any,
+      pageCache: new Map(),
+      pageCacheLimit: 8,
+      pageCacheTtlMs: 60_000
+    })
+
+    const outcome = await runReadPage(deps, {}, 'tab-1')
+
+    expect(outcome.ok).toBe(true)
+    expect(outcome.text).toContain('── IFRAME CONTROLS ──')
+    expect(outcome.text).toContain('@a9 | textbox | Family Name')
+    const sc = outcome.structuredContent as Record<string, unknown>
+    expect(sc.iframeControls).toEqual([
+      { ref: '@a9', role: 'textbox', name: 'Family Name', value: undefined, frameLabel: 'iframe:widget' },
+      { ref: '@a11', role: 'textbox', name: 'First Name', value: undefined, frameLabel: 'iframe:widget' }
+    ])
   })
 })

@@ -1611,7 +1611,7 @@ function suggestionProbeScript(value: string, waitMs: number): string {
   `
 }
 
-function submitIntentScript(): string {
+export function submitIntentScript(): string {
   return `
     const visible = (el) => {
       if (!(el instanceof HTMLElement)) return false;
@@ -1622,12 +1622,44 @@ function submitIntentScript(): string {
     };
     const enabled = (el) => !(el instanceof HTMLButtonElement || el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) || !el.disabled;
     const labelOf = (el) => ((el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('value') || el.getAttribute('name'))) || el.innerText || '').replace(/[\\s\\u00a0]+/g, ' ').trim();
+    const attrText = (el) => [el.id, el.getAttribute && el.getAttribute('name'), el.getAttribute && el.getAttribute('class'), el.getAttribute && el.getAttribute('data-testid')]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
     const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const form = (active && active.closest('form')) || document.querySelector('form');
     if (!form) return { ok: false, reason: 'no form found near the current focus' };
 
-    const submitter = form.querySelector('button[type="submit"], input[type="submit"], button:not([type]), [role="button"]');
-    if (submitter instanceof HTMLElement && visible(submitter) && enabled(submitter)) {
+    const associated = (selector) => {
+      const out = [...form.querySelectorAll(selector)];
+      if (form.id) {
+        try {
+          out.push(...document.querySelectorAll(selector + '[form="' + CSS.escape(form.id) + '"]'));
+        } catch {
+          // Ignore selector/CSS.escape issues and stick to in-form candidates.
+        }
+      }
+      return [...new Set(out)].filter((el) => el instanceof HTMLElement);
+    };
+    const scoreSubmitter = (el) => {
+      if (!(el instanceof HTMLElement) || !visible(el) || !enabled(el)) return -1;
+      const label = labelOf(el).toLowerCase();
+      const attrs = attrText(el);
+      let score = 0;
+      if (el.matches('button[type="submit"], input[type="submit"], input[type="image"]')) score += 100;
+      if (/\\b(submit|send|save|search|apply|continue|finish|done|checkout|check out|place order|sign in|log in|register|book)\\b/i.test(label)) score += 60;
+      if (/\\b(submit|send|save|search|apply|continue|finish|done|checkout|check|order|sign|login|register|book)\\b/i.test(attrs)) score += 25;
+      if (/\\b(choose|pick|date|calendar|upload|delete|remove|clear|close|cancel|back|previous|zoom)\\b/i.test(label)) score -= 80;
+      if (!label && !attrs && el.matches('button:not([type]), [role="button"], input[type="button"]')) score -= 20;
+      return score;
+    };
+
+    const candidates = associated('button, input[type="submit"], input[type="image"], input[type="button"], [role="button"]')
+      .map((el) => ({ el, score: scoreSubmitter(el) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+    const submitter = candidates.length > 0 ? candidates[0].el : null;
+    if (submitter instanceof HTMLElement) {
       submitter.click();
       return { ok: true, mode: 'click', label: labelOf(submitter) };
     }
